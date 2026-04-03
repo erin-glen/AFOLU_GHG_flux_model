@@ -108,3 +108,65 @@ def test_build_bbox_mask_clips_to_bbox_subset() -> None:
     mask = organic_zonal.build_bbox_mask(ref, [1.0, 1.0, 3.0, 3.0])
     # selected coords are x={1.5,2.5}, y={2.5,1.5}
     assert int(mask.sum()) == 4
+
+
+def test_resolve_requested_contextual_groupers_canonical_deduped() -> None:
+    resolved = organic_zonal.resolve_requested_contextual_groupers(["KBA", "wdpa", "kba", "WDPA"])
+    assert resolved == ["wdpa", "kba"]
+
+
+def test_finalize_interval_tile_outputs_preserves_optional_contextual_columns(tmp_path: Path) -> None:
+    tile_stage_dir = tmp_path / "stage_ctx"
+    tile_stage_dir.mkdir()
+    combined = int(
+        organic_zonal.zc.pack_combined_state(
+            np.array([[np.uint32(0)]], dtype=np.uint32),
+            np.array([[np.uint32(0)]], dtype=np.uint32),
+        )[0, 0]
+    )
+    frame = pd.DataFrame(
+        {
+            "adm0": [840, 840],
+            "combined_state_nodes": [combined, combined],
+            "flux_type": ["drained_total_Mg_CO2e", "drained_total_Mg_CO2e"],
+            "interval_end": [2024, 2024],
+            "tile_id": ["00N_010E", "00N_020E"],
+            "wdpa": [0, 0],
+            "kba": [1, 1],
+            "value": [1.0, 2.0],
+        }
+    )
+    ds.write_dataset(pa.Table.from_pandas(frame, preserve_index=False), base_dir=str(tile_stage_dir), format="parquet")
+    out = organic_zonal.finalize_interval_tile_outputs(tile_stage_dir)
+    assert "wdpa" in out.columns
+    assert "kba" in out.columns
+    assert out.iloc[0]["value"] == 3.0
+
+
+def test_manifest_match_includes_contextual_grouper_identity() -> None:
+    base = {
+        "model_version": "1",
+        "run_name": "r",
+        "run_date": "20260101",
+        "interval": "2020_2024",
+        "interval_type": "five_year",
+        "branch": "combined_state",
+        "selected_fluxes": ["drained_total"],
+        "selected_contextual_groupers": [],
+        "contextual_grouper_paths": {},
+        "align_tolerance_fraction": 0.49,
+        "force_align": False,
+        "roi_mode": "global",
+        "bounding_box": None,
+        "tile_ids": None,
+        "execution_mode": "roi",
+        "tile_source": "none",
+        "tile_count": 0,
+        "adm0_zarr_path": "a",
+        "pixel_area_zarr_path": "p",
+    }
+    changed = dict(base)
+    changed["selected_contextual_groupers"] = ["wdpa"]
+    changed["contextual_grouper_paths"] = {"wdpa": "path"}
+    assert organic_zonal.manifests_match(base, base)
+    assert not organic_zonal.manifests_match(base, changed)

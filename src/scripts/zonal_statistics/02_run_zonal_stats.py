@@ -108,6 +108,35 @@ FLUX_SPECS = {
 }
 ALL_DATASETS: Dict[str, Dict[str, Any]] = {**STATE_DATASETS, **FLUX_DATASETS}
 
+CANONICAL_CONTEXTUAL_GROUPER_ORDER = ("wdpa", "kba")
+
+
+def _expected_groups_with_zero(codes: Any, *, dtype: np.dtype) -> np.ndarray:
+    arr = np.asarray(codes, dtype=dtype)
+    if arr.size == 0:
+        return np.array([0], dtype=dtype)
+    if not np.any(arr == 0):
+        arr = np.concatenate([np.array([0], dtype=dtype), arr.astype(dtype, copy=False)])
+    return np.unique(arr.astype(dtype, copy=False))
+
+
+OPTIONAL_CONTEXTUAL_GROUPERS: Dict[str, Dict[str, Any]] = {
+    "wdpa": {
+        "name": cn.WDPA_pattern,
+        "zarr_path": cn.WDPA_zarr_path,
+        "expected_groups": _expected_groups_with_zero(cn.WDPA_codes, dtype=np.uint16),
+        "dtype": np.uint16,
+        "source_label": "WDPA",
+    },
+    "kba": {
+        "name": cn.KBA_pattern,
+        "zarr_path": cn.KBA_zarr_path,
+        "expected_groups": _expected_groups_with_zero(cn.KBA_codes, dtype=np.uint16),
+        "dtype": np.uint16,
+        "source_label": "KBA",
+    },
+}
+
 
 def ordered_dataset_keys(selected: Optional[List[str]]) -> List[str]:
     if not selected:
@@ -610,6 +639,73 @@ def resolve_flux_selection(selected_names: List[str], logger: Optional[logging.L
     }
 
 
+def resolve_requested_contextual_groupers(raw_values: Optional[List[str]]) -> List[str]:
+    requested = [str(v).strip().lower() for v in (raw_values or []) if str(v).strip()]
+    requested_set = set(requested)
+    return [k for k in CANONICAL_CONTEXTUAL_GROUPER_ORDER if k in requested_set]
+
+
+def open_optional_contextual_grouper(
+    spec: Dict[str, Any],
+    bbox: Optional[List[float]],
+    chunk_size: int,
+    logger: logging.Logger,
+) -> xr.DataArray:
+    logger.info("Contextual grouper open start: name=%s source=%s path=%s", spec["name"], spec["source_label"], spec["zarr_path"])
+    arr = open_zarr_region(spec["zarr_path"], bbox, chunk_size)
+    logger.info("Contextual grouper open end: name=%s dims=%s chunks=%s", spec["name"], dict(arr.sizes), _chunk_structure(arr))
+    return arr
+
+
+def prepare_contextual_grouper(
+    arr: xr.DataArray,
+    ref: xr.DataArray,
+    tol: float,
+    force_align: bool,
+    name: str,
+    dtype: Any,
+) -> xr.DataArray:
+    out = align_auto(arr, ref, tol, force_align)
+    out = drop_scalar_year_coord(out).astype(dtype).rename(name)
+    return out
+
+
+def zero_like_contextual(ref: xr.DataArray, name: str, dtype: Any) -> xr.DataArray:
+    return xr.zeros_like(ref, dtype=dtype).rename(name)
+
+
+def resolve_contextual_groupers_for_extent(
+    *,
+    requested_keys: List[str],
+    bbox: Optional[List[float]],
+    chunk_size: int,
+    ref: xr.DataArray,
+    tol: float,
+    force_align: bool,
+    logger: logging.Logger,
+) -> tuple[List[xr.DataArray], List[np.ndarray]]:
+    resolved_arrays: List[xr.DataArray] = []
+    resolved_expected_groups: List[np.ndarray] = []
+    for key in requested_keys:
+        spec = OPTIONAL_CONTEXTUAL_GROUPERS[key]
+        arr = open_optional_contextual_grouper(spec, bbox, chunk_size, logger)
+        if arr.sizes.get("x", 0) == 0 or arr.sizes.get("y", 0) == 0:
+            logger.warning(
+                "Contextual grouper empty for extent; substituting zero-like fallback: key=%s name=%s bbox=%s",
+                key, spec["name"], bbox,
+            )
+            prepared = zero_like_contextual(ref, spec["name"], spec["dtype"])
+        else:
+            prepared = prepare_contextual_grouper(arr, ref, tol, force_align, spec["name"], spec["dtype"])
+        logger.info(
+            "Contextual grouper prepared: key=%s name=%s dims=%s chunks=%s dtype=%s",
+            key, spec["name"], dict(prepared.sizes), _chunk_structure(prepared), prepared.dtype,
+        )
+        resolved_arrays.append(prepared)
+        resolved_expected_groups.append(spec["expected_groups"])
+    return resolved_arrays, resolved_expected_groups
+
+
 def tile_ids_for_global() -> List[str]:
     return sorted(cn.tile_id_list)
 
@@ -687,6 +783,7 @@ def build_branch_manifest(
     branch: str,
     selected_fluxes: List[str],
     roi_meta: Dict[str, Any],
+    selected_contextual_groupers: List[str],
 ) -> Dict[str, Any]:
     selected_flux_type_labels = [
         zc.ZONAL_FLUX_LABELS_BY_KEY[k]
@@ -702,6 +799,11 @@ def build_branch_manifest(
         "branch": branch,
         "selected_fluxes": selected_fluxes,
         "selected_flux_type_labels": selected_flux_type_labels,
+        "selected_contextual_groupers": selected_contextual_groupers,
+        "contextual_grouper_paths": {
+            key: OPTIONAL_CONTEXTUAL_GROUPERS[key]["zarr_path"]
+            for key in selected_contextual_groupers
+        },
         "align_tolerance_fraction": args.align_tolerance_fraction,
         "force_align": bool(args.force_align),
         "roi_mode": roi_meta["roi_mode"],
@@ -776,6 +878,8 @@ def manifests_match(existing: Dict[str, Any], current: Dict[str, Any]) -> bool:
         "interval_type",
         "branch",
         "selected_fluxes",
+        "selected_contextual_groupers",
+        "contextual_grouper_paths",
         "align_tolerance_fraction",
         "force_align",
         "roi_mode",
@@ -908,6 +1012,8 @@ def run_combined_state_reduce(
     adm0_aligned: xr.DataArray,
     ref: xr.DataArray,
     expected_groups: List[np.ndarray],
+    extra_groupers: tuple[xr.DataArray, ...] = (),
+    extra_expected_groups: tuple[np.ndarray, ...] = (),
     where_mask: Optional[xr.DataArray],
     interval_end_year: int,
     no_sparse: bool,
@@ -924,12 +1030,21 @@ def run_combined_state_reduce(
         "Reduction start: label=%s flux_layers=%d cube_dims=%s cube_chunks=%s cube_numblocks=%s",
         reduce_label, len(selected_flux_keys), dict(cube_e.sizes), _chunk_structure(cube_e), getattr(cube_e.data, "numblocks", None),
     )
+    all_groupers = [adm0_aligned, combined_nodes_for_reduce, *list(extra_groupers)]
+    all_expected_groups = [*expected_groups, *list(extra_expected_groups)]
+    logger.info(
+        "Reduction groupers: label=%s groupers=%s expected_group_lengths=%s where_mask=%s",
+        reduce_label,
+        [g.name for g in all_groupers],
+        [int(len(gv)) for gv in all_expected_groups],
+        where_mask is not None,
+    )
     with dask.annotate(label=reduce_label):
         result = xarray_reduce(
             cube_e,
-            *[adm0_aligned, combined_nodes_for_reduce],
+            *all_groupers,
             func="sum",
-            expected_groups=tuple(expected_groups),
+            expected_groups=tuple(all_expected_groups),
             where=where_mask,
             **flox_sparse_reindex_kwargs(not no_sparse),
         ).compute()
@@ -1023,6 +1138,19 @@ def run(args: argparse.Namespace) -> None:
         logger.info("Diagnostics mode: %s | Force align: %s", args.diagnostics, args.force_align)
         flux_selection = resolve_flux_selection(selected_names, logger=logger)
         selected_fluxes_ordered = flux_selection["selected_fluxes_ordered"]
+        selected_contextual_groupers = resolve_requested_contextual_groupers(args.contextual_groupers)
+        logger.info(
+            "Requested contextual groupers: raw=%s resolved=%s",
+            args.contextual_groupers,
+            selected_contextual_groupers,
+        )
+        logger.info(
+            "Contextual grouper source paths: %s",
+            {
+                key: OPTIONAL_CONTEXTUAL_GROUPERS[key]["zarr_path"]
+                for key in selected_contextual_groupers
+            },
+        )
         execution_plan = resolve_execution_plan(args)
         logger.info(
             "Resolved execution mode: requested=%s resolved=%s roi_mode=%s tile_count=%s tile_source=%s bbox=%s",
@@ -1060,10 +1188,22 @@ def run(args: argparse.Namespace) -> None:
             interval = f"{interval_start_year}_{interval_end_year}"
             dest_root = build_output_parquet(args.model_version, args.run_name, args.run_date, interval)
             dest_e = posixpath.join(dest_root.rstrip("/"), "combined_state")
-            manifest_e = build_branch_manifest(args, interval, "combined_state", selected_fluxes_ordered, roi_meta)
+            manifest_e = build_branch_manifest(
+                args,
+                interval,
+                "combined_state",
+                selected_fluxes_ordered,
+                roi_meta,
+                selected_contextual_groupers,
+            )
             manifest_e["execution_mode"] = execution_plan["execution_mode_resolved"]
             manifest_e["tile_source"] = execution_plan["tile_source"]
             manifest_e["tile_count"] = execution_plan["tile_count"]
+            logger.info(
+                "Manifest contextual metadata: selected_contextual_groupers=%s contextual_grouper_paths=%s",
+                manifest_e.get("selected_contextual_groupers"),
+                manifest_e.get("contextual_grouper_paths"),
+            )
 
             emissions_exists = remote_prefix_has_parquet(fs_s3, dest_e)
             if not args.overwrite_existing:
@@ -1109,6 +1249,15 @@ def run(args: argparse.Namespace) -> None:
                 flux_arrays = [prepare_analysis_array(FLUX_DATASETS[k], k, mega_ds, ref, tol, args.force_align, mega_zarr_path=mega_zarr_path).astype("float32") for k in selected_fluxes_ordered]
                 combined_nodes = resolve_combined_state_nodes(mega_ds, ref, tol, args.force_align, mega_zarr_path, interval, logger)
                 adm0_aligned = align_auto(adm0, ref, tol, args.force_align)
+                contextual_groupers, contextual_expected_groups = resolve_contextual_groupers_for_extent(
+                    requested_keys=selected_contextual_groupers,
+                    bbox=bbox,
+                    chunk_size=args.chunk_size,
+                    ref=ref,
+                    tol=tol,
+                    force_align=args.force_align,
+                    logger=logger,
+                )
                 where_mask = (adm0_aligned > 0)
                 if execution_plan["exact_tile_mask_required"]:
                     where_mask = where_mask & build_exact_tile_mask(ref, execution_plan["explicit_tile_ids"])
@@ -1119,6 +1268,8 @@ def run(args: argparse.Namespace) -> None:
                     adm0_aligned=adm0_aligned,
                     ref=ref,
                     expected_groups=[gadm_adm0_ids, combined_state_codes_arr],
+                    extra_groupers=tuple(contextual_groupers),
+                    extra_expected_groups=tuple(contextual_expected_groups),
                     where_mask=where_mask,
                     interval_end_year=interval_end_year,
                     no_sparse=args.no_sparse,
@@ -1143,6 +1294,15 @@ def run(args: argparse.Namespace) -> None:
                     flux_arrays = [prepare_analysis_array(FLUX_DATASETS[k], k, mega_ds, ref, tol, args.force_align, mega_zarr_path=mega_zarr_path).astype("float32") for k in selected_fluxes_ordered]
                     combined_nodes = resolve_combined_state_nodes(mega_ds, ref, tol, args.force_align, mega_zarr_path, interval, logger)
                     adm0_aligned = align_auto(adm0, ref, tol, args.force_align)
+                    contextual_groupers, contextual_expected_groups = resolve_contextual_groupers_for_extent(
+                        requested_keys=selected_contextual_groupers,
+                        bbox=tile_bbox,
+                        chunk_size=args.chunk_size,
+                        ref=ref,
+                        tol=tol,
+                        force_align=args.force_align,
+                        logger=logger,
+                    )
                     tile_where_mask = (adm0_aligned > 0)
                     if execution_plan["bbox"] is not None:
                         logger.info("Applying bbox clip mask in tile mode: interval=%s tile_id=%s bbox=%s", interval, tile_id, execution_plan["bbox"])
@@ -1154,6 +1314,8 @@ def run(args: argparse.Namespace) -> None:
                         adm0_aligned=adm0_aligned,
                         ref=ref,
                         expected_groups=[gadm_adm0_ids, combined_state_codes_arr],
+                        extra_groupers=tuple(contextual_groupers),
+                        extra_expected_groups=tuple(contextual_expected_groups),
                         where_mask=tile_where_mask,
                         interval_end_year=interval_end_year,
                         no_sparse=args.no_sparse,
@@ -1223,6 +1385,13 @@ def main(argv=None):
     parser.add_argument("--run_name", default="ogh_standard_model")
     parser.add_argument("--datasets", nargs="+", choices=sorted(list(FLUX_DATASETS.keys()) + list(STATE_DATASETS.keys())),
                         help="Flux datasets to process (default: all flux datasets). State keys are ignored for compatibility.")
+    parser.add_argument(
+        "--contextual_groupers",
+        nargs="+",
+        choices=list(CANONICAL_CONTEXTUAL_GROUPER_ORDER),
+        default=[],
+        help="Optional contextual grouping axes (default: none). Choices: wdpa kba",
+    )
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
                         help="Fraction of one pixel for nearest reindex tolerance (default 0.49).")
     parser.add_argument("--leak_warn_threshold", type=float, default=0.002,

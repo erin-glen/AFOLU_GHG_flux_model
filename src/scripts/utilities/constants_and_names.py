@@ -134,6 +134,25 @@ s3_chunk_stats_path = "climate/AFOLU_flux_model/organic_soils/chunk_stats/"
 pixel_area_dir = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
 
+# Canonical global contextual zarrs (shared with vegetation/zonal workflows).
+contextual_layer_global_zarr_root = (
+    f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr"
+)
+
+WDPA_pattern = "wdpa"
+WDPA_zarr_path = (
+    f"{contextual_layer_global_zarr_root}/wdpa/20260224/global_wdpa_20260224.zarr"
+)
+# WDPA classes are currently binary: 0=outside, 1=inside.
+WDPA_codes = np.array([0, 1], dtype=np.uint16)
+
+KBA_pattern = "kba"
+KBA_zarr_path = (
+    f"{contextual_layer_global_zarr_root}/kba/20260224/global_kba_20260224.zarr"
+)
+# KBA classes are currently binary: 0=outside, 1=inside.
+KBA_codes = np.array([0, 1], dtype=np.uint16)
+
 progress_tracking_path = "climate/AFOLU_flux_model/organic_soils/task_progress_txts/"
 
 possible_task_statuses = [
