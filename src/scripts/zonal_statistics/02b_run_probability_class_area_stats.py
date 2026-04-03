@@ -171,7 +171,12 @@ def build_exact_tile_mask(ref: xr.DataArray, tiles: List[str]) -> xr.DataArray:
 
 
 def _df_from_result(res: xr.DataArray) -> pd.DataFrame:
-    arr = res.values
+    arr = res.data
+    if hasattr(arr, "todense"):
+        arr = np.asarray(arr.todense())
+    else:
+        arr = np.asarray(arr)
+
     idx = np.nonzero(arr)
     if len(idx[0]) == 0:
         return pd.DataFrame(columns=["adm0_id", "probability_class", "area_ha"])
