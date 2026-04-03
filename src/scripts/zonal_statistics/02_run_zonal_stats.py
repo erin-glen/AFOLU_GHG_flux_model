@@ -15,6 +15,31 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --diagnostics off \
   --datasets drained_co2 drained_n2o
 
+# Explicit tiled execution (recommended for global/disjoint/large runs)
+python -m src.scripts.zonal_statistics.02_run_zonal_stats \
+  --interval_end_years 2024 \
+  --cluster_name drainage_cluster \
+  --run_date 20251118 \
+  --model_version 0_9_7 \
+  --run_name ogh_sensitivity_500m_10 \
+  --execution_mode tile \
+  --tile_ids 00N_110E,10N_120E \
+  --chunk_size 10000 \
+  --datasets drained_total burned_total \
+  --keep_tile_stage
+
+# Auto execution mode with threshold control (auto switches ROI/tile)
+python -m src.scripts.zonal_statistics.02_run_zonal_stats \
+  --interval_end_years 2024 \
+  --cluster_name drainage_cluster \
+  --run_date 20251118 \
+  --model_version 0_9_7 \
+  --run_name ogh_sensitivity_500m_10 \
+  --execution_mode auto \
+  --auto_tile_threshold_tiles 8 \
+  --bounding_box 110 -10 120 0 \
+  --datasets drained_total burned_total
+
 """
 
 from __future__ import annotations

@@ -1605,4 +1605,16 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_dataset gfw \
   --run_name gfw_standard_model_1km
   
+# Optional: include legacy drained_state + burned_state rasters in mega-zarr
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2021 \
+  --end_year 2024 \
+  --interval_type five_year \
+  --create_zarr \
+  --include_legacy_state_rasters \
+  --run_name ogh_sensitivity_1km
+
 """
