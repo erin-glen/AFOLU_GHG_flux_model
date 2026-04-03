@@ -351,6 +351,31 @@ def _read_parquet_list_sql(globs: Sequence[str]) -> str:
     items = ", ".join([f"'{g}'" for g in globs])
     return f"[{items}]"
 
+
+def _decode_combined_state_sql(component: str, combined_expr: str) -> str:
+    """Return SQL that decodes combined_state_nodes into legacy node-code values."""
+    if component == "drained":
+        id_expr = (
+            f"(CAST({combined_expr} AS UINTEGER) "
+            f"& {int(zc.COMBINED_STATE_DRAINED_MASK)})"
+        )
+        mapping = zc.DRAINED_STATE_ID_TO_CODE
+    elif component == "burned":
+        id_expr = (
+            f"((CAST({combined_expr} AS UINTEGER) >> {int(zc.COMBINED_STATE_BURNED_SHIFT)}) "
+            f"& {int(zc.COMBINED_STATE_BURNED_MASK)})"
+        )
+        mapping = zc.BURNED_STATE_ID_TO_CODE
+    else:
+        raise ValueError(f"Unsupported component for combined-state decode: {component}")
+
+    when_clauses = [
+        f"WHEN {id_expr} = {int(idx)} THEN {int(code)}"
+        for idx, code in sorted(mapping.items())
+    ]
+    case_sql = " ".join(when_clauses)
+    return f"(CASE {case_sql} ELSE 0 END)"
+
 def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
                          globs: Sequence[str], kind: str):
     """
@@ -384,7 +409,12 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
         """
 
     if kind == "drained":
-        nodes_expr   = "drained_state_nodes"   if "drained_state_nodes"   in cols else "CAST(NULL AS INTEGER)"
+        if "drained_state_nodes" in cols:
+            nodes_expr = "drained_state_nodes"
+        elif "combined_state_nodes" in cols:
+            nodes_expr = _decode_combined_state_sql("drained", "combined_state_nodes")
+        else:
+            nodes_expr = "CAST(NULL AS INTEGER)"
         meaning_expr = "drained_state_meaning" if "drained_state_meaning" in cols else "CAST(NULL AS VARCHAR)"
         con.execute(f"""
             CREATE OR REPLACE VIEW {name} AS
@@ -399,7 +429,12 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
             WHERE {value_expr} IS NOT NULL;
         """)
     else:
-        nodes_expr   = "burned_state_nodes"   if "burned_state_nodes"   in cols else "CAST(NULL AS INTEGER)"
+        if "burned_state_nodes" in cols:
+            nodes_expr = "burned_state_nodes"
+        elif "combined_state_nodes" in cols:
+            nodes_expr = _decode_combined_state_sql("burned", "combined_state_nodes")
+        else:
+            nodes_expr = "CAST(NULL AS INTEGER)"
         meaning_expr = "burned_state_meaning" if "burned_state_meaning" in cols else "CAST(NULL AS VARCHAR)"
         con.execute(f"""
             CREATE OR REPLACE VIEW {name} AS
