@@ -19,8 +19,9 @@ Key points
   plus area (Area) -> ha -> Mha (also averaged over the same window).
 
 * Land-use comparability:
-    - We classify model pixels from *emissions_state* using
-      `pc._reclass_emissions_state`.
+    - We classify model pixels from the unified state semantics exposed via the
+      `emissions_state` compatibility label (derived from combined-state routing)
+      using `pc._reclass_emissions_state`.
     - For this FAO comparison we explicitly fold **Oil Palm into Cropland**:
           "Oil Palm" -> "Cropland"
     - We then restrict to LandUse in {"Cropland", "Grassland"}.
@@ -163,9 +164,13 @@ def _parse_run_specs(entries: Sequence[str]) -> list[RunSpec]:
 
 # ----------------------------- model (zonal stats) -----------------------------
 
-def _make_drained_globs_for_run(spec: RunSpec, years: Sequence[int]) -> Tuple[list[str], Tuple[int, int]]:
+def _make_drained_glob_candidates_for_run(spec: RunSpec, years: Sequence[int]) -> Tuple[list[Tuple[str, list[str]]], Tuple[int, int]]:
     """
-    Build drained_co2_n2o glob(s) for the latest inventory interval of this run.
+    Build drained-component glob candidates for the latest inventory interval
+    of this run, in preferred order:
+      1) drained_co2_n2o branch (legacy FAO-targeted output)
+      2) combined_state branch (new zonal-stats default)
+      3) drained/fao_stat branch (older legacy fallback)
     """
     start, end = _interval_pair_for_latest(years)
     interval_folder = f"{start}_{end}"
@@ -177,8 +182,12 @@ def _make_drained_globs_for_run(spec: RunSpec, years: Sequence[int]) -> Tuple[li
         interval_folder,
     ).rstrip("/")
 
-    glob_path = posixpath.join(base_prefix, "drained_co2_n2o", "*.parquet")
-    return [glob_path], (start, end)
+    candidates = [
+        ("drained_co2_n2o", [posixpath.join(base_prefix, "drained_co2_n2o", "*.parquet")]),
+        ("combined_state", [posixpath.join(base_prefix, "combined_state", "*.parquet")]),
+        ("drained/fao_stat", [posixpath.join(base_prefix, "drained", "fao_stat", "*.parquet")]),
+    ]
+    return candidates, (start, end)
 
 
 def _register_model_views_for_run(
@@ -194,31 +203,26 @@ def _register_model_views_for_run(
     """
     pa._ensure_httpfs(con, aws_region)
 
-    drained_globs, interval_pair = _make_drained_globs_for_run(spec, years)
-    n_files = pa._count_globs(con, drained_globs)
-
-    # Fallback to legacy drained/fao_stat if no drained_co2_n2o tiles are found.
+    candidates, interval_pair = _make_drained_glob_candidates_for_run(spec, years)
+    drained_globs: list[str] = []
+    source_label = ""
+    n_files = 0
+    for candidate_label, candidate_globs in candidates:
+        candidate_count = pa._count_globs(con, candidate_globs)
+        if candidate_count > 0:
+            source_label = candidate_label
+            drained_globs = candidate_globs
+            n_files = candidate_count
+            break
     if n_files == 0:
-        start, end = interval_pair
-        interval_folder = f"{start}_{end}"
-        base_prefix = build_output_parquet(
-            spec.model_version,
-            spec.run_name,
-            spec.run_date,
-            interval_folder,
-        ).rstrip("/")
-        legacy_globs = [posixpath.join(base_prefix, "drained", "fao_stat", "*.parquet")]
-        n_legacy = pa._count_globs(con, legacy_globs)
-        if n_legacy == 0:
-            raise RuntimeError(
-                f"[FAO] No drained CO2+N2O Parquet files found for run '{spec.run_name}'. "
-                f"Tried globs: {drained_globs + legacy_globs}"
-            )
-        drained_globs = legacy_globs
-        n_files = n_legacy
+        all_globs = [g for _, globs in candidates for g in globs]
+        raise RuntimeError(
+            f"[FAO] No drained CO2+N2O Parquet files found for run '{spec.run_name}'. "
+            f"Tried globs: {all_globs}"
+        )
 
     print(
-        f"[FAO] {spec.label}: using drained_co2_n2o tiles "
+        f"[FAO] {spec.label}: using {source_label} tiles "
         f"({n_files} file(s) across {len(drained_globs)} interval(s))"
     )
     print(f"  Globs for {spec.label}")
@@ -293,7 +297,8 @@ def _compute_model_metrics_for_run(
     CO₂, N₂O, total area, and land-use split.
 
     Land-use classification:
-      - Based on emissions_state via pc._reclass_emissions_state.
+      - Based on unified-state semantics exposed as `emissions_state` via
+        pc._reclass_emissions_state.
       - "Oil Palm" is explicitly folded into "Cropland" for FAO comparison.
       - Filtered to LandUse in {"Cropland", "Grassland"}.
     """
@@ -312,7 +317,8 @@ def _compute_model_metrics_for_run(
 
     latest_year = int(df["interval_end"].max())
 
-    # Land-use classification from emissions_state (NOT drained_state)
+    # Land-use classification from unified-state semantics exposed as
+    # `emissions_state` (NOT drained_state)
     df = df.copy()
     df["LandUse_raw"] = df["emissions_state"].apply(pc._reclass_emissions_state)
 
