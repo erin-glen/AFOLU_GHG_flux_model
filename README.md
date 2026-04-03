@@ -11,7 +11,29 @@ The current workflow is:
 3. **Run zonal stats** (`zonal_statistics/02_run_zonal_stats`) directly from the model mega-zarr.
 
 `zonal_statistics/01_build_zarr_caches` is now mainly for contextual-layer prep
-(`pixel_area`, `adm0`). Its legacy model-output cache build path is optional.
+(`pixel_area`, `adm0`, `ogh_unthresholded_probability`). Its legacy model-output
+cache path only runs when flux datasets are explicitly passed via `--datasets`.
+
+Default (contextual-only) run example:
+
+```bash
+python -m src.scripts.zonal_statistics.01_build_zarr_caches \
+  --cluster_name zarr_build \
+  --chunk_size 8000
+```
+
+Legacy flux-cache example (explicit):
+
+```bash
+python -m src.scripts.zonal_statistics.01_build_zarr_caches \
+  --cluster_name zarr_build \
+  --include_legacy_model_output_caches \
+  --model_version 0_9_7 \
+  --run_date 20251118 \
+  --interval_end_years 2024 \
+  --run_name ogh_standard_model \
+  --datasets drained_total burned_total
+```
 
 ### Is `2_per_pixel_soils_outputs.py` still required?
 
