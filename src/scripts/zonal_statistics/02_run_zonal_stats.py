@@ -515,6 +515,29 @@ def build_exact_tile_mask(ref: xr.DataArray, tile_ids: List[str]) -> xr.DataArra
         raise ValueError("No pixels selected by --tile_ids on the reference grid.")
     return xr.concat(tile_masks, dim="tile").any(dim="tile")
 
+
+def build_bbox_mask(ref: xr.DataArray, bbox: List[float]) -> xr.DataArray:
+    """Build exact mask for pixels intersecting a requested bbox."""
+    west, south, east, north = _normalize_bbox(bbox)
+    x0, x1 = float(ref.x.values[0]), float(ref.x.values[-1])
+    y0, y1 = float(ref.y.values[0]), float(ref.y.values[-1])
+    x_slice = slice(min(west, east), max(west, east)) if x0 < x1 else slice(max(east, west), min(east, west))
+    y_slice = slice(min(south, north), max(south, north)) if y0 < y1 else slice(max(north, south), min(north, south))
+    selected = ref.sel(x=x_slice, y=y_slice)
+    if selected.sizes.get("x", 0) == 0 or selected.sizes.get("y", 0) == 0:
+        raise ValueError("Requested --bounding_box selects no pixels on the reference grid.")
+    x_membership = xr.DataArray(
+        np.isin(ref.x.values, selected.x.values),
+        dims=("x",),
+        coords={"x": ref.x},
+    )
+    y_membership = xr.DataArray(
+        np.isin(ref.y.values, selected.y.values),
+        dims=("y",),
+        coords={"y": ref.y},
+    )
+    return (x_membership & y_membership).transpose(*ref.dims)
+
 def _normalize_tile_ids(raw_tile_args: Optional[List[str]]) -> List[str]:
     tiles: List[str] = []
     for item in raw_tile_args or []:
@@ -1120,6 +1143,10 @@ def run(args: argparse.Namespace) -> None:
                     flux_arrays = [prepare_analysis_array(FLUX_DATASETS[k], k, mega_ds, ref, tol, args.force_align, mega_zarr_path=mega_zarr_path).astype("float32") for k in selected_fluxes_ordered]
                     combined_nodes = resolve_combined_state_nodes(mega_ds, ref, tol, args.force_align, mega_zarr_path, interval, logger)
                     adm0_aligned = align_auto(adm0, ref, tol, args.force_align)
+                    tile_where_mask = (adm0_aligned > 0)
+                    if execution_plan["bbox"] is not None:
+                        logger.info("Applying bbox clip mask in tile mode: interval=%s tile_id=%s bbox=%s", interval, tile_id, execution_plan["bbox"])
+                        tile_where_mask = tile_where_mask & build_bbox_mask(ref, execution_plan["bbox"])
                     df_tile = run_combined_state_reduce(
                         selected_flux_arrays=flux_arrays,
                         selected_flux_keys=selected_fluxes_ordered,
@@ -1127,7 +1154,7 @@ def run(args: argparse.Namespace) -> None:
                         adm0_aligned=adm0_aligned,
                         ref=ref,
                         expected_groups=[gadm_adm0_ids, combined_state_codes_arr],
-                        where_mask=(adm0_aligned > 0),
+                        where_mask=tile_where_mask,
                         interval_end_year=interval_end_year,
                         no_sparse=args.no_sparse,
                         logger=logger,

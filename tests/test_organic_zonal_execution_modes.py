@@ -97,3 +97,14 @@ def test_script_no_longer_uses_drained_burned_output_prefixes() -> None:
     assert '"combined_state"' in source
     assert "dest_d" not in source
     assert "dest_b" not in source
+
+
+def test_build_bbox_mask_clips_to_bbox_subset() -> None:
+    ref = xr.DataArray(
+        np.ones((4, 4), dtype=np.float32),
+        dims=("y", "x"),
+        coords={"x": [0.5, 1.5, 2.5, 3.5], "y": [3.5, 2.5, 1.5, 0.5]},
+    )
+    mask = organic_zonal.build_bbox_mask(ref, [1.0, 1.0, 3.0, 3.0])
+    # selected coords are x={1.5,2.5}, y={2.5,1.5}
+    assert int(mask.sum()) == 4
