@@ -144,6 +144,15 @@ PIXEL_AREA_GTIF_FOLDER = (
     "v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 )
 
+ORGANIC_PROBABILITY_DATASET = "ogh_unthresholded_probability"
+ORGANIC_PROBABILITY_DATE = "20251105"
+ORGANIC_PROBABILITY_VAR_NAME = "organic_probability"
+ORGANIC_PROBABILITY_FILENAME_TEMPLATE = "global_ogh_unthresholded_probability_{date}.zarr"
+ORGANIC_PROBABILITY_GTIF_FOLDER_TEMPLATE = (
+    "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/"
+    "peat_mask/OGH/tiles_unthresholded/{date}/"
+)
+
 ADM0_DATASET = "GADM4_1_adm0_global"
 ADM0_DATE = "20250925"  # keep in sync with Step 2
 ADM0_FILENAME_TEMPLATE = "global_GADM41_adm0_{date}.zarr"
@@ -160,6 +169,17 @@ def adm0_zarr_path(date: str = ADM0_DATE) -> str:
         date,
         ADM0_FILENAME_TEMPLATE.format(date=date),
     )
+
+def organic_probability_zarr_path(date: str = ORGANIC_PROBABILITY_DATE) -> str:
+    return posixpath.join(
+        CONTEXTUAL_ZARR_ROOT,
+        ORGANIC_PROBABILITY_DATASET,
+        date,
+        ORGANIC_PROBABILITY_FILENAME_TEMPLATE.format(date=date),
+    )
+
+def organic_probability_gtif_folder(date: str = ORGANIC_PROBABILITY_DATE) -> str:
+    return ORGANIC_PROBABILITY_GTIF_FOLDER_TEMPLATE.format(date=date)
 
 # ------------------------------ helpers --------------------------------
 def _split_s3(path: str) -> tuple[str, str]:
@@ -400,6 +420,56 @@ def ensure_adm0_contextual_zarr(
     logger.info("flm: Built adm0 contextual Zarr ✅ %s", zarr_path)
     return zarr_path
 
+def ensure_organic_probability_contextual_zarr(
+    *,
+    ref: xr.DataArray,
+    tol: float,
+    chunk_size: int,
+    logger: logging.Logger,
+    date: str = ORGANIC_PROBABILITY_DATE,
+) -> str:
+    zarr_path = organic_probability_zarr_path(date)
+    if zarr_exists(zarr_path):
+        try:
+            validate_zarr(zarr_path, ref, logger=logger)
+            logger.info("flm: Using existing ogh_unthresholded_probability contextual Zarr: %s", zarr_path)
+            return zarr_path
+        except Exception as exc:
+            logger.warning("flm: ogh_unthresholded_probability Zarr validation failed (%s); rebuilding.", exc)
+            try:
+                remove_store_recursively(zarr_path)
+            except Exception:
+                pass
+
+    logger.info("flm: Building ogh_unthresholded_probability contextual Zarr for date %s from GeoTIFF tiles.", date)
+    source_folder = organic_probability_gtif_folder(date)
+    tiffs = list_folder_uris(source_folder)
+    if not tiffs:
+        raise FileNotFoundError(
+            f"No GeoTIFFs found under {source_folder} to build ogh_unthresholded_probability"
+        )
+
+    da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
+    da_aligned = align_like_nearest_tol(da_in, ref, tol)
+    da_uint = da_aligned.fillna(0).astype("uint8").chunk(
+        {d: chunk_size for d in ("x", "y") if d in da_aligned.dims}
+    )
+    ds_out = xr.Dataset({ORGANIC_PROBABILITY_VAR_NAME: da_uint})
+
+    try:
+        remove_store_recursively(zarr_path)
+    except Exception:
+        pass
+
+    with dask.annotate(label="to_zarr:ogh_unthresholded_probability"):
+        ds_out.to_zarr(zarr_path, mode="w")
+    if Version(zarr.__version__).major < 3:
+        ensure_consolidated_v2(zarr_path)
+
+    validate_zarr(zarr_path, ref, logger=logger)
+    logger.info("flm: Built ogh_unthresholded_probability contextual Zarr ✅ %s", zarr_path)
+    return zarr_path
+
 # ------------------------------ pipeline --------------------------------
 def build_paths(interval: str, *, tile_pixels: int, dataset_names: Optional[List[str]] = None, **kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
@@ -447,6 +517,7 @@ def run(args: argparse.Namespace) -> None:
 
     # 2) Ensure adm0 contextual grid exists and matches ref
     ensure_adm0_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
+    ensure_organic_probability_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
 
     logger.info("flm: Model version: %s", args.model_version)
     if client:
