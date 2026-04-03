@@ -48,6 +48,7 @@ from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.zonal_statistics import zonal_constants as zc
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
+UNCERTAINTY_ROOT = posixpath.join(ROOT, "uncertainty")
 CONTEXTUAL_ZARR_ROOT = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
 )
@@ -193,7 +194,7 @@ def _df_from_result(res: xr.DataArray) -> pd.DataFrame:
 
 def output_prefix(model_version: str, run_name: str, run_date: str, probability_date: str) -> str:
     return posixpath.join(
-        ROOT,
+        UNCERTAINTY_ROOT,
         f"version_{model_version}",
         "probability_area_stats",
         run_name,
