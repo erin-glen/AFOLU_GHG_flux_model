@@ -48,10 +48,12 @@ def get_output_folders(
     output_pixel_resolution: str,
     run_name: str = "ogh_standard_model",
     output_date: str = DEFAULT_OUTPUT_DATE,
+    inventory_periods: list[str] | None = None,
 ) -> list:
     """Return list of S3 folders for organic soil outputs."""
     interval_folder = f"{interval_type}_intervals"
-    inventory_periods = get_inventory_periods(interval_type)
+    if inventory_periods is None:
+        inventory_periods = get_inventory_periods(interval_type)
     paths = []
     for period in inventory_periods:
         for dtype in DATA_TYPES:
@@ -61,6 +63,30 @@ def get_output_folders(
             )
             paths.append(path)
     return paths
+
+
+def filter_inventory_periods(
+    inventory_periods: list[str], interval_end_years: list[int] | None
+) -> list[str]:
+    """Filter inventory periods by selected interval end years, preserving order."""
+    if not interval_end_years:
+        return inventory_periods
+
+    selected_end_years = {int(year) for year in interval_end_years}
+    filtered = [
+        period
+        for period in inventory_periods
+        if int(period.split("_")[-1]) in selected_end_years
+    ]
+    available_end_years = {int(period.split("_")[-1]) for period in inventory_periods}
+    missing = sorted(selected_end_years - available_end_years)
+    if missing:
+        raise ValueError(
+            f"Requested interval end years are not available for this interval type: {missing}"
+        )
+    if not filtered:
+        raise ValueError("No inventory periods matched the requested interval end years.")
+    return filtered
 
 
 def build_year_indices(interval_type: str) -> tuple[list[int], dict[int, int]]:
@@ -231,6 +257,7 @@ def main(
     run_name: str = "ogh_standard_model",
     output_date: str = DEFAULT_OUTPUT_DATE,
     interval_type: str = cn.intervals_five_year,
+    interval_end_years: list[int] | None = None,
 ):
     logger = lu.setup_logging_main()
 
@@ -249,6 +276,8 @@ def main(
     output_pixel_resolution = f"{cn.full_raster_dims}_pixels"
     year_index, year_lookup = build_year_indices(interval_type)
     inventory_periods = get_inventory_periods(interval_type)
+    inventory_periods = filter_inventory_periods(inventory_periods, interval_end_years)
+    logger.info(f"Inventory periods selected for aggregation: {inventory_periods}")
 
     zarr_path = dzu.create_mega_zarr_path(
         cn.drainage_outputs_path_mega_zarr,
@@ -303,7 +332,11 @@ def main(
     )
 
     output_folders = get_output_folders(
-        interval_type, output_pixel_resolution, run_name, output_date
+        interval_type,
+        output_pixel_resolution,
+        run_name,
+        output_date,
+        inventory_periods=inventory_periods,
     )
     output_folders_pixel = [
         folder.replace("_ha_", "_pixel_")
@@ -372,6 +405,13 @@ if __name__ == "__main__":
         default=DEFAULT_OUTPUT_DATE,
         help="Date tag for selecting input datasets (YYYYMMDD)",
     )
+    parser.add_argument(
+        "--interval_end_years",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Optional subset of interval end years to aggregate (e.g., 2010 2015 2020).",
+    )
 
     args = parser.parse_args()
 
@@ -384,8 +424,10 @@ if __name__ == "__main__":
         args.run_name,
         args.output_date,
         args.interval_type,
+        args.interval_end_years,
     )
 
 """
 python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118
+python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118 --interval_end_years 2010 2015 2020
 """
