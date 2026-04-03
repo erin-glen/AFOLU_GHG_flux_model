@@ -17,6 +17,11 @@ You can either provide --input directly, or pass --probability-date to read
 the default 02b output location:
   s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/uncertainty/
   area_probability/<probability_date>/by_adm0_probability_class/
+
+Example:
+python -m src.scripts.uncertainty.build_probability_area_curve \
+  --input "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/uncertainty/area_probability/20251105/by_adm0_probability_class/" \
+  --output ./area_vs_threshold_20251105.csv
 """
 
 from __future__ import annotations
