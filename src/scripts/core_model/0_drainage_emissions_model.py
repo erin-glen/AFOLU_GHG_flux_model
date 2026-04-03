@@ -1068,6 +1068,7 @@ def run_drainage_model(
     emission_factor_variant: str = "default",
     mega_zarr_path: Optional[str] = None,
     outputs_to_zarr: Optional[list[str]] = None,
+    include_legacy_state_rasters: bool = False,
     create_zarr: bool = False,
     run_date: Optional[str] = None,
 ):
@@ -1204,7 +1205,16 @@ def run_drainage_model(
             run_date,
             main_logger,
         )
-        outputs_to_zarr = list(cn.drainage_outputs_to_zarr)
+        if outputs_to_zarr is None:
+            outputs_to_zarr = list(cn.drainage_outputs_to_zarr)
+            if include_legacy_state_rasters:
+                outputs_to_zarr.extend(cn.drainage_optional_state_outputs)
+        outputs_to_zarr = list(dict.fromkeys(outputs_to_zarr))
+        main_logger.info(
+            "Mega-zarr output datasets (%d): %s",
+            len(outputs_to_zarr),
+            outputs_to_zarr,
+        )
         zu.initialize_global_mega_zarr(
             mega_zarr_path,
             outputs_to_zarr,
@@ -1428,6 +1438,11 @@ def main(argv=None):
         help="Create and populate global mega-zarr with model outputs",
     )
     p.add_argument(
+        "--include_legacy_state_rasters",
+        action="store_true",
+        help="Also write legacy drained_state and burned_state rasters (default: omit from standard runs).",
+    )
+    p.add_argument(
         "--run_date",
         help="Run date used in mega-zarr path naming (YYYYMMDD)",
     )
@@ -1461,6 +1476,7 @@ def main(argv=None):
         count_burned_years=args.count_burned_years,
         emission_factor_variant=args.emission_factor_variant,
         create_zarr=args.create_zarr,
+        include_legacy_state_rasters=args.include_legacy_state_rasters,
         run_date=args.run_date,
     )
 
