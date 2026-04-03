@@ -30,6 +30,7 @@ import argparse
 import posixpath
 from pathlib import Path
 
+import fsspec
 import pandas as pd
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
@@ -97,16 +98,27 @@ def resolve_output_path(args: argparse.Namespace) -> Path:
     return Path("area_vs_threshold.csv").resolve()
 
 
+def _read_parquet_directory(path_str: str) -> pd.DataFrame:
+    """Read all parquet files under a local or remote directory path."""
+    fs, base_path = fsspec.core.url_to_fs(path_str)
+    parquet_paths = sorted(fs.glob(f"{base_path.rstrip('/')}/**/*.parquet"))
+    if not parquet_paths:
+        raise FileNotFoundError(f"No parquet files found under directory: {path_str}")
+
+    protocol = fs.protocol[0] if isinstance(fs.protocol, tuple) else fs.protocol
+    parquet_urls = [f"{protocol}://{p}" if protocol != "file" else p for p in parquet_paths]
+    return pd.concat([pd.read_parquet(url) for url in parquet_urls], ignore_index=True)
+
+
 def read_table(path_str: str) -> pd.DataFrame:
     if path_str.startswith("s3://"):
-        return pd.read_parquet(path_str)
+        if path_str.lower().endswith((".parquet", ".pq")):
+            return pd.read_parquet(path_str)
+        return _read_parquet_directory(path_str)
 
     path = Path(path_str).expanduser().resolve()
     if path.is_dir():
-        parquet_files = sorted(path.rglob("*.parquet"))
-        if not parquet_files:
-            raise FileNotFoundError(f"No parquet files found under directory: {path}")
-        return pd.concat([pd.read_parquet(fp) for fp in parquet_files], ignore_index=True)
+        return _read_parquet_directory(str(path))
 
     suffix = path.suffix.lower()
     if suffix == ".csv":
