@@ -733,8 +733,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--area-curve-area-column",
-        default="area",
-        help="Mapped-area column name in --area-curve-table. Default: area",
+        default="area_ha",
+        help="Mapped-area column name in --area-curve-table. Default: area_ha",
     )
     return parser.parse_args()
 
