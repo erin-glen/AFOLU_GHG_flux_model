@@ -160,13 +160,18 @@ def build_exact_tile_mask(ref: xr.DataArray, tiles: List[str]) -> xr.DataArray:
     mask = xr.zeros_like(ref, dtype=bool)
     x0, x1 = float(ref.x.values[0]), float(ref.x.values[-1])
     y0, y1 = float(ref.y.values[0]), float(ref.y.values[-1])
+
+    x_ref = ref["x"]
+    y_ref = ref["y"]
     for tile in tiles:
         west, south, east, north = uu.get_10x10_tile_bounds(tile)
-        x_slice = slice(min(west, east), max(west, east)) if x0 < x1 else slice(max(east, west), min(east, west))
-        y_slice = slice(min(south, north), max(south, north)) if y0 < y1 else slice(max(north, south), min(north, south))
-        tile_sel = ref.sel(x=x_slice, y=y_slice)
-        tile_mask = xr.full_like(tile_sel, True, dtype=bool)
-        mask.loc[dict(x=tile_mask.x, y=tile_mask.y)] = tile_mask
+        x_min, x_max = (min(west, east), max(west, east)) if x0 < x1 else (min(east, west), max(east, west))
+        y_min, y_max = (min(south, north), max(south, north)) if y0 < y1 else (min(north, south), max(north, south))
+
+        x_in_tile = (x_ref >= x_min) & (x_ref <= x_max)
+        y_in_tile = (y_ref >= y_min) & (y_ref <= y_max)
+        tile_mask = x_in_tile & y_in_tile
+        mask = mask | tile_mask
     return mask
 
 
