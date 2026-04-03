@@ -6,11 +6,17 @@ disabled by default because zonal statistics now reads flux/state layers
 directly from the drainage mega-zarr.
 
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
-  --interval_end_years 2024 \
   --cluster_name drainage_cluster \
-  --run_date 20251118 \
+  --chunk_size 8000
+
+python -m src.scripts.zonal_statistics.01_build_zarr_caches \
+  --cluster_name drainage_cluster \
+  --include_legacy_model_output_caches \
   --model_version 0_9_7 \
+  --run_date 20251118 \
+  --interval_end_years 2024 \
   --run_name ogh_sensitivity_500m_10 \
+  --datasets drained_total burned_total \
   --tile_pixels 40000 \
   --chunk_size 8000
 
@@ -110,6 +116,16 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "dtype": "uint32",
     },
 }
+FLUX_DATASET_KEYS: Tuple[str, ...] = (
+    "drained_total",
+    "drained_co2",
+    "drained_n2o",
+    "drained_total_co2",
+    "drained_total_ch4",
+    "burned_total",
+    "burned_total_co2",
+    "burned_total_ch4",
+)
 
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
 FOLDER_TEMPLATE = (
@@ -494,14 +510,7 @@ def run(args: argparse.Namespace) -> None:
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
-    base_selection = ordered_dataset_keys(args.datasets)
-    required_selection = set(base_selection)
-    if any(k in base_selection for k in ("drained_total", "drained_co2", "drained_n2o")):
-        required_selection.add("drained_state_nodes")
-    if "burned_total" in base_selection:
-        required_selection.add("burned_state_nodes")
-    dataset_names = ordered_dataset_keys(list(required_selection))
+    requested_datasets = ordered_dataset_keys(args.datasets)
 
     # 0) Ensure canonical reference grid exists, then open it
     ensure_pixel_area_contextual_zarr(chunk_size=args.chunk_size, logger=logger)
@@ -540,6 +549,53 @@ def run(args: argparse.Namespace) -> None:
         if cluster:
             cluster.close()
         return
+
+    if not requested_datasets:
+        logger.info(
+            "flm: Legacy cache mode requested, but no datasets were specified. "
+            "Skipping model-output cache build. Pass --datasets with one or more flux datasets to build them."
+        )
+        uu.stage_duration(start_ts, uu.timestr(), stage)
+        if client:
+            client.close()
+        if cluster:
+            cluster.close()
+        return
+
+    dataset_names = [k for k in requested_datasets if k in FLUX_DATASET_KEYS]
+    ignored_non_flux = [k for k in requested_datasets if k not in FLUX_DATASET_KEYS]
+    if ignored_non_flux:
+        logger.warning(
+            "flm: Ignoring non-flux dataset selections in legacy mode: %s. "
+            "Only flux zarr caches are built by this script.",
+            ignored_non_flux,
+        )
+    if not dataset_names:
+        logger.info(
+            "flm: No flux datasets requested; skipping legacy model-output cache build. "
+            "Contextual zarrs are ready."
+        )
+        uu.stage_duration(start_ts, uu.timestr(), stage)
+        if client:
+            client.close()
+        if cluster:
+            cluster.close()
+        return
+
+    missing_legacy_args: List[str] = []
+    if not args.model_version:
+        missing_legacy_args.append("--model_version")
+    if not args.run_date:
+        missing_legacy_args.append("--run_date")
+    if not args.interval_end_years:
+        missing_legacy_args.append("--interval_end_years")
+    if missing_legacy_args:
+        raise ValueError(
+            "Legacy model-output cache mode requires: "
+            + ", ".join(missing_legacy_args)
+        )
+
+    OUTPUT_KW = dict(root=ROOT, model_version=args.model_version, run_date=args.run_date, run_name=args.run_name)
 
     # 3) Build per-variable aligned Zarrs (legacy compatibility mode)
     mapping = {end: (start, end) for start, end in cn.five_year_inventory_periods}
@@ -618,15 +674,18 @@ def run(args: argparse.Namespace) -> None:
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description="Build aligned Zarr caches for organic soils")
-    parser.add_argument("--model_version", required=True)
-    parser.add_argument("--run_date", required=True)
-    parser.add_argument("--interval_end_years", nargs="+", type=int, required=True)
+    parser.add_argument("--model_version",
+                        help="Legacy mode only: model version (required with --include_legacy_model_output_caches).")
+    parser.add_argument("--run_date",
+                        help="Legacy mode only: run date (required with --include_legacy_model_output_caches).")
+    parser.add_argument("--interval_end_years", nargs="+", type=int,
+                        help="Legacy mode only: interval end years (required with --include_legacy_model_output_caches).")
     parser.add_argument("--chunk_size", type=int, default=8000)
     parser.add_argument("--tile_pixels", type=int, default=40000,
                         help="Input tile size in pixels in the source folder path (4000 or 40000).")
     parser.add_argument("--run_name", default="ogh_standard_model")
     parser.add_argument("--datasets", nargs="+", choices=sorted(DATASETS.keys()),
-                        help="Datasets to process (default: all)")
+                        help="Legacy mode only: explicit flux datasets to process.")
     parser.add_argument("--write_mode", choices=["w", "w-"], default="w-",
                         help="'w' overwrite, 'w-' skip if exists (validate only).")
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
@@ -642,6 +701,19 @@ def main(argv=None):
     mode.add_argument("--cluster_name", default="zarr_build")
     parser.add_argument("-bb", "--bounding_box", nargs=4, type=float, help="W S E N (optional, dev only)")
     args = parser.parse_args(argv)
+    if args.include_legacy_model_output_caches and args.datasets:
+        requested_fluxes = [k for k in args.datasets if k in FLUX_DATASET_KEYS]
+        missing = []
+        if requested_fluxes and not args.model_version:
+            missing.append("--model_version")
+        if requested_fluxes and not args.run_date:
+            missing.append("--run_date")
+        if requested_fluxes and not args.interval_end_years:
+            missing.append("--interval_end_years")
+        if missing:
+            parser.error(
+                "Legacy flux cache mode requires: " + ", ".join(missing)
+            )
     run(args)
 
 if __name__ == "__main__":
