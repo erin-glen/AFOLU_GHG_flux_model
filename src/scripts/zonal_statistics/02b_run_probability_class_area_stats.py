@@ -13,8 +13,6 @@ The resulting class-area table can be post-processed into a threshold curve
 
 Example:
 python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
-  --model_version 0_9_7 \
-  --run_date 20260403 \
   --contextual_date 20250925 \
   --probability_date 20251105
 """
@@ -192,13 +190,10 @@ def _df_from_result(res: xr.DataArray) -> pd.DataFrame:
     return out.sort_values(["adm0_id", "probability_class"]).reset_index(drop=True)
 
 
-def output_prefix(model_version: str, run_name: str, run_date: str, probability_date: str) -> str:
+def output_prefix(probability_date: str) -> str:
     return posixpath.join(
         UNCERTAINTY_ROOT,
-        f"version_{model_version}",
-        "probability_area_stats",
-        run_name,
-        run_date,
+        "area_probability",
         probability_date,
         "by_adm0_probability_class",
     ).rstrip("/") + "/"
@@ -278,9 +273,6 @@ def run(args: argparse.Namespace) -> None:
         df = _df_from_result(res)
 
         out_meta = {
-            "model_version": args.model_version,
-            "run_name": args.run_name,
-            "run_date": args.run_date,
             "contextual_date": args.contextual_date,
             "probability_date": args.probability_date,
             "probability_range_included": [1, 100],
@@ -308,7 +300,7 @@ def run(args: argparse.Namespace) -> None:
         )
         (local_dir / "manifest.json").write_text(json.dumps(out_meta, indent=2) + "\n", encoding="utf-8")
 
-        remote_prefix = output_prefix(args.model_version, args.run_name, args.run_date, args.probability_date)
+        remote_prefix = output_prefix(args.probability_date)
         fs_s3 = s3fs.S3FileSystem(anon=False)
         remote_exists = fs_s3.exists(remote_prefix.rstrip("/"))
         if remote_exists and not args.overwrite_existing:
@@ -340,9 +332,6 @@ def run(args: argparse.Namespace) -> None:
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description="Run organic probability class-area zonal statistics by adm0")
-    parser.add_argument("--model_version", required=True)
-    parser.add_argument("--run_date", required=True)
-    parser.add_argument("--run_name", default="ogh_probability_contextual")
     parser.add_argument("--contextual_date", default="20250925", help="Date tag for adm0/pixel_area contextual zarrs.")
     parser.add_argument("--probability_date", default="20251105", help="Date tag for ogh_unthresholded_probability contextual zarr.")
     parser.add_argument("--chunk_size", type=int, default=10000)
