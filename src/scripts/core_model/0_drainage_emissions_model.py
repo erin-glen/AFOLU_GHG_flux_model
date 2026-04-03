@@ -1025,12 +1025,16 @@ def compute_intervals(start_year, end_year, interval_type, all_five_year_periods
             end_year = start_year
 
     if interval_type == cn.intervals_five_year:
-        # Snap a 2019 start year to the final interval (2020–2024)
-        if start_year == 2019 and end_year >= 2024:
-            start_year = 2020
         intervals = [
-            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
+            (period_start, period_end)
+            for period_start, period_end in cn.five_year_inventory_periods
+            if period_end >= start_year and period_start <= end_year
         ]
+        if not intervals:
+            first_period = cn.five_year_inventory_periods[0]
+            intervals = [first_period]
+        start_year = intervals[0][0]
+        end_year = intervals[-1][1]
     else:
         intervals = [(y, y) for y in range(start_year, end_year + 1)]
 
@@ -1183,6 +1187,13 @@ def run_drainage_model(
         end_year,
         interval_type,
         all_five_year_periods,
+    )
+    main_logger.info(
+        "Resolved interval configuration: interval_type=%s, start_year=%s, end_year=%s, intervals=%s",
+        interval_type,
+        start_year,
+        end_year,
+        intervals,
     )
     interval_end_years = [iv[1] for iv in intervals]
     zarr_year_index = interval_end_years
