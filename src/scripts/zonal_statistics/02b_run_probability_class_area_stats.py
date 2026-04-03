@@ -48,6 +48,7 @@ from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.zonal_statistics import zonal_constants as zc
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
+UNCERTAINTY_ROOT = posixpath.join(ROOT, "uncertainty")
 CONTEXTUAL_ZARR_ROOT = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
 )
@@ -191,13 +192,11 @@ def _df_from_result(res: xr.DataArray) -> pd.DataFrame:
     return out.sort_values(["adm0_id", "probability_class"]).reset_index(drop=True)
 
 
-def output_prefix(model_version: str, run_name: str, run_date: str, probability_date: str) -> str:
+def output_prefix(contextual_date: str, probability_date: str) -> str:
     return posixpath.join(
-        ROOT,
-        f"version_{model_version}",
+        UNCERTAINTY_ROOT,
         "probability_area_stats",
-        run_name,
-        run_date,
+        contextual_date,
         probability_date,
         "by_adm0_probability_class",
     ).rstrip("/") + "/"
@@ -307,7 +306,7 @@ def run(args: argparse.Namespace) -> None:
         )
         (local_dir / "manifest.json").write_text(json.dumps(out_meta, indent=2) + "\n", encoding="utf-8")
 
-        remote_prefix = output_prefix(args.model_version, args.run_name, args.run_date, args.probability_date)
+        remote_prefix = output_prefix(args.contextual_date, args.probability_date)
         fs_s3 = s3fs.S3FileSystem(anon=False)
         remote_exists = fs_s3.exists(remote_prefix.rstrip("/"))
         if remote_exists and not args.overwrite_existing:
