@@ -404,11 +404,15 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
     else:
         interval_expr = f"""
             TRY_CAST(
-                regexp_extract({filename_expr}, '([0-9]{{4}})_([0-9]{{4}})/(?:drained|drained_co2_n2o|burned)/', 2)
+                regexp_extract({filename_expr}, '([0-9]{{4}})_([0-9]{{4}})/(?:drained|drained_co2_n2o|burned|combined_state)/', 2)
             AS INTEGER)
         """
 
     if kind == "drained":
+        component_filter = (
+            f"(CAST({flux_type_expr} AS VARCHAR) IS NULL OR "
+            f"regexp_matches(lower(CAST({flux_type_expr} AS VARCHAR)), 'drained|area'))"
+        )
         if "drained_state_nodes" in cols:
             nodes_expr = "drained_state_nodes"
         elif "combined_state_nodes" in cols:
@@ -426,9 +430,14 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
                 {nodes_expr}                       AS drained_state_nodes,
                 {meaning_expr}                     AS drained_state_meaning
             FROM raw_{name}
-            WHERE {value_expr} IS NOT NULL;
+            WHERE {value_expr} IS NOT NULL
+              AND {component_filter};
         """)
     else:
+        component_filter = (
+            f"(CAST({flux_type_expr} AS VARCHAR) IS NULL OR "
+            f"regexp_matches(lower(CAST({flux_type_expr} AS VARCHAR)), 'burned|area'))"
+        )
         if "burned_state_nodes" in cols:
             nodes_expr = "burned_state_nodes"
         elif "combined_state_nodes" in cols:
@@ -446,7 +455,8 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
                 {nodes_expr}                       AS burned_state_nodes,
                 {meaning_expr}                     AS burned_state_meaning
             FROM raw_{name}
-            WHERE {value_expr} IS NOT NULL;
+            WHERE {value_expr} IS NOT NULL
+              AND {component_filter};
         """)
 
 def _register_components(con: duckdb.DuckDBPyConnection,
@@ -455,6 +465,14 @@ def _register_components(con: duckdb.DuckDBPyConnection,
     _ensure_httpfs(con, aws_region)
     existing_drained = _existing_globs(con, drained_globs)
     existing_burned = _existing_globs(con, burned_globs)
+
+    # Prefer legacy branch-specific outputs when available; otherwise fall back
+    # to the combined_state branch (used by current zonal-stats defaults).
+    if any("/drained/" in g or "/drained_co2_n2o/" in g for g in existing_drained):
+        existing_drained = [g for g in existing_drained if "/combined_state/" not in g]
+    if any("/burned/" in g for g in existing_burned):
+        existing_burned = [g for g in existing_burned if "/combined_state/" not in g]
+
     existing_drained_set = set(existing_drained)
     existing_burned_set = set(existing_burned)
     skipped_drained = [g for g in drained_globs if g not in existing_drained_set]
@@ -784,7 +802,9 @@ def _make_base_prefixes(model_version: str, run_name: str, run_date: str,
 def _make_globs_for_components(base_prefixes: Sequence[str]) -> tuple[list[str], list[str]]:
     drained = [posixpath.join(bp, "drained", "*.parquet") for bp in base_prefixes]
     drained += [posixpath.join(bp, "drained_co2_n2o", "*.parquet") for bp in base_prefixes]
+    drained += [posixpath.join(bp, "combined_state", "*.parquet") for bp in base_prefixes]
     burned  = [posixpath.join(bp, "burned",  "*.parquet") for bp in base_prefixes]
+    burned += [posixpath.join(bp, "combined_state", "*.parquet") for bp in base_prefixes]
     return drained, burned
 
 # ----------------------------- CLI ----------------------------------------
