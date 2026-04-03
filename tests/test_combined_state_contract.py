@@ -37,6 +37,10 @@ def test_new_write_contracts_use_combined_state_names() -> None:
     assert "combined_state" in cn.drainage_outputs_to_zarr
     assert "combined_state" in cn.drainage_output_dtypes
     assert "emissions_state" not in cn.drainage_outputs_to_zarr
+    assert "drained_state" not in cn.drainage_outputs_to_zarr
+    assert "burned_state" not in cn.drainage_outputs_to_zarr
+    assert "drained_state" in cn.drainage_optional_state_outputs
+    assert "burned_state" in cn.drainage_optional_state_outputs
 
     core_model_source = Path("src/scripts/core_model/0_drainage_emissions_model.py").read_text()
     assert 'outputs["combined_state"]' in core_model_source

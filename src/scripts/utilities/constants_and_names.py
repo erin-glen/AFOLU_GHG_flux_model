@@ -45,8 +45,6 @@ drainage_outputs_path_mega_zarr = posixpath.join(outputs_path, "mega_zarr")
 
 drainage_outputs_to_zarr = [
     "drained_soil",
-    "drained_state",
-    "burned_state",
     "combined_state",
     "burned_years_count",
     "drained_co2_Mg_CO2_ha_yr",
@@ -59,6 +57,14 @@ drainage_outputs_to_zarr = [
     "burned_co_Mg_CO2e_ha_yr",
     "burned_ch4_Mg_CO2e_ha_yr",
     "burned_total_Mg_CO2e_ha_yr",
+]
+
+# Optional legacy categorical state outputs.
+# These are computed by the model for combined-state packing/diagnostics but
+# are not written by default in standard production runs.
+drainage_optional_state_outputs = [
+    "drained_state",
+    "burned_state",
 ]
 
 drainage_output_dtypes = {

@@ -21,10 +21,14 @@ from src.scripts.utilities import drainage_zarr_utilities as dzu
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 
-DATA_TYPES = list(cn.drainage_outputs_to_zarr)
-if "combined_state" not in DATA_TYPES:
-    # Keep aggregation forward-compatible when constants lag behind model outputs.
-    DATA_TYPES.append("combined_state")
+def default_data_types(include_legacy_state_rasters: bool = False) -> list[str]:
+    data_types = list(cn.drainage_outputs_to_zarr)
+    if include_legacy_state_rasters:
+        data_types.extend(list(getattr(cn, "drainage_optional_state_outputs", [])))
+    if "combined_state" not in data_types:
+        # Keep aggregation forward-compatible when constants lag behind model outputs.
+        data_types.append("combined_state")
+    return list(dict.fromkeys(data_types))
 
 
 version = cn.model_version_underscore
@@ -49,14 +53,16 @@ def get_output_folders(
     run_name: str = "ogh_standard_model",
     output_date: str = DEFAULT_OUTPUT_DATE,
     inventory_periods: list[str] | None = None,
+    data_types: list[str] | None = None,
 ) -> list:
     """Return list of S3 folders for organic soil outputs."""
     interval_folder = f"{interval_type}_intervals"
     if inventory_periods is None:
         inventory_periods = get_inventory_periods(interval_type)
     paths = []
+    data_types = data_types or default_data_types()
     for period in inventory_periods:
-        for dtype in DATA_TYPES:
+        for dtype in data_types:
             path = (
                 f"{BASE_URL}/{dtype}/{run_name}/"
                 f"{interval_folder}/{period}/{output_pixel_resolution}/{output_date}"
@@ -258,6 +264,7 @@ def main(
     output_date: str = DEFAULT_OUTPUT_DATE,
     interval_type: str = cn.intervals_five_year,
     interval_end_years: list[int] | None = None,
+    include_legacy_state_rasters: bool = False,
 ):
     logger = lu.setup_logging_main()
 
@@ -292,9 +299,11 @@ def main(
 
     tile_ids = cn.tile_id_list
     is_final = len(tile_ids) > 20
+    data_types = default_data_types(include_legacy_state_rasters=include_legacy_state_rasters)
+    logger.info("Aggregation dataset defaults (%d): %s", len(data_types), data_types)
 
     tasks = []
-    for dataset in DATA_TYPES:
+    for dataset in data_types:
         for period in inventory_periods:
             end_year = int(period.split("_")[-1])
             year_idx = year_lookup.get(end_year)
@@ -337,6 +346,7 @@ def main(
         run_name,
         output_date,
         inventory_periods=inventory_periods,
+        data_types=data_types,
     )
     output_folders_pixel = [
         folder.replace("_ha_", "_pixel_")
@@ -412,6 +422,11 @@ if __name__ == "__main__":
         default=None,
         help="Optional subset of interval end years to aggregate (e.g., 2010 2015 2020).",
     )
+    parser.add_argument(
+        "--include_legacy_state_rasters",
+        action="store_true",
+        help="Also aggregate drained_state and burned_state (default: omit from standard runs).",
+    )
 
     args = parser.parse_args()
 
@@ -425,9 +440,11 @@ if __name__ == "__main__":
         args.output_date,
         args.interval_type,
         args.interval_end_years,
+        args.include_legacy_state_rasters,
     )
 
 """
 python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118
 python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118 --interval_end_years 2010 2015 2020
+python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118 --include_legacy_state_rasters
 """
