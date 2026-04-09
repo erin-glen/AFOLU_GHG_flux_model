@@ -599,22 +599,105 @@ def plot_area_curve_with_bounds(
     upper_target = float(row["upper_bound_area"])
     area_unit = str(row["area_unit"])
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(area_df["threshold"], area_df["area"], label="Area vs threshold")
-    ax.axvline(operational_threshold, linestyle="--", linewidth=1, label=f"Operational threshold = {operational_threshold:.4f}")
-    ax.axhline(mapped_area, linestyle="--", linewidth=1, label=f"Mapped area = {mapped_area:.4f} {area_unit}")
-    ax.axhline(lower_target, linestyle=":", linewidth=1, label=f"Lower bound = {lower_target:.4f} {area_unit}")
-    ax.axhline(upper_target, linestyle=":", linewidth=1, label=f"Upper bound = {upper_target:.4f} {area_unit}")
+    fig, ax = plt.subplots(figsize=(10, 6))
 
+    ax.plot(
+        area_df["threshold"],
+        area_df["area"],
+        color="#1f77b4",
+        linewidth=2.2,
+        label="Area vs threshold",
+        zorder=3,
+    )
+
+    lower_fill = min(lower_target, upper_target)
+    upper_fill = max(lower_target, upper_target)
+    ax.axhspan(
+        lower_fill,
+        upper_fill,
+        facecolor="#a1d99b",
+        alpha=0.18,
+        label=f"Validation range [{lower_fill:.2f}, {upper_fill:.2f}] {area_unit}",
+        zorder=0,
+    )
+
+    ax.axhline(
+        mapped_area,
+        color="#ff7f0e",
+        linestyle=(0, (8, 3)),
+        linewidth=2.0,
+        label=f"Mapped area = {mapped_area:.4f} {area_unit}",
+        zorder=2,
+    )
+    ax.axhline(
+        lower_target,
+        color="#2ca02c",
+        linestyle=":",
+        linewidth=2.0,
+        label=f"Lower bound = {lower_target:.4f} {area_unit}",
+        zorder=2,
+    )
+    ax.axhline(
+        upper_target,
+        color="#d62728",
+        linestyle=":",
+        linewidth=2.0,
+        label=f"Upper bound = {upper_target:.4f} {area_unit}",
+        zorder=2,
+    )
+
+    ax.axvline(
+        operational_threshold,
+        color="#9467bd",
+        linestyle="-.",
+        linewidth=1.8,
+        label=f"Operational threshold = {operational_threshold:.4f}",
+        zorder=2,
+    )
+
+    target_to_color = {
+        "lower_bound_area": "#2ca02c",
+        "upper_bound_area": "#d62728",
+    }
+    target_to_label = {
+        "lower_bound_area": "Matched lower-bound threshold",
+        "upper_bound_area": "Matched upper-bound threshold",
+    }
+    seen_match_labels: set[str] = set()
     for _, match in matches_df.iterrows():
-        ax.axvline(float(match["selected_threshold"]), linestyle="-.", linewidth=1)
+        target_name = str(match["target_name"])
+        color = target_to_color.get(target_name, "#7f7f7f")
+        base_label = target_to_label.get(target_name, f"Matched threshold ({target_name})")
+        label = base_label if base_label not in seen_match_labels else "_nolegend_"
+        seen_match_labels.add(base_label)
+
+        selected_threshold = float(match["selected_threshold"])
+        selected_area = float(match["selected_area"])
+        ax.axvline(
+            selected_threshold,
+            color=color,
+            linestyle=(0, (3, 2, 1, 2)),
+            linewidth=1.6,
+            alpha=0.9,
+            label=label,
+            zorder=1,
+        )
+        ax.scatter(
+            [selected_threshold],
+            [selected_area],
+            color=color,
+            edgecolor="white",
+            linewidth=0.7,
+            s=48,
+            zorder=4,
+        )
 
     ax.set_xlabel("Probability threshold")
     ax.set_ylabel(f"Mapped area ({area_unit})")
     ax.set_title("Area-versus-threshold curve with validation-based bounds")
     ax.set_xlim(0, 1)
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.25)
+    ax.legend(fontsize=9, loc="best")
     fig.tight_layout()
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
