@@ -476,16 +476,34 @@ def read_area_curve_table(
         raise FileNotFoundError(f"Area-curve table not found: {area_curve_path}")
 
     area_df = pd.read_csv(area_curve_path)
-    missing_columns = [col for col in [threshold_column, area_column] if col not in area_df.columns]
-    if missing_columns:
+    if threshold_column not in area_df.columns:
         raise KeyError(
-            "Required columns were not found in the area-curve table: "
-            + ", ".join(missing_columns)
-            + f"\nAvailable columns: {area_df.columns.tolist()}"
+            "Threshold column was not found in the area-curve table: "
+            f"{threshold_column}\nAvailable columns: {area_df.columns.tolist()}"
         )
 
-    area_df = area_df[[threshold_column, area_column]].copy().dropna()
-    area_df = area_df.rename(columns={threshold_column: "threshold", area_column: "area"})
+    resolved_area_column = area_column
+    if area_column not in area_df.columns:
+        fallback_priority = [
+            "area",
+            "area_mha",
+            "area_ha",
+        ]
+        fallback_candidates = [col for col in fallback_priority if col in area_df.columns]
+        if fallback_candidates:
+            resolved_area_column = fallback_candidates[0]
+            print(
+                "Warning: requested area column "
+                f"'{area_column}' was not found. Using '{resolved_area_column}' instead."
+            )
+        else:
+            raise KeyError(
+                "Area column was not found in the area-curve table: "
+                f"{area_column}\nAvailable columns: {area_df.columns.tolist()}"
+            )
+
+    area_df = area_df[[threshold_column, resolved_area_column]].copy().dropna()
+    area_df = area_df.rename(columns={threshold_column: "threshold", resolved_area_column: "area"})
     area_df["threshold"] = area_df["threshold"].astype(float)
     area_df["area"] = area_df["area"].astype(float)
     area_df = area_df.sort_values("threshold").drop_duplicates(subset="threshold", keep="last").reset_index(drop=True)
@@ -816,8 +834,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--area-curve-area-column",
-        default="area_ha",
-        help="Mapped-area column name in --area-curve-table. Default: area_ha",
+        default="area",
+        help=(
+            "Mapped-area column name in --area-curve-table. Default: area. "
+            "If missing, the script falls back to area_mha then area_ha when available."
+        ),
     )
     return parser.parse_args()
 
