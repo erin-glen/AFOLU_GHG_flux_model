@@ -885,6 +885,18 @@ def main(argv=None):
                   _join(out_tables_dir, f"top{args.topn}_by_country_drained.csv"))
         _copy_sql(con, pc.table_topn_country_sql("burned", args.topn, have_lookup),
                   _join(out_tables_dir, f"top{args.topn}_by_country_burned.csv"))
+        nghgi_subset = con.execute(pc.table_nghgi_comparison_subset_sql(with_lookup=have_lookup)).df()
+        nghgi_subset[inv_col] = nghgi_subset["interval_end"].map(period_labels).fillna(
+            nghgi_subset["interval_end"].astype("Int64").astype(str)
+        )
+        cols = [c for c in (inv_col, "interval_end", "gadm_adm0", "country", "iso3", "land_use",
+                            "drained_area_ha", "drained_on_site_co2_Mg_CO2_yr")
+                if c in nghgi_subset.columns]
+        _write_csv_df(
+            con,
+            nghgi_subset[cols],
+            _join(out_tables_dir, "nghgi_comparison_subset.csv"),
+        )
 
     # -------------------- Figures --------------------
     if args.do_figures:

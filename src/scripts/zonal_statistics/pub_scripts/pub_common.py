@@ -898,6 +898,76 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     ORDER BY ranked.interval_end, rank
     """
 
+def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
+    """
+    Country × inventory period × land-use subset intended for NGHGI comparisons.
+
+    Output columns:
+      - interval_end
+      - gadm_adm0[, country, iso3]
+      - land_use
+      - drained_area_ha
+      - drained_on_site_co2_Mg_CO2_yr
+    """
+    select_l = ", l.country, l.iso3" if with_lookup else ""
+    join_l = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = base.gadm_adm0" if with_lookup else ""
+    return f"""
+    WITH base AS (
+      SELECT
+        z.interval_end,
+        z.gadm_adm0,
+        CASE
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')),
+                              '^.*coastal[_\\- ]?(mangrove|tidal[_\\- ]?marsh).*$')
+          THEN 'Wetland'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')), '^(oil[_\\- ]?palm|oilpalm)$')
+          THEN 'Oil Palm'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')),
+                              '^(short[_\\- ]?rotation|long[_\\- ]?rotation|plantation.*|planted.*|tree[_\\- ]?crop.*)$')
+          THEN 'Other plantation'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')), '^cropland.*$')
+          THEN 'Cropland'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')), '^forest.*$')
+          THEN 'Forest'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')), '^(grassland|pasture|rangeland).*$')
+          THEN 'Grassland'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')), '^(settlement|built[_\\- ]?up|urban).*$')
+          THEN 'Settlement'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')), '^wetland.*$')
+          THEN 'Wetland'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')),
+                              '^(extraction|peat[_\\- ]?extraction|cutover).*$')
+          THEN 'Extraction'
+          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')), '^(otherland|other)$')
+          THEN 'Otherland'
+          ELSE COALESCE(ctx.emissions_state, 'Unspecified')
+        END AS land_use,
+        SUM(CASE WHEN lower(z.flux_type) IN ('area__ha', 'area_ha') THEN z.value ELSE 0 END) AS drained_area_ha,
+        SUM(
+          CASE
+            WHEN lower(z.flux_type) LIKE 'drained_co2%' AND lower(z.flux_type) NOT LIKE '%offsite%'
+            THEN z.value ELSE 0
+          END
+        ) AS drained_on_site_co2_Mg_CO2_yr
+      FROM zs_drained z
+      LEFT JOIN drained_state_ctx AS ctx
+        ON (z.drained_state_meaning = ctx.meaning)
+        OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
+      GROUP BY 1,2,3
+    )
+    SELECT
+      base.interval_end,
+      base.gadm_adm0
+      {select_l},
+      base.land_use,
+      base.drained_area_ha,
+      base.drained_on_site_co2_Mg_CO2_yr
+    FROM base
+    {join_l}
+    WHERE base.drained_area_ha <> 0 OR base.drained_on_site_co2_Mg_CO2_yr <> 0
+    ORDER BY base.interval_end, base.gadm_adm0, base.land_use
+    """
+
 # ----------------------------- Figure SQL --------------------------------
 
 def sql_drained_by_climate() -> str:
