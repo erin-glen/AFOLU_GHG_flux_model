@@ -941,6 +941,32 @@ def _df_from_result(res: xr.DataArray, flux_map: Dict[int, str], interval_end: i
     return df
 
 
+def _canonicalize_output_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize output dtypes so parquet shards share a stable schema."""
+    canonical_strings = {
+        "flux_type",
+        "tile_id",
+        "drained_state_meaning",
+        "burned_state_meaning",
+    }
+    for col in df.columns:
+        if col in canonical_strings or col.endswith("_meaning"):
+            df[col] = df[col].astype("string")
+    return df
+
+
+def _table_from_canonical_frame(df: pd.DataFrame) -> pa.Table:
+    """Build an Arrow table with explicit string fields to avoid null-typed shards."""
+    frame = _canonicalize_output_frame(df.copy())
+    fields = []
+    for col in frame.columns:
+        if pd.api.types.is_string_dtype(frame[col]):
+            fields.append(pa.field(col, pa.string()))
+        else:
+            fields.append(pa.field(col, pa.array(frame[col], from_pandas=True).type))
+    return pa.Table.from_pandas(frame, preserve_index=False, schema=pa.schema(fields))
+
+
 def resolve_combined_state_nodes(
     mega_ds: xr.Dataset,
     ref: xr.DataArray,
@@ -1055,8 +1081,16 @@ def run_combined_state_reduce(
 
 
 def finalize_interval_tile_outputs(tile_stage_dir: Path) -> pd.DataFrame:
-    table = ds.dataset(str(tile_stage_dir), format="parquet").to_table()
-    frame = table.to_pandas()
+    try:
+        table = ds.dataset(str(tile_stage_dir), format="parquet").to_table()
+        frame = table.to_pandas()
+    except pa.ArrowNotImplementedError as exc:
+        if "cast_null" not in str(exc):
+            raise
+        parquet_paths = sorted(tile_stage_dir.glob("*.parquet"))
+        if not parquet_paths:
+            return pd.DataFrame()
+        frame = pd.concat((pd.read_parquet(path) for path in parquet_paths), ignore_index=True)
     if frame.empty:
         return frame
     drop_cols = {
@@ -1323,7 +1357,7 @@ def run(args: argparse.Namespace) -> None:
                         reduce_label=f"reduce:combined_state:{interval}:{tile_id}",
                     )
                     df_tile["tile_id"] = tile_id
-                    ds.write_dataset(pa.Table.from_pandas(df_tile, preserve_index=False), base_dir=str(stage_dir / tile_id), filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
+                    ds.write_dataset(_table_from_canonical_frame(df_tile), base_dir=str(stage_dir / tile_id), filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
                     logger.info("Tile end: interval=%s tile_id=%s", interval, tile_id)
                 logger.info("Tile re-aggregation start: interval=%s tile_stage_dir=%s", interval, stage_dir)
                 df_e = finalize_interval_tile_outputs(stage_dir)
@@ -1334,7 +1368,7 @@ def run(args: argparse.Namespace) -> None:
             if local_e.exists():
                 shutil.rmtree(local_e, ignore_errors=True)
             local_e.mkdir(parents=True, exist_ok=True)
-            ds.write_dataset(pa.Table.from_pandas(df_e, preserve_index=False), base_dir=str(local_e),
+            ds.write_dataset(_table_from_canonical_frame(df_e), base_dir=str(local_e),
                              filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
             write_local_manifest(local_e, manifest_e)
             uploaded_count = _upload_dir(fs_s3, local_e, dest_e)
