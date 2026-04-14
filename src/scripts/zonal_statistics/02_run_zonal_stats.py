@@ -94,7 +94,7 @@ STATE_DATASETS: Dict[str, Dict[str, Any]] = {
 }
 
 FLUX_DATASETS: Dict[str, Dict[str, Any]] = {
-    "drained_total": {"source_var": "drained_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #standard drained output
+    "drained_total": {"source_var": "drained_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"} #standard drained output
     "drained_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #subset for FAO/NGHGI
     "drained_n2o": {"source_var": "drained_n2o_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #subset for FAO/NGHGI
     "drained_total_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #for LULUCF
