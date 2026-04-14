@@ -19,9 +19,9 @@ Usage examples:
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
 
   python -m src.scripts.zonal_statistics.pub_scripts.pub_assets \
-    --model_version 0_1_1 \
-    --run_name zarr_test \
-    --run_date 20260330 \
+    --model_version 0_1_2 \
+    --run_name zarr_test_full \
+    --run_date 20260403 \
     --years 2024 \
     --topn 10
 """

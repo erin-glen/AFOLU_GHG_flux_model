@@ -444,7 +444,6 @@ if __name__ == "__main__":
     )
 
 """
-python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118
-python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118 --interval_end_years 2010 2015 2020
+python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name zarr_test --output_date 20260403 --interval_end_years 2024
 python -m src.scripts.core_model.02_aggregate_soils_outputs -cn drainage_cluster --run_name ogh_sensitivity_500m_10 --output_date 20251118 --include_legacy_state_rasters
 """
