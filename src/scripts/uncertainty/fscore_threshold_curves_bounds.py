@@ -81,6 +81,36 @@ import pandas as pd
 DEFAULT_OPERATIONAL_THRESHOLD = 0.23
 
 
+def normalize_area_unit(unit: str) -> str:
+    """Normalize area unit aliases used by CLI arguments."""
+    value = str(unit).strip().lower()
+    aliases = {
+        "ha": "ha",
+        "hectare": "ha",
+        "hectares": "ha",
+        "mha": "mha",
+        "million ha": "mha",
+        "million_hectares": "mha",
+        "million hectares": "mha",
+    }
+    if value not in aliases:
+        raise ValueError(f"Unsupported area unit '{unit}'. Use one of: ha, Mha.")
+    return aliases[value]
+
+
+def convert_area_values(values: pd.Series, source_unit: str, target_unit: str) -> pd.Series:
+    """Convert area values between supported units."""
+    src = normalize_area_unit(source_unit)
+    tgt = normalize_area_unit(target_unit)
+    if src == tgt:
+        return values.astype(float)
+    if src == "ha" and tgt == "mha":
+        return values.astype(float) / 1_000_000.0
+    if src == "mha" and tgt == "ha":
+        return values.astype(float) * 1_000_000.0
+    raise ValueError(f"Unsupported area-unit conversion: {source_unit} -> {target_unit}")
+
+
 METRIC_COLUMNS_ORDER = [
     "precision",
     "recall",
@@ -470,6 +500,8 @@ def read_area_curve_table(
     area_curve_path: Path,
     threshold_column: str,
     area_column: str,
+    area_curve_unit: str,
+    mapped_area_unit: str,
 ) -> pd.DataFrame:
     """Read and validate a threshold-vs-area table."""
     if not area_curve_path.exists():
@@ -506,6 +538,21 @@ def read_area_curve_table(
     area_df = area_df.rename(columns={threshold_column: "threshold", resolved_area_column: "area"})
     area_df["threshold"] = area_df["threshold"].astype(float)
     area_df["area"] = area_df["area"].astype(float)
+
+    resolved_curve_unit = area_curve_unit
+    if resolved_area_column.lower() == "area_ha" and area_curve_unit.lower() == "auto":
+        resolved_curve_unit = "ha"
+    elif resolved_area_column.lower() == "area_mha" and area_curve_unit.lower() == "auto":
+        resolved_curve_unit = "Mha"
+    elif area_curve_unit.lower() == "auto":
+        resolved_curve_unit = mapped_area_unit
+
+    area_df["area"] = convert_area_values(
+        area_df["area"],
+        source_unit=resolved_curve_unit,
+        target_unit=mapped_area_unit,
+    )
+
     area_df = area_df.sort_values("threshold").drop_duplicates(subset="threshold", keep="last").reset_index(drop=True)
     return area_df
 
@@ -840,6 +887,15 @@ def parse_args() -> argparse.Namespace:
             "If missing, the script falls back to area_mha then area_ha when available."
         ),
     )
+    parser.add_argument(
+        "--area-curve-area-unit",
+        default="auto",
+        help=(
+            "Unit for --area-curve-area-column. Use 'ha', 'Mha', or 'auto'. "
+            "With auto, area_ha and area_mha columns are inferred by name; otherwise "
+            "the script assumes the same unit as --mapped-area-unit."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -944,6 +1000,8 @@ def main() -> None:
             area_curve_path=args.area_curve_table.resolve(),
             threshold_column=args.area_curve_threshold_column,
             area_column=args.area_curve_area_column,
+            area_curve_unit=args.area_curve_area_unit,
+            mapped_area_unit=args.mapped_area_unit,
         )
         matches_df = match_area_bounds_to_thresholds(area_df=area_df, bounds_summary=bounds_summary)
         matches_path = output_dir / "area_bound_threshold_matches.csv"
