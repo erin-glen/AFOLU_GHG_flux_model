@@ -94,14 +94,14 @@ STATE_DATASETS: Dict[str, Dict[str, Any]] = {
 }
 
 FLUX_DATASETS: Dict[str, Dict[str, Any]] = {
-    "drained_total": {"source_var": "drained_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"},
-    "drained_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"},
-    "drained_n2o": {"source_var": "drained_n2o_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"},
-    "drained_total_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"},
-    "drained_total_ch4": {"source_var": ["drained_ch4_land_Mg_CO2e_ha_yr", "drained_ch4_ditch_Mg_CO2e_ha_yr"], "kind": "flux_per_ha_yr_sum"},
-    "burned_total": {"source_var": "burned_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"},
-    "burned_total_co2": {"source_var": "burned_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"},
-    "burned_total_ch4": {"source_var": "burned_ch4_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"},
+    "drained_total": {"source_var": "drained_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #standard drained output
+    "drained_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #subset for FAO/NGHGI
+    "drained_n2o": {"source_var": "drained_n2o_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #subset for FAO/NGHGI
+    "drained_total_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #for LULUCF
+    "drained_total_ch4": {"source_var": ["drained_ch4_land_Mg_CO2e_ha_yr", "drained_ch4_ditch_Mg_CO2e_ha_yr"], "kind": "flux_per_ha_yr_sum"}, #for LULUCF
+    "burned_total": {"source_var": "burned_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #standard burned output
+    "burned_total_co2": {"source_var": "burned_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #for LULUCF
+    "burned_total_ch4": {"source_var": "burned_ch4_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #for LULUCF
 }
 
 FLUX_SPECS = {
