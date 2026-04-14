@@ -1087,7 +1087,7 @@ def finalize_interval_tile_outputs(tile_stage_dir: Path) -> pd.DataFrame:
     except pa.ArrowNotImplementedError as exc:
         if "cast_null" not in str(exc):
             raise
-        parquet_paths = sorted(tile_stage_dir.glob("*.parquet"))
+        parquet_paths = sorted(tile_stage_dir.rglob("*.parquet"))
         if not parquet_paths:
             return pd.DataFrame()
         frame = pd.concat((pd.read_parquet(path) for path in parquet_paths), ignore_index=True)
