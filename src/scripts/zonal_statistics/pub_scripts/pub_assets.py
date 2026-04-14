@@ -890,7 +890,7 @@ def main(argv=None):
             nghgi_subset["interval_end"].astype("Int64").astype(str)
         )
         cols = [c for c in (inv_col, "interval_end", "gadm_adm0", "country", "iso3", "land_use",
-                            "drained_area_ha", "drained_on_site_co2_Mg_CO2_yr")
+                            "drained_area_ha", "undrained_area_ha", "drained_on_site_co2_Mg_CO2_yr")
                 if c in nghgi_subset.columns]
         _write_csv_df(
             con,
