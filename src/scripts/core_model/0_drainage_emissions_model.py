@@ -599,7 +599,7 @@ def calculate_and_upload_drainage(
     closing_year,
     peat_dataset="ogh",
     run_name="ogh_standard_model",
-    peat_threshold: Optional[float] = None,
+    peat_threshold: Optional[float | dict[int, float]] = None,
     count_burned_years: bool = True,
     emission_factor_variant: str = "default",
     mega_zarr_path: Optional[str] = None,
@@ -626,10 +626,12 @@ def calculate_and_upload_drainage(
         Peat mask dataset name.
     run_name : str, optional
         Model run identifier used to label output paths.
-    peat_threshold : float or None, optional
+    peat_threshold : float, dict[int, float], or None, optional
         Threshold applied to the peat probability layer when using the OGH
-        dataset. Values strictly greater than the threshold are treated as
-        peat. ``None`` disables thresholding and uses the raw probabilities.
+        dataset. A scalar applies a single global threshold. A dict maps
+        ecozone codes to per-biome thresholds (e.g., ``{1: 0.15, 2: 0.30,
+        3: 0.20, 0: 0.23}``). Values strictly greater than the threshold
+        are treated as peat. ``None`` disables thresholding.
     count_burned_years : bool, optional
         If ``True``, count the number of burned years within the interval and
         multiply burned emissions accordingly.
@@ -720,10 +722,28 @@ def calculate_and_upload_drainage(
         layers, uint8, int16, [], float32, bstr, tid, is_final, logger
     )
 
+    # Remap FAO ecozone values to simplified climate domain codes.
+    # Done before peat thresholding so per-biome thresholds can use
+    # the remapped ecozone codes.
+    if "climate_domain" in layers:
+        cd = layers["climate_domain"].astype(np.int16, copy=False)
+        remapped = np.zeros_like(cd, dtype=np.int16)
+        for src_val, dst_val in cn.climate_domain_remap.items():
+            remapped[cd == src_val] = np.int16(dst_val)
+        layers["climate_domain"] = remapped
+
     if peat_dataset in {"ogh", "ogh_unthresholded"} and peat_threshold is not None:
         peat_layer = layers.get("peat")
         if peat_layer is not None:
-            layers["peat"] = (peat_layer > peat_threshold).astype(np.uint8)
+            if isinstance(peat_threshold, dict):
+                cd = layers["climate_domain"]
+                binary_peat = np.zeros_like(peat_layer, dtype=np.uint8)
+                for ecozone_code, thresh in peat_threshold.items():
+                    mask = cd == ecozone_code
+                    binary_peat[mask] = (peat_layer[mask] > thresh).astype(np.uint8)
+                layers["peat"] = binary_peat
+            else:
+                layers["peat"] = (peat_layer > peat_threshold).astype(np.uint8)
 
     # stats for inputs
     for k, arr in layers.items():
@@ -732,14 +752,6 @@ def calculate_and_upload_drainage(
         )
 
     combine_burned_area(layers, iv_start, iv_end, count_burned_years)
-
-    # Remap FAO ecozone values to simplified climate domain codes
-    if "climate_domain" in layers:
-        cd = layers["climate_domain"].astype(np.int16, copy=False)
-        remapped = np.zeros_like(cd, dtype=np.int16)
-        for src_val, dst_val in cn.climate_domain_remap.items():
-            remapped[cd == src_val] = np.int16(dst_val)
-        layers["climate_domain"] = remapped
 
     # create typed dicts for numba
     td8, td16, td32, td32f = nu.create_typed_dicts(layers)
@@ -1046,6 +1058,70 @@ def parse_optional_float(value: Optional[str]) -> Optional[float]:
     return float(value)
 
 
+def parse_biome_thresholds(
+    raw: Optional[str],
+    fallback: Optional[float] = None,
+) -> Optional[dict[int, float]]:
+    """Parse per-biome thresholds from a JSON string or CSV file path.
+
+    Returns a dict mapping ecozone codes (int) to threshold values (float),
+    or ``None`` if *raw* is ``None``.
+    """
+    import json
+
+    if raw is None:
+        return None
+
+    raw = raw.strip()
+
+    if raw.startswith("{"):
+        name_map = json.loads(raw)
+    elif raw.endswith(".csv"):
+        import pandas as pd
+        df = pd.read_csv(raw)
+        threshold_col = "best_f1_threshold"
+        if threshold_col not in df.columns:
+            raise KeyError(
+                f"CSV must contain a '{threshold_col}' column. "
+                f"Found: {df.columns.tolist()}"
+            )
+        name_map = dict(zip(df["biome"], df[threshold_col]))
+    elif raw.endswith(".json"):
+        with open(raw) as fh:
+            name_map = json.load(fh)
+    else:
+        raise ValueError(
+            f"Cannot parse --peat_threshold_by_biome: expected JSON string, "
+            f".csv, or .json file. Got: {raw!r}"
+        )
+
+    code_map: dict[int, float] = {}
+    for name, thresh in name_map.items():
+        name_lower = str(name).strip().lower()
+        if name_lower in cn.ecozone_codes:
+            code_map[cn.ecozone_codes[name_lower]] = float(thresh)
+        else:
+            try:
+                code_map[int(name)] = float(thresh)
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"Unknown biome name '{name}'. Expected one of: "
+                    f"{list(cn.ecozone_codes.keys())}"
+                )
+
+    # The fscore script and CLI examples express thresholds on a 0–1 scale,
+    # but the OGH raster stores probabilities as uint8 0–100.  Rescale so
+    # the comparison `peat_layer > thresh` works on the native raster values.
+    if code_map and all(v <= 1.0 for v in code_map.values()):
+        code_map = {k: v * 100.0 for k, v in code_map.items()}
+
+    unknown_code = cn.ecozone_codes["unknown"]
+    if unknown_code not in code_map and fallback is not None:
+        code_map[unknown_code] = fallback
+
+    return code_map
+
+
 def run_drainage_model(
     cluster_name=None,
     bounding_box=None,
@@ -1063,7 +1139,7 @@ def run_drainage_model(
     tile_ids=None,
     peat_dataset="ogh",
     run_name="ogh_standard_model",
-    peat_threshold: Optional[float] = DEFAULT_OGH_THRESHOLD,
+    peat_threshold: Optional[float | dict[int, float]] = DEFAULT_OGH_THRESHOLD,
     count_burned_years: bool = True,
     emission_factor_variant: str = "default",
     mega_zarr_path: Optional[str] = None,
@@ -1130,7 +1206,15 @@ def run_drainage_model(
             cn.tile_id_list_source,
         )
 
-    threshold_msg = "none" if peat_threshold is None else f"> {peat_threshold}"
+    if peat_threshold is None:
+        threshold_msg = "none"
+    elif isinstance(peat_threshold, dict):
+        inv = {v: k for k, v in cn.ecozone_codes.items()}
+        threshold_msg = "per-biome: " + "; ".join(
+            f"{inv.get(k, k)}: > {v}" for k, v in sorted(peat_threshold.items())
+        )
+    else:
+        threshold_msg = f"> {peat_threshold}"
     main_logger.info(
         "Peat dataset set to %s with threshold %s",
         peat_dataset,
@@ -1409,7 +1493,21 @@ def main(argv=None):
         help=(
             "Threshold applied to OGH peat probabilities; values strictly "
             "greater than the threshold are treated as peat. Pass 'none' "
-            "to disable thresholding."
+            "to disable thresholding. When --peat_threshold_by_biome is "
+            "also set, this value is used as the fallback for unknown ecozones."
+        ),
+    )
+    p.add_argument(
+        "--peat_threshold_by_biome",
+        type=str,
+        default=None,
+        help=(
+            "Per-biome peat probability thresholds. Accepts either an inline "
+            "JSON string (e.g., '{\"tropical\": 0.15, \"boreal\": 0.30, "
+            "\"temperate\": 0.20}') or a path to a CSV file with 'biome' and "
+            "'best_f1_threshold' columns (as produced by the fscore script's "
+            "--biome-column mode). When set, --peat_threshold is used as the "
+            "fallback for unknown ecozones."
         ),
     )
     p.add_argument(
@@ -1455,6 +1553,11 @@ def main(argv=None):
         for item in args.tile_ids:
             tile_ids.extend(t.strip() for t in item.split(",") if t.strip())
 
+    biome_thresholds = parse_biome_thresholds(
+        args.peat_threshold_by_biome, fallback=args.peat_threshold
+    )
+    effective_threshold = biome_thresholds if biome_thresholds is not None else args.peat_threshold
+
     run_drainage_model(
         cluster_name=args.cluster_name,
         bounding_box=args.bounding_box,
@@ -1472,7 +1575,7 @@ def main(argv=None):
         tile_ids=tile_ids,
         peat_dataset=args.peat_dataset,
         run_name=args.run_name,
-        peat_threshold=args.peat_threshold,
+        peat_threshold=effective_threshold,
         count_burned_years=args.count_burned_years,
         emission_factor_variant=args.emission_factor_variant,
         create_zarr=args.create_zarr,
@@ -1673,4 +1776,15 @@ python src/scripts/uncertainty/plot_drainage_sensitivity_dummy.py \
   --base-emissions 120.5 \
   --unit "MtCO2e/yr"
 
+  python -m src.scripts.core_model.0_drainage_emissions_model \
+    --cluster_name drainage_cluster \
+    --full_model \
+    --chunk_size 1 \
+    --start_year 2021 \
+    --end_year 2024 \
+    --interval_type five_year \
+    --peat_dataset ogh \
+    --peat_threshold 0.219 \
+    --peat_threshold_by_biome "/mnt/c/tmp/uncertainty/threshold_curves_v3_biome/biome_thresholds_summary.csv" \
+    --run_name ogh_biome_thresholds
 """

@@ -5,10 +5,12 @@ Input expected columns:
 - adm0_id
 - probability_class (1..100)
 - area_ha
+- biome_id (optional, when --per-biome is used)
 
 Output columns:
 - threshold
 - area_ha
+- biome (only when --per-biome is used, in the combined CSV)
 
 By default this sums all adm0 to global, then computes
 area_ha(threshold=t) = sum_{p>=t} area_ha(p).
@@ -18,10 +20,15 @@ the default 02b output location:
   s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/uncertainty/
   area_probability/<probability_date>/by_adm0_probability_class/
 
-Example:
+Examples:
 python -m src.scripts.uncertainty.build_probability_area_curve \
   --probability-date 20251105 \
   --output ./area_vs_threshold_20251105.csv
+
+python -m src.scripts.uncertainty.build_probability_area_curve \
+  --probability-date 20251105 \
+  --per-biome \
+  --output ./area_vs_threshold_20251105_biome.csv
 """
 
 from __future__ import annotations
@@ -32,6 +39,10 @@ from pathlib import Path
 
 import fsspec
 import pandas as pd
+
+from src.scripts.utilities import constants_and_names as cn
+
+BIOME_ID_TO_NAME = {v: k for k, v in cn.ecozone_codes.items() if v > 0}
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 UNCERTAINTY_ROOT = posixpath.join(ROOT, "uncertainty")
@@ -74,6 +85,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--probability-column", default="probability_class")
     parser.add_argument("--area-column", default="area_ha")
     parser.add_argument("--adm0-column", default="adm0_id")
+    parser.add_argument("--per-biome", action="store_true", default=False,
+                        help="Produce separate threshold-vs-area CSVs per biome.")
+    parser.add_argument("--biome-column", default="biome_id",
+                        help="Column containing biome IDs. Default: biome_id")
     return parser.parse_args()
 
 
@@ -82,10 +97,11 @@ def resolve_input_path(args: argparse.Namespace) -> str:
         return args.input
 
     probability_date = str(args.probability_date)
+    subdir = "by_adm0_probability_class_biome" if args.per_biome else "by_adm0_probability_class"
     return posixpath.join(
         args.area_probability_root.rstrip("/"),
         probability_date,
-        "by_adm0_probability_class",
+        subdir,
     )
 
 
@@ -128,32 +144,10 @@ def read_table(path_str: str) -> pd.DataFrame:
     raise ValueError(f"Unsupported input extension '{suffix}'. Use CSV or Parquet.")
 
 
-def main() -> None:
-    args = parse_args()
-    input_path = resolve_input_path(args)
-    output_path = resolve_output_path(args)
-    df = read_table(input_path)
+def _compute_threshold_curve(work: pd.DataFrame, prob_col: str, area_col: str) -> pd.DataFrame:
+    grouped = work.groupby(prob_col, as_index=False)[area_col].sum()
+    grouped = grouped.rename(columns={prob_col: "probability_class", area_col: "area_ha"})
 
-    required = [args.adm0_column, args.probability_column, args.area_column]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise KeyError(f"Missing required columns: {missing}. Available: {df.columns.tolist()}")
-
-    work = df[[args.adm0_column, args.probability_column, args.area_column]].copy()
-    work = work.dropna()
-    work[args.probability_column] = work[args.probability_column].astype(int)
-    work[args.area_column] = work[args.area_column].astype(float)
-
-    if args.adm0_id is not None:
-        work = work.loc[work[args.adm0_column] == int(args.adm0_id)].copy()
-
-    # Keep probability classes 1..100, matching zonal output conventions.
-    work = work.loc[(work[args.probability_column] >= 1) & (work[args.probability_column] <= 100)]
-
-    grouped = work.groupby(args.probability_column, as_index=False)[args.area_column].sum()
-    grouped = grouped.rename(columns={args.probability_column: "probability_class", args.area_column: "area_ha"})
-
-    # Fill missing classes with zero to ensure deterministic thresholds.
     classes = pd.DataFrame({"probability_class": list(range(1, 101))})
     grouped = classes.merge(grouped, on="probability_class", how="left").fillna({"area_ha": 0.0})
     grouped = grouped.sort_values("probability_class", ascending=False).reset_index(drop=True)
@@ -162,12 +156,65 @@ def main() -> None:
     grouped["threshold"] = grouped["probability_class"].astype(float) / 100.0
     grouped["area_ha"] = grouped["area_ha"].cumsum()
 
-    out = grouped[["threshold", "area_ha"]].sort_values("threshold").reset_index(drop=True)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    out.to_csv(output_path, index=False)
+    return grouped[["threshold", "area_ha"]].sort_values("threshold").reset_index(drop=True)
+
+
+def main() -> None:
+    args = parse_args()
+    input_path = resolve_input_path(args)
+    output_path = resolve_output_path(args)
+    df = read_table(input_path)
+
+    required = [args.adm0_column, args.probability_column, args.area_column]
+    if args.per_biome:
+        required.append(args.biome_column)
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise KeyError(f"Missing required columns: {missing}. Available: {df.columns.tolist()}")
+
+    keep_cols = [args.adm0_column, args.probability_column, args.area_column]
+    if args.per_biome:
+        keep_cols.append(args.biome_column)
+    work = df[keep_cols].copy()
+    work = work.dropna()
+    work[args.probability_column] = work[args.probability_column].astype(int)
+    work[args.area_column] = work[args.area_column].astype(float)
+
+    if args.adm0_id is not None:
+        work = work.loc[work[args.adm0_column] == int(args.adm0_id)].copy()
+
+    work = work.loc[(work[args.probability_column] >= 1) & (work[args.probability_column] <= 100)]
 
     print(f"Read class-area table from: {input_path}")
-    print(f"Wrote curve with {len(out)} thresholds to {output_path}")
+
+    if args.per_biome:
+        out_dir = output_path.parent
+        out_stem = output_path.stem
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        combined_parts = []
+        for biome_id in sorted(work[args.biome_column].unique()):
+            biome_name = BIOME_ID_TO_NAME.get(int(biome_id), f"biome_{biome_id}")
+            biome_work = work.loc[work[args.biome_column] == biome_id]
+            curve = _compute_threshold_curve(biome_work, args.probability_column, args.area_column)
+
+            biome_path = out_dir / f"{out_stem}_{biome_name}.csv"
+            curve.to_csv(biome_path, index=False)
+            print(f"  {biome_name}: {len(curve)} thresholds -> {biome_path}")
+
+            curve_with_biome = curve.copy()
+            curve_with_biome["biome"] = biome_name
+            curve_with_biome["biome_id"] = int(biome_id)
+            combined_parts.append(curve_with_biome)
+
+        combined = pd.concat(combined_parts, ignore_index=True)
+        combined.to_csv(output_path, index=False)
+        print(f"Wrote combined per-biome curve ({len(combined)} rows) to {output_path}")
+    else:
+        out = _compute_threshold_curve(work, args.probability_column, args.area_column)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(output_path, index=False)
+        print(f"Wrote curve with {len(out)} thresholds to {output_path}")
 
 
 if __name__ == "__main__":

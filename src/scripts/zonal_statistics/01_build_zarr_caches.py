@@ -169,6 +169,11 @@ ORGANIC_PROBABILITY_GTIF_FOLDER_TEMPLATE = (
     "peat_mask/OGH/tiles_unthresholded/{date}/"
 )
 
+CLIMATE_DOMAIN_DATASET = "climate_domain"
+CLIMATE_DOMAIN_DATE = "20190418"
+CLIMATE_DOMAIN_VAR_NAME = "climate_domain"
+CLIMATE_DOMAIN_FILENAME_TEMPLATE = "global_climate_domain_{date}.zarr"
+
 ADM0_DATASET = "GADM4_1_adm0_global"
 ADM0_DATE = "20250925"  # keep in sync with Step 2
 ADM0_FILENAME_TEMPLATE = "global_GADM41_adm0_{date}.zarr"
@@ -196,6 +201,14 @@ def organic_probability_zarr_path(date: str = ORGANIC_PROBABILITY_DATE) -> str:
 
 def organic_probability_gtif_folder(date: str = ORGANIC_PROBABILITY_DATE) -> str:
     return ORGANIC_PROBABILITY_GTIF_FOLDER_TEMPLATE.format(date=date)
+
+def climate_domain_zarr_path(date: str = CLIMATE_DOMAIN_DATE) -> str:
+    return posixpath.join(
+        CONTEXTUAL_ZARR_ROOT,
+        CLIMATE_DOMAIN_DATASET,
+        date,
+        CLIMATE_DOMAIN_FILENAME_TEMPLATE.format(date=date),
+    )
 
 # ------------------------------ helpers --------------------------------
 def _split_s3(path: str) -> tuple[str, str]:
@@ -486,6 +499,58 @@ def ensure_organic_probability_contextual_zarr(
     logger.info("flm: Built ogh_unthresholded_probability contextual Zarr ✅ %s", zarr_path)
     return zarr_path
 
+
+def ensure_climate_domain_contextual_zarr(
+    *,
+    ref: xr.DataArray,
+    tol: float,
+    chunk_size: int,
+    logger: logging.Logger,
+    date: str = CLIMATE_DOMAIN_DATE,
+) -> str:
+    zarr_path = climate_domain_zarr_path(date)
+    if zarr_exists(zarr_path):
+        try:
+            validate_zarr(zarr_path, ref, logger=logger)
+            logger.info("flm: Using existing climate_domain contextual Zarr: %s", zarr_path)
+            return zarr_path
+        except Exception as exc:
+            logger.warning("flm: climate_domain Zarr validation failed (%s); rebuilding.", exc)
+            try:
+                remove_store_recursively(zarr_path)
+            except Exception:
+                pass
+
+    logger.info("flm: Building climate_domain contextual Zarr from GeoTIFF tiles.")
+    source_folder = cn.dirs["climate_domain"]
+    tiffs = list_folder_uris(source_folder)
+    if not tiffs:
+        raise FileNotFoundError(
+            f"No GeoTIFFs found under {source_folder} to build climate_domain"
+        )
+
+    da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
+    da_aligned = align_like_nearest_tol(da_in, ref, tol)
+    da_cast = da_aligned.fillna(0).astype("int16").chunk(
+        {d: chunk_size for d in ("x", "y") if d in da_aligned.dims}
+    )
+    ds_out = xr.Dataset({CLIMATE_DOMAIN_VAR_NAME: da_cast})
+
+    try:
+        remove_store_recursively(zarr_path)
+    except Exception:
+        pass
+
+    with dask.annotate(label="to_zarr:climate_domain"):
+        ds_out.to_zarr(zarr_path, mode="w")
+    if Version(zarr.__version__).major < 3:
+        ensure_consolidated_v2(zarr_path)
+
+    validate_zarr(zarr_path, ref, logger=logger)
+    logger.info("flm: Built climate_domain contextual Zarr ✅ %s", zarr_path)
+    return zarr_path
+
+
 # ------------------------------ pipeline --------------------------------
 def build_paths(interval: str, *, tile_pixels: int, dataset_names: Optional[List[str]] = None, **kw) -> Dict[str, Dict[str, Any]]:
     zarr_base = ZARR_CACHE_PREFIX.format(interval=interval, **kw)
@@ -527,6 +592,7 @@ def run(args: argparse.Namespace) -> None:
     # 2) Ensure adm0 contextual grid exists and matches ref
     ensure_adm0_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
     ensure_organic_probability_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
+    ensure_climate_domain_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
 
     logger.info("flm: Model version: %s", args.model_version)
     if client:

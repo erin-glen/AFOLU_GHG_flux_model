@@ -58,11 +58,11 @@ python src/scripts/uncertainty/fscore_threshold_curves_bounds.py \
 python src/scripts/uncertainty/fscore_threshold_curves_bounds.py \
     --input "/mnt/c/tmp/uncertainty/USDA_testpoints_probability.csv" \
     --output-dir "/mnt/c/tmp/uncertainty/" \
-    --report-thresholds 0.23 \
-    --mapped-area 120.5 \
+    --report-thresholds 0.10 \
+    --mapped-area  2098.02  \
     --mapped-area-unit Mha \
-    --bounds-threshold 0.23 \
-    --area-curve-table "/mnt/c/tmp/uncertainty/area_vs_threshold_dummy.csv"
+    --bounds-threshold 0.10 \
+    --area-curve-table "/mnt/c/tmp/uncertainty/area_vs_threshold_20251105.csv"
 """
 
 from __future__ import annotations
@@ -896,6 +896,25 @@ def parse_args() -> argparse.Namespace:
             "the script assumes the same unit as --mapped-area-unit."
         ),
     )
+    parser.add_argument(
+        "--biome-column",
+        default=None,
+        help=(
+            "Optional column in the input CSV containing biome labels (e.g., "
+            "'tropical', 'boreal', 'temperate'). When set, the script runs "
+            "per-biome threshold analysis in addition to the global analysis "
+            "and writes a biome_thresholds_summary.csv."
+        ),
+    )
+    parser.add_argument(
+        "--min-biome-samples",
+        type=int,
+        default=30,
+        help=(
+            "Minimum number of positive samples required per biome for "
+            "per-biome analysis. Biomes below this are flagged. Default: 30"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1015,6 +1034,24 @@ def main() -> None:
             output_path=area_plot_path,
         )
 
+    # Per-biome analysis (when --biome-column is provided)
+    if args.biome_column is not None:
+        if args.biome_column not in df.columns:
+            raise KeyError(
+                f"Biome column '{args.biome_column}' not found in input file. "
+                f"Available columns: {df.columns.tolist()}"
+            )
+        run_biome_analysis(
+            df=df,
+            biome_column=args.biome_column,
+            label_column=args.label_column,
+            score_column=args.score_column,
+            output_dir=output_dir,
+            report_thresholds=report_thresholds,
+            bounds_threshold=args.bounds_threshold,
+            min_positive_samples=args.min_biome_samples,
+        )
+
     print("Finished.")
     print(f"Input file: {input_path}")
     print(f"Rows read: {n_before}")
@@ -1098,6 +1135,125 @@ def main() -> None:
             ],
             record_label_column="target_name",
         )
+
+
+def run_biome_analysis(
+    df: pd.DataFrame,
+    biome_column: str,
+    label_column: str,
+    score_column: str,
+    output_dir: Path,
+    report_thresholds: list[float],
+    bounds_threshold: float | None,
+    min_positive_samples: int = 30,
+) -> None:
+    """Run per-biome threshold analysis and write a summary CSV."""
+    biome_values = sorted(df[biome_column].dropna().unique())
+    print(f"\n{'='*60}")
+    print(f"Per-biome analysis: {len(biome_values)} biome(s) found: {biome_values}")
+    print(f"{'='*60}")
+
+    summary_rows: list[dict] = []
+
+    for biome_name in biome_values:
+        biome_df = df[df[biome_column] == biome_name]
+        subset = biome_df[[label_column, score_column]].dropna()
+        y_true = subset[label_column].astype(int).to_numpy()
+        scores = subset[score_column].astype(float).to_numpy()
+
+        n_pos = int(np.sum(y_true == 1))
+        n_neg = int(np.sum(y_true == 0))
+        low_sample = n_pos < min_positive_samples
+
+        if low_sample:
+            print(f"\n  WARNING: biome '{biome_name}' has only {n_pos} positive "
+                  f"samples (< {min_positive_samples}). Results may be unreliable.")
+
+        if n_pos == 0 or n_neg == 0:
+            print(f"\n  SKIPPED biome '{biome_name}': {n_pos} positive, {n_neg} negative samples.")
+            summary_rows.append({
+                "biome": biome_name,
+                "n_points": len(subset),
+                "n_positive": n_pos,
+                "n_negative": n_neg,
+                "best_f1_threshold": np.nan,
+                "best_f2_threshold": np.nan,
+                "f1_at_best": np.nan,
+                "f2_at_best": np.nan,
+                "precision_at_best_f1": np.nan,
+                "recall_at_best_f1": np.nan,
+                "low_sample_warning": True,
+            })
+            continue
+
+        biome_dir = output_dir / str(biome_name)
+        biome_dir.mkdir(parents=True, exist_ok=True)
+
+        metrics = compute_threshold_metrics(y_true=y_true, scores=scores)
+        for count_col in ["tp", "fp", "fn", "tn"]:
+            metrics[count_col] = metrics[count_col].astype(int)
+        metrics = metrics[["threshold", "tp", "fp", "fn", "tn", *METRIC_COLUMNS_ORDER]]
+        metrics.to_csv(biome_dir / "threshold_metrics.csv", index=False)
+
+        reported_rows = [evaluate_single_threshold(y_true, scores, t) for t in report_thresholds]
+        reported = pd.DataFrame(reported_rows)
+        for count_col in ["tp", "fp", "fn", "tn"]:
+            reported[count_col] = reported[count_col].astype(int)
+        reported = reported[["threshold", "tp", "fp", "fn", "tn", *METRIC_COLUMNS_ORDER]]
+        reported = reported.sort_values("threshold", ascending=False)
+        reported.to_csv(biome_dir / "selected_thresholds.csv", index=False)
+
+        best_f1 = metrics.loc[metrics["f1"].idxmax()]
+        best_f2 = metrics.loc[metrics["f2"].idxmax()]
+        operational = resolve_bounds_threshold(bounds_threshold, report_thresholds)
+
+        plot_metric_curves(
+            metrics=metrics,
+            output_path=biome_dir / "f1_f2_vs_threshold.png",
+            report_thresholds=report_thresholds,
+            operational_threshold=operational,
+            best_f1_threshold=float(best_f1["threshold"]),
+            best_f2_threshold=float(best_f2["threshold"]),
+            metric_columns=["f1", "f2"],
+            metric_labels=["F1", "F2"],
+            title=f"Threshold-response curves — {biome_name}",
+        )
+
+        plot_metric_curves(
+            metrics=metrics,
+            output_path=biome_dir / "precision_recall_vs_threshold.png",
+            report_thresholds=report_thresholds,
+            operational_threshold=operational,
+            best_f1_threshold=float(best_f1["threshold"]),
+            best_f2_threshold=float(best_f2["threshold"]),
+            metric_columns=["precision", "recall"],
+            metric_labels=["Precision (UA)", "Recall (PA)"],
+            title=f"Precision and recall — {biome_name}",
+        )
+
+        summary_rows.append({
+            "biome": biome_name,
+            "n_points": len(subset),
+            "n_positive": n_pos,
+            "n_negative": n_neg,
+            "best_f1_threshold": float(best_f1["threshold"]),
+            "best_f2_threshold": float(best_f2["threshold"]),
+            "f1_at_best": float(best_f1["f1"]),
+            "f2_at_best": float(best_f2["f2"]),
+            "precision_at_best_f1": float(best_f1["precision"]),
+            "recall_at_best_f1": float(best_f1["recall"]),
+            "low_sample_warning": low_sample,
+        })
+
+        print(f"\n  Biome '{biome_name}': {n_pos} pos / {n_neg} neg — "
+              f"best F1 threshold = {best_f1['threshold']:.4f} (F1={best_f1['f1']:.4f}), "
+              f"best F2 threshold = {best_f2['threshold']:.4f} (F2={best_f2['f2']:.4f})")
+        print(f"    Wrote: {biome_dir}")
+
+    summary = pd.DataFrame(summary_rows)
+    summary_path = output_dir / "biome_thresholds_summary.csv"
+    summary.to_csv(summary_path, index=False)
+    print(f"\nWrote: {summary_path}")
 
 
 if __name__ == "__main__":

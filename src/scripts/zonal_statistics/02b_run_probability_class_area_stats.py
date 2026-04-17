@@ -11,10 +11,15 @@ layers only:
 The resulting class-area table can be post-processed into a threshold curve
 (area where probability >= threshold) without rerunning the raster reduction.
 
-Example:
+Examples:
 python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
   --contextual_date 20250925 \
   --probability_date 20251105
+
+python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
+  --contextual_date 20250925 \
+  --probability_date 20251105 \
+  --include_biome
 """
 
 from __future__ import annotations
@@ -61,7 +66,13 @@ ORGANIC_PROBABILITY_DATASET = "ogh_unthresholded_probability"
 ORGANIC_PROBABILITY_FILENAME_TEMPLATE = "global_ogh_unthresholded_probability_{date}.zarr"
 ORGANIC_PROBABILITY_VAR_NAME = "organic_probability"
 
+CLIMATE_DOMAIN_DATASET = "climate_domain"
+CLIMATE_DOMAIN_FILENAME_TEMPLATE = "global_climate_domain_{date}.zarr"
+CLIMATE_DOMAIN_VAR_NAME = "climate_domain"
+
 AREA_SCALE = np.float32(cn.m2_to_ha)
+
+ECOZONE_CODE_TO_NAME = {v: k for k, v in cn.ecozone_codes.items() if v > 0}
 
 
 def adm0_zarr_path(date: str) -> str:
@@ -83,6 +94,15 @@ def organic_probability_zarr_path(date: str) -> str:
         ORGANIC_PROBABILITY_DATASET,
         date,
         ORGANIC_PROBABILITY_FILENAME_TEMPLATE.format(date=date),
+    )
+
+
+def climate_domain_zarr_path(date: str) -> str:
+    return posixpath.join(
+        CONTEXTUAL_ZARR_ROOT,
+        CLIMATE_DOMAIN_DATASET,
+        date,
+        CLIMATE_DOMAIN_FILENAME_TEMPLATE.format(date=date),
     )
 
 
@@ -175,7 +195,7 @@ def build_exact_tile_mask(ref: xr.DataArray, tiles: List[str]) -> xr.DataArray:
     return mask
 
 
-def _df_from_result(res: xr.DataArray) -> pd.DataFrame:
+def _df_from_result(res: xr.DataArray, include_biome: bool = False) -> pd.DataFrame:
     arr = res.data
     if hasattr(arr, "todense"):
         arr = np.asarray(arr.todense())
@@ -183,29 +203,40 @@ def _df_from_result(res: xr.DataArray) -> pd.DataFrame:
         arr = np.asarray(arr)
 
     idx = np.nonzero(arr)
+    cols = ["adm0_id", "probability_class"]
+    if include_biome:
+        cols.append("biome_id")
+    cols.append("area_ha")
+
     if len(idx[0]) == 0:
-        return pd.DataFrame(columns=["adm0_id", "probability_class", "area_ha"])
+        return pd.DataFrame(columns=cols)
 
     adm0_ids = res.coords[res.dims[0]].values[idx[0]].astype(np.uint32)
     p_classes = res.coords[res.dims[1]].values[idx[1]].astype(np.uint8)
     values_ha = arr[idx].astype(np.float64)
 
-    out = pd.DataFrame(
-        {
-            "adm0_id": adm0_ids,
-            "probability_class": p_classes,
-            "area_ha": values_ha,
-        }
-    )
-    return out.sort_values(["adm0_id", "probability_class"]).reset_index(drop=True)
+    data = {
+        "adm0_id": adm0_ids,
+        "probability_class": p_classes,
+    }
+    if include_biome:
+        biome_ids = res.coords[res.dims[2]].values[idx[2]].astype(np.int16)
+        data["biome_id"] = biome_ids
+    data["area_ha"] = values_ha
+
+    sort_cols = ["adm0_id", "probability_class"]
+    if include_biome:
+        sort_cols.append("biome_id")
+    return pd.DataFrame(data).sort_values(sort_cols).reset_index(drop=True)
 
 
-def output_prefix(probability_date: str) -> str:
+def output_prefix(probability_date: str, include_biome: bool = False) -> str:
+    subdir = "by_adm0_probability_class_biome" if include_biome else "by_adm0_probability_class"
     return posixpath.join(
         UNCERTAINTY_ROOT,
         "area_probability",
         probability_date,
-        "by_adm0_probability_class",
+        subdir,
     ).rstrip("/") + "/"
 
 
@@ -243,6 +274,8 @@ def run(args: argparse.Namespace) -> None:
         if args.debug:
             logger.setLevel(logging.DEBUG)
 
+        include_biome = bool(args.include_biome)
+
         adm0_path = adm0_zarr_path(args.contextual_date)
         pixel_area_path = pixel_area_zarr_path(args.contextual_date)
         prob_path = organic_probability_zarr_path(args.probability_date)
@@ -258,6 +291,14 @@ def run(args: argparse.Namespace) -> None:
         prob_aligned = align_auto(probability, ref, tol, args.force_align).astype("uint8")
 
         where_mask = (adm0_aligned > 0) & (prob_aligned > 0)
+
+        if include_biome:
+            cd_path = climate_domain_zarr_path(args.climate_domain_date)
+            logger.info("Opening climate_domain layer: %s", cd_path)
+            climate_domain = open_zarr_region(cd_path, bbox, args.chunk_size).astype("int16")
+            cd_aligned = align_auto(climate_domain, ref, tol, args.force_align).astype("int16")
+            where_mask = where_mask & (cd_aligned > 0)
+
         if tiles:
             exact_tile_mask = build_exact_tile_mask(ref, tiles)
             where_mask = where_mask & exact_tile_mask
@@ -267,20 +308,27 @@ def run(args: argparse.Namespace) -> None:
         expected_adm0 = np.array([i for i in zc.GADM_ADM0_IDS if i > 0], dtype=np.uint32)
         expected_prob_classes = np.arange(1, 101, dtype=np.uint8)
 
+        if include_biome:
+            expected_biomes = np.array([1, 2, 3], dtype=np.int16)
+            groupby_arrays = [adm0_aligned, prob_aligned, cd_aligned]
+            expected_groups = (expected_adm0, expected_prob_classes, expected_biomes)
+        else:
+            groupby_arrays = [adm0_aligned, prob_aligned]
+            expected_groups = (expected_adm0, expected_prob_classes)
+
         logger.info("Reduction start: %s", timestr())
         with dask.annotate(label="reduce:adm0_probability_class_area"):
             res = xarray_reduce(
                 area_ha,
-                adm0_aligned,
-                prob_aligned,
+                *groupby_arrays,
                 func="sum",
-                expected_groups=(expected_adm0, expected_prob_classes),
+                expected_groups=expected_groups,
                 where=where_mask,
                 **flox_sparse_reindex_kwargs(not args.no_sparse),
             ).compute()
         logger.info("Reduction end: %s", timestr())
 
-        df = _df_from_result(res)
+        df = _df_from_result(res, include_biome=include_biome)
 
         out_meta = {
             "contextual_date": args.contextual_date,
@@ -290,12 +338,17 @@ def run(args: argparse.Namespace) -> None:
             "area_units": "ha",
             "roi_bbox": bbox,
             "tile_ids": tiles,
+            "include_biome": include_biome,
             "row_count": int(len(df)),
         }
+        if include_biome:
+            out_meta["climate_domain_date"] = args.climate_domain_date
+            out_meta["biome_id_map"] = {int(v): k for k, v in cn.ecozone_codes.items() if v > 0}
 
+        local_subdir = "by_adm0_probability_class_biome" if include_biome else "by_adm0_probability_class"
         local_root = Path(args.local_output).expanduser().resolve()
         local_root.mkdir(parents=True, exist_ok=True)
-        local_dir = local_root / "by_adm0_probability_class"
+        local_dir = local_root / local_subdir
         if local_dir.exists():
             shutil.rmtree(local_dir, ignore_errors=True)
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -310,7 +363,7 @@ def run(args: argparse.Namespace) -> None:
         )
         (local_dir / "manifest.json").write_text(json.dumps(out_meta, indent=2) + "\n", encoding="utf-8")
 
-        remote_prefix = output_prefix(args.probability_date)
+        remote_prefix = output_prefix(args.probability_date, include_biome=include_biome)
         fs_s3 = s3fs.S3FileSystem(anon=False)
         remote_exists = fs_s3.exists(remote_prefix.rstrip("/"))
         if remote_exists and not args.overwrite_existing:
@@ -356,6 +409,11 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")
     mode.add_argument("--cluster_name", default="probability_area_stats")
+
+    parser.add_argument("--include_biome", action="store_true", default=False,
+                        help="Add climate_domain (biome) as a third grouping dimension.")
+    parser.add_argument("--climate_domain_date", default="20190418",
+                        help="Date tag for climate_domain contextual zarr. Default: 20190418")
 
     parser.add_argument("-bb", "--bounding_box", nargs=4, type=float, help="W S E N")
     parser.add_argument("--tile_ids", action="append", help="Comma-separated 10x10 tile IDs")
