@@ -979,6 +979,7 @@ def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
             THEN j.value ELSE 0
           END
         ) AS drained_on_site_co2_Mg_CO2_yr
+      FROM joined j
       GROUP BY 1,2,3
     )
     SELECT

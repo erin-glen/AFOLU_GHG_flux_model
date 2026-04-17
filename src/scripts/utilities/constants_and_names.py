@@ -15,7 +15,7 @@ from src.scripts.utilities.lulucf_constants_and_names import (
 # ---------------------------------------------------
 
 # ── version helpers ──────────────────────────────────────────────
-model_version = "0.1.3"              # dotted string
+model_version = "0.1.4"              # dotted string
 model_version_underscore = model_version.replace(".", "_")   # "0_3_0"
 
 s3_bucket_name = 'gfw2-data'

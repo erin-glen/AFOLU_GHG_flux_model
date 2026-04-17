@@ -8,7 +8,7 @@ Production-lean defaults:
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --interval_end_years 2024 \
   --cluster_name drainage_cluster \
-  --run_date 20260403 \
+  --run_date 20260417 \
   --model_version 0_1_3 \
   --run_name zarr_test \
   --chunk_size 10000
@@ -20,8 +20,8 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --model_version 0_1_2 \
   --run_name zarr_test_full \
   --chunk_size 10000 \
-  --datasets drained_total burned_total drained_co2 drained_n2o \
-  --tile_ids 00N_110E,10N_120E
+  --tile_ids 00N_110E,10N_120E \
+  --datasets drained_total burned_total drained_co2 drained_n2o
 
 # Explicit tiled execution (recommended for global/disjoint/large runs)
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
