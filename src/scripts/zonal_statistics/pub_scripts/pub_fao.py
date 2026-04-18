@@ -113,12 +113,7 @@ _save_png = pa._save_png
 _write_csv_df = pa._write_csv_df
 
 
-@dataclass(frozen=True)
-class RunSpec:
-    run_name: str
-    model_version: str
-    run_date: str
-    label: str
+RunSpec = pc.RunSpec
 
 
 @dataclass
@@ -151,15 +146,7 @@ def _interval_pair_for_latest(years: Sequence[int]) -> Tuple[int, int]:
 
 
 def _parse_run_specs(entries: Sequence[str]) -> list[RunSpec]:
-    return [
-        RunSpec(
-            run_name=run_name,
-            model_version=model_version,
-            run_date=run_date,
-            label=label,
-        )
-        for run_name, model_version, run_date, label in pc.parse_run_spec_entries(entries, spec_name="--run")
-    ]
+    return pc.parse_run_specs(entries, spec_name="--run")
 
 
 # ----------------------------- model (zonal stats) -----------------------------

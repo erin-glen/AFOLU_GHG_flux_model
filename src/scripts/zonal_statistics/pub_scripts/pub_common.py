@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 import hashlib
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Optional, Sequence, List, Dict, Mapping, Tuple
 
 import pandas as pd
@@ -122,6 +123,28 @@ def parse_run_spec_entries(
         model_version, run_date = parts
         parsed.append((run_name, model_version, run_date, label))
     return parsed
+
+
+@dataclass(frozen=True)
+class RunSpec:
+    """Parsed model-run specification."""
+    run_name: str
+    model_version: str
+    run_date: str
+    label: str
+
+
+def parse_run_specs(
+    entries: Sequence[str],
+    *,
+    spec_name: str = "--run",
+) -> List[RunSpec]:
+    """Parse ``--run`` CLI entries into :class:`RunSpec` objects."""
+    return [
+        RunSpec(run_name=rn, model_version=mv, run_date=rd, label=lbl)
+        for rn, mv, rd, lbl in parse_run_spec_entries(entries, spec_name=spec_name)
+    ]
+
 
 def set_climate_palette(name: str) -> dict:
     """

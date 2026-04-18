@@ -190,12 +190,7 @@ SENSITIVITY_CHUNK_RUNS = {
 }
 
 
-@dataclass(frozen=True)
-class RunSpec:
-    run_name: str
-    model_version: str
-    run_date: str
-    label: str
+RunSpec = pc.RunSpec
 
 
 @dataclass
@@ -363,15 +358,7 @@ def _partition_comparisons(
 
 
 def _parse_run_specs(entries: Sequence[str]) -> Mapping[str, RunSpec]:
-    specs: dict[str, RunSpec] = {}
-    for run_name, model_version, run_date, label in pc.parse_run_spec_entries(entries, spec_name="--run"):
-        specs[run_name] = RunSpec(
-            run_name=run_name,
-            model_version=model_version,
-            run_date=run_date,
-            label=label,
-        )
-    return specs
+    return {s.run_name: s for s in pc.parse_run_specs(entries, spec_name="--run")}
 
 
 def _parse_chunk_stat_paths(entries: Sequence[str] | None) -> Mapping[str, str]:
