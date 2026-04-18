@@ -114,7 +114,12 @@ os.makedirs(local_log_path, exist_ok=True)
 local_root = 'C:/GIS/Data/Global'
 local_temp_dir = '/tmp'
 
-today_date = datetime.today().strftime('%Y%m%d')
+today_date = datetime.utcnow().strftime('%Y%m%d')
+
+
+def get_today_date_utc() -> str:
+    """Return today's UTC date as YYYYMMDD, evaluated at call time."""
+    return datetime.utcnow().strftime('%Y%m%d')
 
 # ---------------------------------------------------
 # 2. Tile and Chunk Patterns
@@ -425,11 +430,11 @@ land_cover_pattern = "land_cover"
 
 # --- Display / cartography constants (for global JPEGs) ---
 
-# Country boundaries (simple) – adjust paths if yours differ
-# The cartography pipeline now expects the simplified administrative boundaries to
-# live under the shared `tmp/viz/world_boundaries` directory.
-original_shapefile_path   = "/mnt/c/tmp/viz/world_boundaries/admin0_simp_dis.shp"
-reprojected_shapefile_path = "/mnt/c/tmp/viz/world_boundaries/admin0_simp_dis.shp"
+_SHAPEFILE_DIR = os.environ.get(
+    "AFOLU_WORLD_BOUNDARIES_DIR", "/mnt/c/tmp/viz/world_boundaries"
+)
+original_shapefile_path = posixpath.join(_SHAPEFILE_DIR, "admin0_simp_dis.shp")
+reprojected_shapefile_path = posixpath.join(_SHAPEFILE_DIR, "admin0_simp_dis.shp")
 
 # Map projection
 Robinson_crs = "ESRI:54030"

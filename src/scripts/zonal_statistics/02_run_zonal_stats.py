@@ -9,8 +9,8 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --interval_end_years 2024 \
   --cluster_name drainage_cluster \
   --run_date 20260417 \
-  --model_version 0_1_3 \
-  --run_name zarr_test \
+  --model_version 0_1_4 \
+  --run_name ogh_biome_thresholds \
   --chunk_size 10000
 
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
