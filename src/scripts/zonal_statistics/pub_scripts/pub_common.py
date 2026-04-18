@@ -608,8 +608,8 @@ def hbar_two_series(labels: List[str], left_vals: List[float], right_vals: List[
     fig.tight_layout(rect=(0, 0, 1, 0.88))
     return fig
 
-def barh_single(labels: List[str], values: List[float], xlabel: str, color: str,
-                *, sort_desc: bool = True) -> plt.Figure:
+def barh_single(labels: List[str], values: List[float], xlabel: str,
+                color, *, sort_desc: bool = True) -> plt.Figure:
     """Horizontal bar chart for a single series."""
     if sort_desc:
         order = sorted(range(len(labels)), key=lambda i: values[i], reverse=True)
@@ -631,6 +631,65 @@ def barh_single(labels: List[str], values: List[float], xlabel: str, color: str,
         ax.text(v + (x_max * 0.01), yy, f"{v:.2f}", ha="left", va="center", fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 0.88))
     return fig
+
+
+def stacked_hbar_generic(
+    df: pd.DataFrame,
+    label_col: str,
+    component_order: Sequence[str],
+    component_colors: Mapping[str, str],
+    xlabel: str,
+    *,
+    legend_columns: int = 2,
+    width: float = 8.0,
+) -> plt.Figure:
+    """Generalized horizontal stacked bar chart.
+
+    *df* must have a *label_col* column for y-axis labels and one numeric
+    column per entry in *component_order*.
+    """
+    labels = df[label_col].tolist()
+    y_positions = list(range(len(labels)))
+    height = max(3.2, 0.55 * len(labels) + 1.0)
+
+    totals = df[list(component_order)].sum(axis=1).tolist()
+    x_max = max(totals) if totals else 0.0
+
+    colors = resolve_colors(component_order, component_colors)
+
+    theme = {**THEME_LIGHT_GRID, "axes.grid.axis": "x"}
+    with use_theme(theme):
+        fig, ax = plt.subplots(figsize=(width, height))
+
+        left = [0.0] * len(labels)
+        for component in component_order:
+            vals = df[component].tolist()
+            ax.barh(y_positions, vals, left=left, color=colors[component], label=component)
+            left = [l + v for l, v in zip(left, vals)]
+
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel(xlabel)
+        ax.set_axisbelow(True)
+        tidy_axes(ax, grid="x")
+        fmt_si(ax, axis="x")
+
+        pad = x_max * 0.03 if x_max else 0.05
+        for ypos, total in zip(y_positions, totals):
+            ax.text(total + pad, ypos, f"{total:.2f}", ha="left", va="center", fontsize=9)
+
+        ax.legend(
+            ncol=legend_columns,
+            loc="upper left",
+            bbox_to_anchor=(0.0, 1.10),
+            frameon=False,
+            handlelength=1.6,
+            columnspacing=1.2,
+        )
+
+        fig.tight_layout(rect=(0, 0, 1, 0.9))
+        return fig
 
 # ----------------------------- SQL builders -------------------------------
 

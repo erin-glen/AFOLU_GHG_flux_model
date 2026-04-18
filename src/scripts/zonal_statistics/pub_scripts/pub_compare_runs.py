@@ -712,29 +712,13 @@ def _build_metric_long_df(comp: ComparisonSpec, metric: MetricSpec, records: Map
 
 
 def _plot_metric(df: pd.DataFrame, metric: MetricSpec, comp: ComparisonSpec, colors: Sequence[str]) -> plt.Figure:
-    labels = df["Run"].tolist()
-    values = df["Value"].tolist()
-    y_positions = list(range(len(labels)))
-    height = max(3.2, 0.55 * len(labels) + 1.0)
-    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "x"}
-    with pc.use_theme(theme):
-        fig, ax = plt.subplots(figsize=(7.5, height))
-        ax.barh(y_positions, values, color=colors)
-        ax.set_yticks(y_positions)
-        ax.set_yticklabels(labels)
-        ax.invert_yaxis()
-        ax.set_xlabel(f"{metric.label} ({metric.units})")
-        ax.set_axisbelow(True)
-        pc.tidy_axes(ax, grid="x")
-        pc.fmt_si(ax, axis="x")
-
-        x_max = max(values) if values else 0.0
-        pad = x_max * 0.03 if x_max else 0.05
-        for ypos, val in zip(y_positions, values):
-            ax.text(val + pad, ypos, f"{val:.2f}", ha="left", va="center", fontsize=9)
-
-        fig.tight_layout(rect=(0, 0, 1, 0.95))
-        return fig
+    return pc.barh_single(
+        df["Run"].tolist(),
+        df["Value"].tolist(),
+        xlabel=f"{metric.label} ({metric.units})",
+        color=colors,
+        sort_desc=False,
+    )
 
 
 def _plot_horizontal_stack(
@@ -745,48 +729,13 @@ def _plot_horizontal_stack(
     title: str,
     legend_columns: int = 2,
 ) -> plt.Figure:
-    labels = df["Run"].tolist()
-    y_positions = list(range(len(labels)))
-    height = max(3.2, 0.55 * len(labels) + 1.0)
-
-    totals = df[list(component_order)].sum(axis=1).tolist()
-    x_max = max(totals) if totals else 0.0
-
-    colors = pc.resolve_colors(component_order, component_colors)
-
-    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "x"}
-    with pc.use_theme(theme):
-        fig, ax = plt.subplots(figsize=(8.0, height))
-
-        left = [0.0] * len(labels)
-        for component in component_order:
-            vals = df[component].tolist()
-            ax.barh(y_positions, vals, left=left, color=colors[component], label=component)
-            left = [l + v for l, v in zip(left, vals)]
-
-        ax.set_yticks(y_positions)
-        ax.set_yticklabels(labels)
-        ax.invert_yaxis()
-        ax.set_xlabel(xlabel)
-        ax.set_axisbelow(True)
-        pc.tidy_axes(ax, grid="x")
-        pc.fmt_si(ax, axis="x")
-
-        pad = x_max * 0.03 if x_max else 0.05
-        for ypos, total in zip(y_positions, totals):
-            ax.text(total + pad, ypos, f"{total:.2f}", ha="left", va="center", fontsize=9)
-
-        ax.legend(
-            ncol=legend_columns,
-            loc="upper left",
-            bbox_to_anchor=(0.0, 1.10),
-            frameon=False,
-            handlelength=1.6,
-            columnspacing=1.2,
-        )
-
-        fig.tight_layout(rect=(0, 0, 1, 0.9))
-        return fig
+    return pc.stacked_hbar_generic(
+        df, label_col="Run",
+        component_order=component_order,
+        component_colors=component_colors,
+        xlabel=xlabel,
+        legend_columns=legend_columns,
+    )
 
 
 def _build_inventory_climate_component_df(
