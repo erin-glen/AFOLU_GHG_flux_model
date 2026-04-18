@@ -605,6 +605,7 @@ def calculate_and_upload_drainage(
     mega_zarr_path: Optional[str] = None,
     outputs_to_zarr: Optional[list[str]] = None,
     interval_end_years: Optional[list[int]] = None,
+    run_date: Optional[str] = None,
 ):
     """Process a single chunk for a given interval.
 
@@ -645,6 +646,9 @@ def calculate_and_upload_drainage(
     interval_end_years : list[int], optional
         Ordered year index used to locate the interval end year in zarr.
         This can be the full-model year index when populating a global store.
+    run_date : str, optional
+        Date string (YYYYMMDD) used in raster output paths. When ``None``,
+        falls back to ``cn.today_date``.
     """
 
     logger = lu.setup_logging_worker()
@@ -992,6 +996,7 @@ def calculate_and_upload_drainage(
             interval_type=interval_tag,
             model_type=run_name,
             no_data_val=0,
+            date_str=run_date,
         )
         lu.print_and_log(
             f"Upload tasks created for {bstr} in {tid}. Uploading now: {uu.timestr()}",
@@ -1371,6 +1376,7 @@ def run_drainage_model(
             mega_zarr_path=mega_zarr_path,
             outputs_to_zarr=outputs_to_zarr,
             interval_end_years=zarr_year_index,
+            run_date=run_date,
         )
 
     results = bag.map(_wrap).compute()

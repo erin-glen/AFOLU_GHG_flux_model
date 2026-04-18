@@ -879,6 +879,7 @@ def save_and_upload_small_raster_set(
     interval_type,
     model_type="standard_model",
     no_data_val=None,
+    date_str=None,
 ):
     """Save arrays as GeoTIFFs locally and return upload tasks.
 
@@ -929,7 +930,8 @@ def save_and_upload_small_raster_set(
             dst.write(arr, 1)
 
         s3_folder = build_output_s3_folder(
-            data_meaning, year_out, chunk_px, interval_type, model_type
+            data_meaning, year_out, chunk_px, interval_type, model_type,
+            date_str=date_str,
         )
         s3_key = posixpath.join(s3_folder.removeprefix("s3://gfw2-data/"), fname)
         upload_tasks.append((lpath, "gfw2-data", s3_key))
