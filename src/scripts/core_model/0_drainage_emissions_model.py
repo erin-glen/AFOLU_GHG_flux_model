@@ -630,7 +630,7 @@ def calculate_and_upload_drainage(
         Threshold applied to the peat probability layer when using the OGH
         dataset. A scalar applies a single global threshold. A dict maps
         ecozone codes to per-biome thresholds (e.g., ``{1: 0.15, 2: 0.30,
-        3: 0.20, 0: 0.23}``). Values strictly greater than the threshold
+        3: 0.20, 0: 0.23}``). Values greater than or equal to the threshold
         are treated as peat. ``None`` disables thresholding.
     count_burned_years : bool, optional
         If ``True``, count the number of burned years within the interval and
@@ -740,10 +740,10 @@ def calculate_and_upload_drainage(
                 binary_peat = np.zeros_like(peat_layer, dtype=np.uint8)
                 for ecozone_code, thresh in peat_threshold.items():
                     mask = cd == ecozone_code
-                    binary_peat[mask] = (peat_layer[mask] > thresh).astype(np.uint8)
+                    binary_peat[mask] = (peat_layer[mask] >= thresh).astype(np.uint8)
                 layers["peat"] = binary_peat
             else:
-                layers["peat"] = (peat_layer > peat_threshold).astype(np.uint8)
+                layers["peat"] = (peat_layer >= peat_threshold).astype(np.uint8)
 
     # stats for inputs
     for k, arr in layers.items():
@@ -1095,14 +1095,19 @@ def parse_biome_thresholds(
             f".csv, or .json file. Got: {raw!r}"
         )
 
+    import math
+
     code_map: dict[int, float] = {}
     for name, thresh in name_map.items():
+        val = float(thresh)
+        if math.isnan(val):
+            continue
         name_lower = str(name).strip().lower()
         if name_lower in cn.ecozone_codes:
-            code_map[cn.ecozone_codes[name_lower]] = float(thresh)
+            code_map[cn.ecozone_codes[name_lower]] = val
         else:
             try:
-                code_map[int(name)] = float(thresh)
+                code_map[int(name)] = val
             except (ValueError, TypeError):
                 raise ValueError(
                     f"Unknown biome name '{name}'. Expected one of: "
@@ -1114,6 +1119,8 @@ def parse_biome_thresholds(
     # the comparison `peat_layer > thresh` works on the native raster values.
     if code_map and all(v <= 1.0 for v in code_map.values()):
         code_map = {k: v * 100.0 for k, v in code_map.items()}
+        if fallback is not None and fallback <= 1.0:
+            fallback = fallback * 100.0
 
     unknown_code = cn.ecozone_codes["unknown"]
     if unknown_code not in code_map and fallback is not None:
@@ -1211,10 +1218,10 @@ def run_drainage_model(
     elif isinstance(peat_threshold, dict):
         inv = {v: k for k, v in cn.ecozone_codes.items()}
         threshold_msg = "per-biome: " + "; ".join(
-            f"{inv.get(k, k)}: > {v}" for k, v in sorted(peat_threshold.items())
+            f"{inv.get(k, k)}: >= {v}" for k, v in sorted(peat_threshold.items())
         )
     else:
-        threshold_msg = f"> {peat_threshold}"
+        threshold_msg = f">= {peat_threshold}"
     main_logger.info(
         "Peat dataset set to %s with threshold %s",
         peat_dataset,
@@ -1492,7 +1499,7 @@ def main(argv=None):
         default=DEFAULT_OGH_THRESHOLD,
         help=(
             "Threshold applied to OGH peat probabilities; values strictly "
-            "greater than the threshold are treated as peat. Pass 'none' "
+            "greater than or equal to the threshold are treated as peat. Pass 'none' "
             "to disable thresholding. When --peat_threshold_by_biome is "
             "also set, this value is used as the fallback for unknown ecozones."
         ),
@@ -1778,6 +1785,7 @@ python src/scripts/uncertainty/plot_drainage_sensitivity_dummy.py \
 
   python -m src.scripts.core_model.0_drainage_emissions_model \
     --cluster_name drainage_cluster \
+    --tile_ids 00N_110E,00N_120E \
     --full_model \
     --chunk_size 1 \
     --start_year 2021 \
