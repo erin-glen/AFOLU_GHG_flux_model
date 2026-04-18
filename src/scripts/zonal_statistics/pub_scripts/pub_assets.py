@@ -19,9 +19,9 @@ Usage examples:
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
 
   python -m src.scripts.zonal_statistics.pub_scripts.pub_assets \
-    --model_version 0_1_2 \
-    --run_name zarr_test_full \
-    --run_date 20260403 \
+    --model_version 0_1_4 \
+    --run_name ogh_biome_thresholds \
+    --run_date 20260417 \
     --years 2024 \
     --topn 10
 """
@@ -47,7 +47,7 @@ from src.scripts.zonal_statistics.run_zonal_stats import (
 )
 
 # ----------------------------- config -----------------------------
-OUT_DIR_ROOT = "/mnt/c/tmp/pub_assets"  # hardcoded output root
+OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_ASSETS_DIR", "/mnt/c/tmp/pub_assets")
 OUT_DIR = OUT_DIR_ROOT
 CHUNK_STATS_ROOT = os.environ.get(
     "AFOLU_CHUNK_STATS_ROOT",

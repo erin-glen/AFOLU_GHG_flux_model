@@ -59,10 +59,10 @@ from src.scripts.zonal_statistics.run_zonal_stats import (
 
 # ----------------------------- config -----------------------------
 
-OUT_DIR_ROOT = "/mnt/c/tmp/pub_nghgi"
+OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_NGHGI_DIR", "/mnt/c/tmp/pub_nghgi")
 OUT_DIR = OUT_DIR_ROOT
 
-DEFAULT_NGHGI_DIR = "/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi"
+DEFAULT_NGHGI_DIR = os.environ.get("AFOLU_NGHGI_DATA_DIR", "/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi")
 NGHGI_TABLE_4II_NAME = "organic_soil_compiled.csv"
 NGHGI_CSTOCK_NAME = "organic_soil_cstock_compiled.csv"
 

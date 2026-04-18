@@ -69,7 +69,7 @@ from src.scripts.zonal_statistics.run_zonal_stats import (
 
 # ----------------------------- config -----------------------------
 
-OUT_DIR_ROOT = "/mnt/c/tmp/pub_fao"
+OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_FAO_DIR", "/mnt/c/tmp/pub_fao")
 OUT_DIR = OUT_DIR_ROOT
 
 # Default FAOSTAT CSV (S3)

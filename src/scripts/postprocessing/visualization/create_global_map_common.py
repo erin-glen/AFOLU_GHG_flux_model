@@ -34,7 +34,7 @@ DEFAULT_MODEL_VERSION = getattr(
 BASE_URL = posixpath.join(OUTPUT_ROOT, f"version_{DEFAULT_MODEL_VERSION}")
 OUTPUTS_BASE = BASE_URL
 
-DEFAULT_DATE_TAG = "20250923"
+DEFAULT_DATE_TAG = "20260418"
 
 DISPLAY_OUT_ROOT = os.environ.get("DISPLAY_OUT_ROOT", "/tmp/create_global_maps/display")
 
