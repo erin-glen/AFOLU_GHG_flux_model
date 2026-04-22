@@ -63,6 +63,17 @@ python src/scripts/uncertainty/fscore_threshold_curves_bounds.py \
     --mapped-area-unit Mha \
     --bounds-threshold 0.10 \
     --area-curve-table "/mnt/c/tmp/uncertainty/area_vs_threshold_20251105.csv"
+
+Per-biome analysis with area-bounds validation::
+
+    python -m src.scripts.uncertainty.fscore_threshold_curves_bounds \
+        --input "/mnt/c/tmp/uncertainty/USDA_testpoints_probability.csv" \
+        --output-dir "/mnt/c/tmp/uncertainty/threshold_curves_biome" \
+        --biome-column ecozone \
+        --report-thresholds 0.219 \
+        --biome-area-curves "./area_vs_threshold_20251105_biome.csv" \
+        --biome-bounds-metric f2 \
+        --mapped-area-unit Mha
 """
 
 from __future__ import annotations
@@ -567,6 +578,79 @@ def monotonicity_status(area_df: pd.DataFrame) -> str:
     return "nonmonotonic"
 
 
+def load_biome_area_curves(
+    path: Path,
+    biome_column: str = "biome",
+    area_column: str = "area_ha",
+    area_unit: str = "auto",
+    target_unit: str = "Mha",
+) -> dict[str, pd.DataFrame]:
+    """Read a combined per-biome area-vs-threshold CSV.
+
+    Returns ``{biome_name: area_df}`` where each ``area_df`` has columns
+    ``[threshold, area]`` with area converted to *target_unit*.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Biome area-curves file not found: {path}")
+
+    raw = pd.read_csv(path)
+    if biome_column not in raw.columns:
+        raise KeyError(
+            f"Biome column '{biome_column}' not in area-curves CSV. "
+            f"Columns: {raw.columns.tolist()}"
+        )
+
+    resolved_area_col = area_column
+    if area_column not in raw.columns:
+        for fallback in ["area", "area_mha", "area_ha"]:
+            if fallback in raw.columns:
+                resolved_area_col = fallback
+                break
+        else:
+            raise KeyError(
+                f"Area column '{area_column}' not in area-curves CSV. "
+                f"Columns: {raw.columns.tolist()}"
+            )
+
+    resolved_unit = area_unit
+    if area_unit.lower() == "auto":
+        if resolved_area_col.lower() == "area_ha":
+            resolved_unit = "ha"
+        elif resolved_area_col.lower() == "area_mha":
+            resolved_unit = "Mha"
+        else:
+            resolved_unit = target_unit
+
+    curves: dict[str, pd.DataFrame] = {}
+    for biome_name, group in raw.groupby(biome_column):
+        adf = group[["threshold", resolved_area_col]].copy().dropna()
+        adf = adf.rename(columns={resolved_area_col: "area"})
+        adf["threshold"] = adf["threshold"].astype(float)
+        adf["area"] = convert_area_values(adf["area"], resolved_unit, target_unit)
+        adf = (
+            adf.sort_values("threshold")
+            .drop_duplicates(subset="threshold", keep="last")
+            .reset_index(drop=True)
+        )
+        curves[str(biome_name)] = adf
+
+    return curves
+
+
+def lookup_mapped_area(area_df: pd.DataFrame, threshold: float) -> tuple[float, float]:
+    """Return ``(mapped_area, snapped_threshold)`` from an area-vs-threshold curve.
+
+    Snaps upward to the next 0.01 step to match integer-raster semantics:
+    on a uint8 raster, ``>= 30.1`` is equivalent to ``>= 31`` → curve threshold 0.31.
+    """
+    snapped = min(np.ceil(threshold * 100.0) / 100.0, 1.0)
+    exact = area_df.loc[np.isclose(area_df["threshold"], snapped, atol=1e-6)]
+    if not exact.empty:
+        return float(exact.iloc[0]["area"]), snapped
+    idx = (area_df["threshold"] - snapped).abs().idxmin()
+    return float(area_df.loc[idx, "area"]), float(area_df.loc[idx, "threshold"])
+
+
 def match_target_area_to_threshold(
     area_df: pd.DataFrame,
     target_area: float,
@@ -915,6 +999,31 @@ def parse_args() -> argparse.Namespace:
             "per-biome analysis. Biomes below this are flagged. Default: 30"
         ),
     )
+    parser.add_argument(
+        "--biome-area-curves",
+        type=Path,
+        default=None,
+        help=(
+            "Combined per-biome area-vs-threshold CSV (with a biome column) "
+            "produced by build_probability_area_curve --per-biome. When provided "
+            "alongside --biome-column, computes per-biome area bounds and "
+            "threshold matching."
+        ),
+    )
+    parser.add_argument(
+        "--biome-area-curves-biome-column",
+        default="biome",
+        help="Biome label column in --biome-area-curves. Default: biome",
+    )
+    parser.add_argument(
+        "--biome-bounds-metric",
+        choices=["f1", "f2"],
+        default="f2",
+        help=(
+            "Which optimal threshold to use as each biome's operational "
+            "threshold for bounds calculation. Default: f2"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1041,6 +1150,16 @@ def main() -> None:
                 f"Biome column '{args.biome_column}' not found in input file. "
                 f"Available columns: {df.columns.tolist()}"
             )
+
+        biome_curves = None
+        if args.biome_area_curves is not None:
+            biome_curves = load_biome_area_curves(
+                path=args.biome_area_curves.resolve(),
+                biome_column=args.biome_area_curves_biome_column,
+                area_unit="auto",
+                target_unit=args.mapped_area_unit,
+            )
+
         run_biome_analysis(
             df=df,
             biome_column=args.biome_column,
@@ -1050,6 +1169,9 @@ def main() -> None:
             report_thresholds=report_thresholds,
             bounds_threshold=args.bounds_threshold,
             min_positive_samples=args.min_biome_samples,
+            biome_area_curves=biome_curves,
+            bounds_metric=args.biome_bounds_metric,
+            mapped_area_unit=args.mapped_area_unit,
         )
 
     print("Finished.")
@@ -1146,11 +1268,17 @@ def run_biome_analysis(
     report_thresholds: list[float],
     bounds_threshold: float | None,
     min_positive_samples: int = 30,
+    biome_area_curves: dict[str, pd.DataFrame] | None = None,
+    bounds_metric: str = "f2",
+    mapped_area_unit: str = "Mha",
 ) -> None:
-    """Run per-biome threshold analysis and write a summary CSV."""
+    """Run per-biome threshold analysis and optionally compute area bounds."""
     biome_values = sorted(df[biome_column].dropna().unique())
     print(f"\n{'='*60}")
     print(f"Per-biome analysis: {len(biome_values)} biome(s) found: {biome_values}")
+    if biome_area_curves is not None:
+        print(f"Area curves provided for: {sorted(biome_area_curves.keys())}")
+        print(f"Bounds metric: best {bounds_metric.upper()} threshold per biome")
     print(f"{'='*60}")
 
     summary_rows: list[dict] = []
@@ -1231,6 +1359,78 @@ def run_biome_analysis(
             title=f"Precision and recall — {biome_name}",
         )
 
+        # --- Per-biome area bounds (when area curves are provided) ---
+        biome_bounds_row: dict = {}
+        if biome_area_curves is not None:
+            area_df = biome_area_curves.get(str(biome_name))
+            if area_df is None:
+                print(f"    No area curve for biome '{biome_name}', skipping bounds.")
+            elif area_df.empty:
+                print(f"    Area curve for biome '{biome_name}' is empty, skipping bounds.")
+            else:
+                biome_operational = (
+                    float(best_f2["threshold"]) if bounds_metric == "f2"
+                    else float(best_f1["threshold"])
+                )
+                mapped_area, snapped = lookup_mapped_area(area_df, biome_operational)
+                biome_op_metrics = evaluate_single_threshold(
+                    y_true, scores, biome_operational,
+                )
+
+                biome_bounds = compute_extent_bounds(
+                    mapped_area=mapped_area,
+                    area_unit=mapped_area_unit,
+                    operational_threshold=biome_operational,
+                    operational_metrics=biome_op_metrics,
+                )
+                biome_bounds.to_csv(
+                    biome_dir / "extent_bounds_summary.csv", index=False,
+                )
+
+                biome_matches = match_area_bounds_to_thresholds(
+                    area_df=area_df, bounds_summary=biome_bounds,
+                )
+                biome_matches.to_csv(
+                    biome_dir / "area_bound_threshold_matches.csv", index=False,
+                )
+
+                plot_area_curve_with_bounds(
+                    area_df=area_df,
+                    bounds_summary=biome_bounds,
+                    matches_df=biome_matches,
+                    output_path=biome_dir / "area_vs_threshold_with_bounds.png",
+                )
+
+                br = biome_bounds.iloc[0]
+                lower_match = biome_matches.loc[
+                    biome_matches["target_name"] == "lower_bound_area"
+                ]
+                upper_match = biome_matches.loc[
+                    biome_matches["target_name"] == "upper_bound_area"
+                ]
+                biome_bounds_row = {
+                    "operational_threshold": biome_operational,
+                    "snapped_curve_threshold": snapped,
+                    f"mapped_area_{mapped_area_unit}": mapped_area,
+                    "ua_at_operational": float(br["ua_precision"]),
+                    "pa_at_operational": float(br["pa_recall"]),
+                    f"lower_bound_{mapped_area_unit}": float(br["lower_bound_area"]),
+                    f"upper_bound_{mapped_area_unit}": float(br["upper_bound_area"]),
+                    "lower_bound_threshold": (
+                        float(lower_match.iloc[0]["selected_threshold"])
+                        if not lower_match.empty else np.nan
+                    ),
+                    "upper_bound_threshold": (
+                        float(upper_match.iloc[0]["selected_threshold"])
+                        if not upper_match.empty else np.nan
+                    ),
+                }
+
+                print(f"    Bounds ({mapped_area_unit}): "
+                      f"mapped={mapped_area:.4f} @ t={snapped:.2f}, "
+                      f"lower={float(br['lower_bound_area']):.4f}, "
+                      f"upper={float(br['upper_bound_area']):.4f}")
+
         summary_rows.append({
             "biome": biome_name,
             "n_points": len(subset),
@@ -1243,6 +1443,7 @@ def run_biome_analysis(
             "precision_at_best_f1": float(best_f1["precision"]),
             "recall_at_best_f1": float(best_f1["recall"]),
             "low_sample_warning": low_sample,
+            **biome_bounds_row,
         })
 
         print(f"\n  Biome '{biome_name}': {n_pos} pos / {n_neg} neg — "

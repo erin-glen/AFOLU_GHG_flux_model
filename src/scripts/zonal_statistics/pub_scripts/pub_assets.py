@@ -506,13 +506,16 @@ def _register_state_context_views(con: duckdb.DuckDBPyConnection):
         if "__" in meaning:
             left, right = meaning.split("__", 1)
             drained_state = left
-            if "_" in right:
-                dom, rest = right.split("_", 1)
-                if dom in {"boreal", "temperate", "tropical"}:
+            # Longest-match on known domains: handles multi-word "other_domain"
+            # and bare-domain labels ("peat_undrained__boreal") correctly.
+            for dom in ("other_domain", "boreal", "temperate", "tropical"):
+                if right == dom:
                     climate_domain = dom
-                    combined_state = rest
-                else:
-                    combined_state = right
+                    break
+                if right.startswith(dom + "_"):
+                    climate_domain = dom
+                    combined_state = right[len(dom) + 1:]
+                    break
             else:
                 combined_state = right
         else:

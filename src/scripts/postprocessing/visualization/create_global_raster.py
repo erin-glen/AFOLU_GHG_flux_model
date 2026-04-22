@@ -5,22 +5,20 @@ What's new in this drop-in update
 ---------------------------------
 - Streamed global mosaic build using a disk-backed memmap (no N×10 GB RAM spike).
 - As-completed iteration over Dask futures; no giant gather into a Python list.
-- Early cast for `drained_state` tiles to UInt8 (0,1,255 nodata) to cut tile payloads 4×.
 - **FIX 1 (GeoTransform)**: Use rasterio.transform.from_bounds (rows & cols) so pixel size Y == X.
 - **FIX 2 (S3 writing)**: When writing to s3:// paths, enable GDAL spooling:
     CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE=YES and CPL_TMPDIR=<our working tmpdir>.
-- **FIX 3 (OOM on drained_state)**: Memory-tight reclassification (no float64/int64 upcasts; one
-    boolean mask at a time; range checks based on 8-digit padding).
-- **Typed reads**: Choose "Int32" for integer datasets (burned_state, drained_state), "Float32" otherwise.
+- **Typed reads**: Choose "Int32" for integer datasets (combined_state), "Float32" otherwise.
 - **Local batch knob**: AGG_LOCAL_BATCH env var controls local batch size (default 8) for iterate_tiles.
 
 Assumptions (this version)
 --------------------------
 - All non-integer inputs are **per-pixel totals** (e.g., Mg yr^-1 per native pixel).
 - Aggregation for float datasets is **SUM** to the target grid.
-- Aggregation for integer datasets is **MODE** (categorical majority).
-- For drained_state specifically: we **reclass to binary** (0 undrained, 1 drained; non-peat masked)
-  *before* aggregation, then take a binary mode and write UInt8 with nodata=255.
+- For the bit-packed `combined_state` (uint32): we unpack to drained_id and burned_id,
+  take the mode of each component independently per block, then repack. The
+  has-drained / has-burned bits are set whenever the aggregated component is nonzero.
+  Output is written as UInt32 with nodata=0.
 - No unit conversions are performed; no input tiles are modified or overwritten.
 
 Examples
@@ -32,7 +30,7 @@ python -m src.scripts.postprocessing.visualization.create_global_raster \
 
 # Aggregate at 0.01° using a local Dask scheduler (smaller local batch by default)
 AGG_LOCAL_BATCH=8 \
-python -m src.scripts.postprocessing.visualization.create_global_raster -cn create_maps --run_name gpd_standard_model_500m --model_version 0_9_7 --date_tag 20251120 --target_deg 0.01 --native_deg 0.00025
+python -m src.scripts.postprocessing.visualization.create_global_raster -cn drainage_cluster --run_name ogh_biome_thresholds --model_version 0_1_4 --date_tag 20260417 --target_deg 0.01 --native_deg 0.00025
 """
 
 from __future__ import annotations
@@ -73,12 +71,6 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
 # Constants / helpers
 # --------------------------------------------------------------------
 
-# Nodata flag for binary outputs we write as UInt8
-UINT8_NODATA = np.uint8(255)
-STATE_PAD_DIGITS = len(next(iter(zc.ALL_DRAINED_STATE_CODES)))
-UNDRAINED_ROOT_CODE = int("16".ljust(STATE_PAD_DIGITS, "0"))
-
-
 def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
     """
     Downsample by summing factor×factor blocks (preserves NaNs).
@@ -102,71 +94,27 @@ def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> n
     return block_sum
 
 
-def _reaggregate_mode_binary(arr01_nan: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
+def _mode_per_component(arr: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
     """
-    Binary 'mode' via block sums (ties -> 1). `arr01_nan` contains {0,1} and NaN for masked.
-    Returns float32 with {0,1,NaN}.
+    Aggregate a bit-packed ``combined_state`` uint32 tile by taking the mode of
+    each component (drained_id and burned_id) independently within each block,
+    then repacking. The has-drained / has-burned bits are set wherever the
+    aggregated component is nonzero.
     """
-    factor_f = target_deg / native_deg
-    if not np.isclose(round(factor_f), factor_f):
-        raise ValueError(f"target_deg/native_deg must be an integer; got {target_deg}/{native_deg}.")
-    f = int(round(factor_f))
+    c = np.asarray(arr, dtype=np.uint32)
+    drained_id = (c & np.uint32(zc.COMBINED_STATE_DRAINED_MASK)).astype(np.uint8)
+    burned_id = (
+        (c >> np.uint32(zc.COMBINED_STATE_BURNED_SHIFT))
+        & np.uint32(zc.COMBINED_STATE_BURNED_MASK)
+    ).astype(np.uint8)
 
-    h, w = arr01_nan.shape
-    H = (h // f) * f
-    W = (w // f) * f
+    drained_mode = uu.reaggregate_mode(drained_id, native_deg, target_deg)
+    burned_mode = uu.reaggregate_mode(burned_id, native_deg, target_deg)
 
-    a = arr01_nan[:H, :W]
-    a4 = a.reshape(H // f, f, W // f, f)
-
-    valid = np.sum(~np.isnan(a4), axis=(1, 3)).astype(np.float32)
-    ones  = np.nansum(a4, axis=(1, 3)).astype(np.float32)  # sum of 1s
-    zeros = valid - ones
-
-    out = np.full((H // f, W // f), np.nan, dtype=np.float32)
-    has = valid > 0
-    # ties resolve to 1 (favor drained when equal)
-    out[has] = (ones[has] >= zeros[has]).astype(np.float32)
-    return out
-
-
-def _reclass_drained_to_binary(arr: np.ndarray) -> np.ndarray:
-    """
-    Reclassify numeric `drained_state` to binary:
-      - undrained peat root (16) -> 0.0
-      - drained peat roots (11..15) -> 1.0
-      - everything else (incl. non-peat 0) -> NaN (masked)
-
-    Robust to 6-, 8-, or 10-digit padded states by detecting observed width.
-    """
-    a = np.asarray(arr, dtype=np.float32)
-
-    # All zero => non-peat everywhere -> mask (NaN)
-    if a.size == 0:
-        return np.full(a.shape, np.nan, dtype=np.float32)
-    m = float(np.nanmax(a))
-    if not np.isfinite(m) or m <= 0.0:
-        return np.full(a.shape, np.nan, dtype=np.float32)
-
-    # Derive the effective pad width from the largest code present
-    # e.g., 160000 (6-digit) -> width=6, 16000000 (8-digit) -> width=8
-    observed_width = max(int(np.floor(np.log10(m))) + 1, 2)
-    div = float(10 ** (observed_width - 2))
-
-    und_lo, und_hi = 16.0 * div, 17.0 * div
-    drn_lo, drn_hi = 11.0 * div, 16.0 * div
-
-    out = np.full(a.shape, np.nan, dtype=np.float32)
-
-    # One boolean at a time to limit peak memory
-    und = (a >= und_lo) & (a < und_hi)
-    out[und] = 0.0
-    del und
-
-    drn = (a >= drn_lo) & (a < drn_hi)
-    out[drn] = 1.0
-    del drn
-
+    out = drained_mode.astype(np.uint32)
+    out |= burned_mode.astype(np.uint32) << np.uint32(zc.COMBINED_STATE_BURNED_SHIFT)
+    out |= (drained_mode > 0).astype(np.uint32) << np.uint32(zc.COMBINED_STATE_HAS_DRAINED_BIT)
+    out |= (burned_mode > 0).astype(np.uint32) << np.uint32(zc.COMBINED_STATE_HAS_BURNED_BIT)
     return out
 
 
@@ -292,25 +240,15 @@ def agg_tile_to_target(
         per_pixel_total_or_state_tile, dtype_hint, bounds, chunk_length_pixels, is_final, logger
     )
 
-    if dataset_name == "drained_state" and not success:
+    if dataset_name == "combined_state" and not success:
         logger.warning(
-            "Tile %s missing drained_state; treating as non-peat (masked after reclass).",
+            "Tile %s missing combined_state; treating as all-zero (nodata after aggregation).",
             tile_id,
         )
-        # zeros will not match the [11..16) ranges and thus become NaN in reclass
-        arr = np.zeros((chunk_length_pixels, chunk_length_pixels), dtype=np.int32)
+        arr = np.zeros((chunk_length_pixels, chunk_length_pixels), dtype=np.uint32)
 
-    if dataset_name in INTEGER_DATASETS:
-        if dataset_name == "drained_state":
-            # Reclass to {0,1,NaN} in float32 with minimal temporaries, then binary mode
-            arr01_nan = _reclass_drained_to_binary(arr)
-            out = _reaggregate_mode_binary(arr01_nan, native_deg, target_deg)  # float32 {0,1,NaN}
-            return np.where(np.isnan(out), UINT8_NODATA, out.astype(np.uint8, copy=False))
-        else:
-            # e.g., burned_state: keep native codes, aggregate by mode
-            return uu.reaggregate_mode(
-                arr.astype(np.int32, copy=False), native_deg, target_deg
-            )
+    if dataset_name == "combined_state":
+        return _mode_per_component(arr, native_deg, target_deg)
 
     # Continuous totals → explicit SUM to target resolution (no unit conversions)
     return _reaggregate_sum(arr.astype(np.float32, copy=False), native_deg, target_deg)
@@ -598,8 +536,7 @@ def aggregate_main(
         tile_ids: List[str] = []
 
         dataset_name = items["dataset"]
-        is_drained = (dataset_name == "drained_state")
-        is_burned  = (dataset_name == "burned_state")
+        is_combined = (dataset_name == "combined_state")
 
         stage = f"aggregate tiles to {res_label} for {key}"
         lu.print_and_log(f"Stage {stage} started at: {uu.timestr()}", is_final, logger)
@@ -638,7 +575,7 @@ def aggregate_main(
         global_outfile = items["global_pattern"]
         global_output_path = items["global_dir"]
 
-        if is_drained:
+        if is_combined:
             _ = combine_global_raster_streaming(
                 tiles_iter=tiles_iter,
                 bounds_list=bounds_list,
@@ -647,20 +584,8 @@ def aggregate_main(
                 global_output_path=global_output_path,
                 target_deg=target_deg,
                 is_final=is_final,
-                out_dtype=np.uint8,
-                int_nodata=int(UINT8_NODATA),
-            )
-        elif is_burned:
-            _ = combine_global_raster_streaming(
-                tiles_iter=tiles_iter,
-                bounds_list=bounds_list,
-                res_label=res_label,
-                global_outfile=global_outfile,
-                global_output_path=global_output_path,
-                target_deg=target_deg,
-                is_final=is_final,
-                out_dtype=np.int32,
-                int_nodata=-1,     # not 0; 0 means “no burn”
+                out_dtype=np.uint32,
+                int_nodata=0,  # 0 = no drained and no burned component present
             )
         else:
             _ = combine_global_raster_streaming(
@@ -691,7 +616,7 @@ def aggregate_main(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Aggregate to a target resolution and build global mosaics (SUM for totals, MODE for integers; drained_state → binary)."
+        description="Aggregate to a target resolution and build global mosaics (SUM for totals; combined_state aggregated by component-wise mode and repacked)."
     )
     parser.add_argument("-cn", "--cluster_name", required=True)
     parser.add_argument("--date_tag", required=True)

@@ -89,9 +89,23 @@ _emissions_by_suffix = {
     },
 }
 
+# Ecozone digits appended to undrained-peat codes by the drainage model.
+# No EF lookup is performed for undrained peat (EF = 0); the digit only carries
+# climate-domain info through to the zonal output.
+_undrained_ecozones = {
+    "1": "boreal",
+    "2": "temperate",
+    "3": "tropical",
+    "4": "other_domain",
+}
+
+
 def _build_drained_state_mapping() -> dict[str, str]:
     mapping: dict[str, str] = {}
 
+    # Fallback (non-domain) codes for root "16" and the non_peat root "0".
+    # 16000000 / 16910000 / 16920000 should not normally be emitted by the
+    # current encoder, but are kept for safety and for legacy outputs.
     for root in ("16", "0"):
         base_label = _drain_root[root]
         for suffix, suffix_label in _classification_suffix_labels.items():
@@ -100,6 +114,19 @@ def _build_drained_state_mapping() -> dict[str, str]:
             else:
                 code = root
             mapping[_pad_right(code)] = base_label + suffix_label
+
+    # Domain-qualified undrained-peat codes: root "16" + optional coastal
+    # suffix + ecozone digit.
+    for suffix, suffix_label in _classification_suffix_labels.items():
+        coastal_part = suffix_label.lstrip("_")
+        class_code = "16" + suffix
+        for ecozone_digit, ecozone_label in _undrained_ecozones.items():
+            full_code = class_code + ecozone_digit
+            if coastal_part:
+                meaning = f"peat_undrained__{ecozone_label}_{coastal_part}"
+            else:
+                meaning = f"peat_undrained__{ecozone_label}"
+            mapping[_pad_right(full_code)] = meaning
 
     for root in ("11", "12", "13", "14", "15"):
         base_label = _drain_root[root]

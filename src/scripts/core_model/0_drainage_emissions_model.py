@@ -436,6 +436,18 @@ def calculate_drainage_and_emissions(
                     drained_co2_offsite_out[row, col] = co2_off
                     drained_total_co2e_out[row, col] = total_co2e
 
+            elif soil_block[row, col] == 1:
+                # Undrained peat: append ecozone digit (1=boreal, 2=temperate,
+                # 3=tropical, 4=other_domain). No EF lookup — undrained EF = 0.
+                if ecozone == boreal_code:
+                    emission_node = nu.accrete_node(emission_node, 1)
+                elif ecozone == temperate_code:
+                    emission_node = nu.accrete_node(emission_node, 2)
+                elif ecozone == tropical_code:
+                    emission_node = nu.accrete_node(emission_node, 3)
+                else:
+                    emission_node = nu.accrete_node(emission_node, 4)
+
             if emission_node > 0:
                 node = nu.accrete_node(node, emission_node)
 
@@ -1066,16 +1078,27 @@ def parse_optional_float(value: Optional[str]) -> Optional[float]:
 def parse_biome_thresholds(
     raw: Optional[str],
     fallback: Optional[float] = None,
+    fscore_metric: str = "f1",
 ) -> Optional[dict[int, float]]:
     """Parse per-biome thresholds from a JSON string or CSV file path.
 
     Returns a dict mapping ecozone codes (int) to threshold values (float),
     or ``None`` if *raw* is ``None``.
+
+    ``fscore_metric`` selects which threshold column to read from a CSV
+    input (``"f1"`` → ``best_f1_threshold``, ``"f2"`` → ``best_f2_threshold``).
+    Ignored for JSON input, where thresholds are given directly.
     """
     import json
 
     if raw is None:
         return None
+
+    metric_key = fscore_metric.lower()
+    if metric_key not in {"f1", "f2"}:
+        raise ValueError(
+            f"fscore_metric must be 'f1' or 'f2'; got {fscore_metric!r}"
+        )
 
     raw = raw.strip()
 
@@ -1084,7 +1107,7 @@ def parse_biome_thresholds(
     elif raw.endswith(".csv"):
         import pandas as pd
         df = pd.read_csv(raw)
-        threshold_col = "best_f1_threshold"
+        threshold_col = f"best_{metric_key}_threshold"
         if threshold_col not in df.columns:
             raise KeyError(
                 f"CSV must contain a '{threshold_col}' column. "
@@ -1518,9 +1541,20 @@ def main(argv=None):
             "Per-biome peat probability thresholds. Accepts either an inline "
             "JSON string (e.g., '{\"tropical\": 0.15, \"boreal\": 0.30, "
             "\"temperate\": 0.20}') or a path to a CSV file with 'biome' and "
-            "'best_f1_threshold' columns (as produced by the fscore script's "
-            "--biome-column mode). When set, --peat_threshold is used as the "
+            "'best_f1_threshold'/'best_f2_threshold' columns (as produced by "
+            "the fscore script's --biome-column mode). Use --fscore_metric to "
+            "pick which column. When set, --peat_threshold is used as the "
             "fallback for unknown ecozones."
+        ),
+    )
+    p.add_argument(
+        "--fscore_metric",
+        choices=["f1", "f2"],
+        default="f1",
+        help=(
+            "When --peat_threshold_by_biome points to a CSV, read thresholds "
+            "from the 'best_f1_threshold' or 'best_f2_threshold' column. "
+            "Ignored for JSON input. Default: f1."
         ),
     )
     p.add_argument(
@@ -1567,7 +1601,9 @@ def main(argv=None):
             tile_ids.extend(t.strip() for t in item.split(",") if t.strip())
 
     biome_thresholds = parse_biome_thresholds(
-        args.peat_threshold_by_biome, fallback=args.peat_threshold
+        args.peat_threshold_by_biome,
+        fallback=args.peat_threshold,
+        fscore_metric=args.fscore_metric,
     )
     effective_threshold = biome_thresholds if biome_thresholds is not None else args.peat_threshold
 
