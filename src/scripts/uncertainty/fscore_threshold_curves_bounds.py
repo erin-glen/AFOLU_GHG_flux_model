@@ -867,7 +867,6 @@ def format_scalar_for_console(value: object) -> object:
     return value
 
 
-
 def format_vertical_series(series: pd.Series, key_order: Sequence[str] | None = None) -> str:
     """Return a one-record vertical string representation for console output."""
     if key_order is not None:

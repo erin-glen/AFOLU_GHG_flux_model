@@ -148,7 +148,7 @@ def main() -> None:
     )
 
     counts = df[args.biome_column].value_counts()
-    print(f"\nBiome distribution:")
+    print("\nBiome distribution:")
     for name, count in counts.items():
         print(f"  {name}: {count:,}")
 
