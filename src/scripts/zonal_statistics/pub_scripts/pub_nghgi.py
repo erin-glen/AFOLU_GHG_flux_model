@@ -1116,6 +1116,18 @@ def main(argv=None):
             "IDN, KAZ, MYS, RUS, USA)."
         ),
     )
+    p.add_argument(
+        "--t3d_landuse",
+        nargs="+",
+        default=None,
+        help=(
+            "Model land-use values to sum for the Table 3.D.1.f cultivation-of-"
+            "organic-soils N2O comparison. Defaults to "
+            f"{list(T3D_N2O_MODEL_LANDUSE)} (matches IPCC 2006 Vol. 4 Ch. 11 "
+            "scope and FAOSTAT GV); pass --t3d_landuse Cropland to drop "
+            "grassland."
+        ),
+    )
     p.add_argument("--aws_region", default=None)
     p.add_argument(
         "--adm0_lookup_csv",
@@ -1213,15 +1225,16 @@ def main(argv=None):
     joined = join_model_nghgi(model_df, nghgi_df)
     print(f"  joined rows: {len(joined):,}")
 
+    t3d_landuse = tuple(args.t3d_landuse) if args.t3d_landuse else T3D_N2O_MODEL_LANDUSE
     joined_t3d = (
-        join_model_nghgi_t3d(model_df, nghgi_t3d_df, T3D_N2O_MODEL_LANDUSE)
+        join_model_nghgi_t3d(model_df, nghgi_t3d_df, t3d_landuse)
         if not nghgi_t3d_df.empty
         else pd.DataFrame()
     )
     if not joined_t3d.empty:
         print(
             f"  Table 3.D joined rows: {len(joined_t3d):,}  "
-            f"(model land-uses summed: {','.join(T3D_N2O_MODEL_LANDUSE)})"
+            f"(model land-uses summed: {','.join(t3d_landuse)})"
         )
 
     # --- Write tables ---
@@ -1311,7 +1324,7 @@ def main(argv=None):
 
     # --- Table 3.D.1.f figures (per interval) ---
     if not joined_t3d.empty:
-        landuse_label = "+".join(T3D_N2O_MODEL_LANDUSE)
+        landuse_label = "+".join(t3d_landuse)
         t3d_order = ["Cultivation"]
         t3d_colors = {"Cultivation": "#D55E00"}
         for interval in sorted(joined_t3d["interval"].dropna().unique()):
