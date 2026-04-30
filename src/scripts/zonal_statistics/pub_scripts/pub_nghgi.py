@@ -320,6 +320,7 @@ def nghgi_by_iso_landuse_interval(
     nghgi_t4ii: pd.DataFrame,
     nghgi_cstock: pd.DataFrame,
     interval_pairs: Sequence[Tuple[int, int]],
+    jrc_lu: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Average NGHGI values over each (start_year, end_year) interval.
@@ -405,6 +406,21 @@ def nghgi_by_iso_landuse_interval(
     # organic area / C-stock change per land use; deeper sub-categories would
     # double-count when summed.
     cstock_top = nghgi_cstock[nghgi_cstock["category_code"].str.count(r"\.") == 1].copy()
+
+    # JRC override: for countries present in the JRC AnnexI 2026 drop, replace
+    # raw 2025-cycle cstock + area_organic with JRC 2026-cycle values. Raw-only
+    # countries (those not in JRC) keep their raw values unchanged.
+    if jrc_lu is not None and not jrc_lu.empty:
+        jrc_iso3s = set(jrc_lu["iso3"].dropna().unique())
+        cstock_top = cstock_top[~cstock_top["iso3"].isin(jrc_iso3s)].copy()
+        jrc_for_merge = jrc_lu.rename(
+            columns={"cstock_organic_ktC": "cstock_soil_organic_ktC"}
+        )[["iso3", "year", "land_use", "area_organic_kha", "cstock_soil_organic_ktC"]].copy()
+        jrc_for_merge["category_code"] = jrc_for_merge["land_use"].map(
+            {v: k for k, v in jrc_loader.JRC_CATEGORY_TO_LANDUSE.items()}
+        )
+        cstock_top = pd.concat([cstock_top, jrc_for_merge], ignore_index=True)
+
     cstock_per_year = (
         cstock_top.groupby(["iso3", "year", "land_use"], as_index=False, observed=False)
         .agg(
@@ -951,6 +967,17 @@ def main(argv=None):
             "then exit. Skips the model side and the regular figure pipeline."
         ),
     )
+    p.add_argument(
+        "--no_jrc",
+        action="store_true",
+        help=(
+            "Skip the JRC AnnexI 2026 drop and run on raw-extract data only "
+            "(the original 12-country comparison). By default the JRC drop "
+            "is loaded and used for the 36 Annex I countries it covers, "
+            "with the raw extract kept for the 6 raw-only countries (CHN, "
+            "IDN, KAZ, MYS, RUS, USA)."
+        ),
+    )
     p.add_argument("--aws_region", default=None)
     p.add_argument(
         "--adm0_lookup_csv",
@@ -1012,7 +1039,24 @@ def main(argv=None):
     print(f"  Table 4(II) rows: {len(t4ii):,}  (organic-soil rows only)")
     print(f"  Table 4.A-F rows: {len(cstock):,}")
 
-    nghgi_df = nghgi_by_iso_landuse_interval(t4ii, cstock, interval_pairs)
+    jrc_lu = None
+    if not args.no_jrc:
+        annexi_dir, _ = jrc_loader.default_jrc_paths(args.jrc_dir)
+        if os.path.isdir(annexi_dir):
+            jrc_lu = jrc_loader.load_jrc_landuse_tables(annexi_dir)
+            jrc_iso3s = sorted(jrc_lu["iso3"].dropna().unique())
+            raw_iso3s = sorted(cstock["iso3"].dropna().unique())
+            jrc_only = sorted(set(jrc_iso3s) - set(raw_iso3s))
+            overlap = sorted(set(jrc_iso3s) & set(raw_iso3s))
+            raw_only = sorted(set(raw_iso3s) - set(jrc_iso3s))
+            print(f"  JRC AnnexI 2026 rows: {len(jrc_lu):,} ({len(jrc_iso3s)} iso3)")
+            print(f"    JRC-only iso3 ({len(jrc_only)}): {', '.join(jrc_only)}")
+            print(f"    overlap iso3 (JRC overrides raw, {len(overlap)}): {', '.join(overlap)}")
+            print(f"    raw-only iso3 ({len(raw_only)}): {', '.join(raw_only)}")
+        else:
+            print(f"  [warn] --jrc_dir present but {annexi_dir} not found; running raw-only.")
+
+    nghgi_df = nghgi_by_iso_landuse_interval(t4ii, cstock, interval_pairs, jrc_lu=jrc_lu)
     print(f"  NGHGI rows after averaging: {len(nghgi_df):,}")
 
     # --- Join ---
