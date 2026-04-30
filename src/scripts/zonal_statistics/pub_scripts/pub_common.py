@@ -1060,7 +1060,14 @@ def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
                  AND j.peat_state = 'drained'
             THEN j.value ELSE 0
           END
-        ) AS drained_on_site_co2_Mg_CO2_yr
+        ) AS drained_on_site_co2_Mg_CO2_yr,
+        SUM(
+          CASE
+            WHEN lower(j.flux_type) LIKE 'drained_n2o%'
+                 AND j.peat_state = 'drained'
+            THEN j.value ELSE 0
+          END
+        ) AS drained_n2o_Mg_CO2e_yr
       FROM joined j
       GROUP BY 1,2,3
     )
@@ -1071,10 +1078,14 @@ def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
       base.land_use,
       base.drained_area_ha,
       base.undrained_area_ha,
-      base.drained_on_site_co2_Mg_CO2_yr
+      base.drained_on_site_co2_Mg_CO2_yr,
+      base.drained_n2o_Mg_CO2e_yr
     FROM base
     {join_l}
-    WHERE base.drained_area_ha <> 0 OR base.undrained_area_ha <> 0 OR base.drained_on_site_co2_Mg_CO2_yr <> 0
+    WHERE base.drained_area_ha <> 0
+       OR base.undrained_area_ha <> 0
+       OR base.drained_on_site_co2_Mg_CO2_yr <> 0
+       OR base.drained_n2o_Mg_CO2e_yr <> 0
     ORDER BY base.interval_end, base.gadm_adm0, base.land_use
     """
 

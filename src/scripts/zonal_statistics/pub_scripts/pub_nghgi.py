@@ -98,6 +98,19 @@ MODEL_LANDUSE_FOLD: Dict[str, str] = {
 
 LANDUSE_ORDER = ["Forest", "Cropland", "Grassland", "Wetland", "Settlement", "Otherland"]
 
+# Land uses on the model side that map to NGHGI Table 3.D.1.f "Cultivation of
+# organic soils (i.e. histosols)". IPCC 2006 Vol. 4 Ch. 11 covers cultivated
+# cropland + managed grassland on organic soils under this category, with
+# different EFs by land-use. Country practice varies (some put grassland in
+# Table 4(II).C instead) -- to switch this comparison to cropland-only,
+# override to ("Cropland",).
+T3D_N2O_MODEL_LANDUSE: Tuple[str, ...] = ("Cropland", "Grassland")
+
+# Global Warming Potential to convert Table 3.D.1.f kt N2O (mass) to kt CO2e.
+# Matches pub_fao convention so model and NGHGI N2O are compared on the same
+# CO2e basis as the model's drained_n2o_Mg_CO2e flux.
+T3D_N2O_GWP = 273.0
+
 LANDUSE_COLORS = {
     "Forest":     "#117733",
     "Cropland":   "#E17C05",
@@ -204,7 +217,12 @@ def _model_country_landuse_for_interval(
             ["interval_end", "gadm_adm0", "iso3", "country", "land_use_folded"],
             as_index=False,
             dropna=False,
-        )[["drained_area_ha", "undrained_area_ha", "drained_on_site_co2_Mg_CO2_yr"]]
+        )[[
+            "drained_area_ha",
+            "undrained_area_ha",
+            "drained_on_site_co2_Mg_CO2_yr",
+            "drained_n2o_Mg_CO2e_yr",
+        ]]
         .sum()
         .rename(columns={"land_use_folded": "land_use"})
     )
@@ -575,16 +593,21 @@ def _plot_scatter_model_vs_nghgi(
     value_nghgi: str,
     unit_label: str,
     title: str,
+    landuse_order: Optional[Sequence[str]] = None,
+    landuse_colors: Optional[Dict[str, str]] = None,
 ) -> plt.Figure:
     df = df.copy()
     df = df.dropna(subset=[value_model, value_nghgi])
     df = df[(df[value_model] > 0) & (df[value_nghgi] > 0)]
 
+    order = list(landuse_order) if landuse_order is not None else LANDUSE_ORDER
+    colors = landuse_colors if landuse_colors is not None else LANDUSE_COLORS
+
     theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "both"}
     with pc.use_theme(theme):
         fig, ax = plt.subplots(figsize=(6.5, 6.0))
 
-        for lu in LANDUSE_ORDER:
+        for lu in order:
             sub = df[df["land_use"] == lu]
             if sub.empty:
                 continue
@@ -592,7 +615,7 @@ def _plot_scatter_model_vs_nghgi(
                 sub[value_nghgi],
                 sub[value_model],
                 label=lu,
-                color=LANDUSE_COLORS.get(lu, "#444"),
+                color=colors.get(lu, "#444"),
                 alpha=0.75,
                 edgecolor="white",
                 linewidth=0.5,
@@ -754,6 +777,121 @@ def _plot_topn_area_stacked(
             pc.fmt_si(ax, axis="y")
         fig.tight_layout()
         return fig
+
+
+# ----------------------------- Table 3.D.1.f N2O -----------------------------
+
+def nghgi_t3d_by_iso_interval(
+    jrc_t3d: pd.DataFrame,
+    interval_pairs: Sequence[Tuple[int, int]],
+) -> pd.DataFrame:
+    """
+    Average JRC Table 3.D.1.f cultivation-of-organic-soils area + N2O over each
+    inventory interval. Returns one row per (iso3, interval_end) with:
+        nghgi_t3d_area_ha
+        nghgi_t3d_n2o_kt
+        nghgi_t3d_n2o_Mg_CO2e_yr   (kt N2O * GWP * 1000)
+        nghgi_t3d_source           ('JRC_AnnexI_2026' | 'JRC_BTR1_2024')
+    """
+    if jrc_t3d is None or jrc_t3d.empty:
+        return pd.DataFrame()
+
+    df = jrc_t3d.copy()
+    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+
+    rows: list[pd.DataFrame] = []
+    for start, end in interval_pairs:
+        window = df[(df["year"] >= start) & (df["year"] <= end)].copy()
+        if window.empty:
+            continue
+        # source: take the first (sorted) source seen for the window. JRC dedup
+        # in the loader already prefers AnnexI 2026 over BTR1 2024 per row, so
+        # mode-by-iso3 here is just for the output label.
+        grouped = (
+            window.groupby("iso3", as_index=False, observed=False)
+            .agg(
+                nghgi_t3d_area_ha=("area_ha", "mean"),
+                nghgi_t3d_n2o_kt=("n2o_kt", "mean"),
+                nghgi_t3d_source=("source", lambda s: s.mode().iloc[0] if not s.mode().empty else None),
+                nghgi_t3d_years_available=("year", "nunique"),
+            )
+        )
+        grouped["interval_start"] = start
+        grouped["interval_end"] = end
+        grouped["interval"] = f"{start}_{end}"
+        rows.append(grouped)
+
+    if not rows:
+        return pd.DataFrame()
+    out = pd.concat(rows, ignore_index=True)
+    out["nghgi_t3d_n2o_Mg_CO2e_yr"] = out["nghgi_t3d_n2o_kt"] * T3D_N2O_GWP * 1_000.0
+    return out
+
+
+def join_model_nghgi_t3d(
+    model_df: pd.DataFrame,
+    t3d_df: pd.DataFrame,
+    model_landuse: Sequence[str] = T3D_N2O_MODEL_LANDUSE,
+) -> pd.DataFrame:
+    """
+    Build the per-country Table 3.D.1.f comparison frame. Sums model drained
+    area and drained N2O across the configured cultivation land uses (default
+    Cropland + Grassland), then outer-joins to the per-country NGHGI 3.D row.
+    """
+    if model_df.empty and t3d_df.empty:
+        return pd.DataFrame()
+
+    if not model_df.empty:
+        m = model_df[model_df["land_use"].isin(model_landuse)].copy()
+        model_t3d = (
+            m.groupby(
+                ["run_label", "run_name", "model_version", "run_date",
+                 "interval", "interval_start", "interval_end",
+                 "gadm_adm0", "iso3", "country"],
+                as_index=False,
+                observed=False,
+                dropna=False,
+            )[[
+                "drained_area_ha",
+                "drained_n2o_Mg_CO2e_yr",
+            ]]
+            .sum()
+            .rename(columns={
+                "drained_area_ha": "model_t3d_drained_area_ha",
+                "drained_n2o_Mg_CO2e_yr": "model_t3d_drained_n2o_Mg_CO2e_yr",
+            })
+        )
+        model_t3d["model_t3d_landuse_set"] = ",".join(model_landuse)
+    else:
+        model_t3d = pd.DataFrame()
+
+    if model_t3d.empty:
+        return t3d_df.assign(
+            model_t3d_drained_area_ha=np.nan,
+            model_t3d_drained_n2o_Mg_CO2e_yr=np.nan,
+            model_t3d_landuse_set=",".join(model_landuse),
+        )
+    if t3d_df.empty:
+        return model_t3d.assign(
+            nghgi_t3d_area_ha=np.nan,
+            nghgi_t3d_n2o_kt=np.nan,
+            nghgi_t3d_n2o_Mg_CO2e_yr=np.nan,
+            nghgi_t3d_source=None,
+            nghgi_t3d_years_available=np.nan,
+        )
+
+    return model_t3d.merge(
+        t3d_df[[
+            "iso3", "interval_end",
+            "nghgi_t3d_area_ha",
+            "nghgi_t3d_n2o_kt",
+            "nghgi_t3d_n2o_Mg_CO2e_yr",
+            "nghgi_t3d_source",
+            "nghgi_t3d_years_available",
+        ]],
+        on=["iso3", "interval_end"],
+        how="outer",
+    )
 
 
 # ----------------------------- validation -----------------------------
@@ -1040,8 +1178,9 @@ def main(argv=None):
     print(f"  Table 4.A-F rows: {len(cstock):,}")
 
     jrc_lu = None
+    jrc_t3d = None
     if not args.no_jrc:
-        annexi_dir, _ = jrc_loader.default_jrc_paths(args.jrc_dir)
+        annexi_dir, btr1_path = jrc_loader.default_jrc_paths(args.jrc_dir)
         if os.path.isdir(annexi_dir):
             jrc_lu = jrc_loader.load_jrc_landuse_tables(annexi_dir)
             jrc_iso3s = sorted(jrc_lu["iso3"].dropna().unique())
@@ -1053,16 +1192,37 @@ def main(argv=None):
             print(f"    JRC-only iso3 ({len(jrc_only)}): {', '.join(jrc_only)}")
             print(f"    overlap iso3 (JRC overrides raw, {len(overlap)}): {', '.join(overlap)}")
             print(f"    raw-only iso3 ({len(raw_only)}): {', '.join(raw_only)}")
+
+            jrc_t3d = jrc_loader.load_jrc_table_3d(annexi_dir, btr1_path)
+            t3d_iso3s = sorted(jrc_t3d.dropna(subset=["n2o_kt"])["iso3"].unique())
+            print(
+                f"  JRC Table 3.D.1.f rows: {len(jrc_t3d):,} ({len(t3d_iso3s)} iso3 with numeric N2O)"
+            )
         else:
             print(f"  [warn] --jrc_dir present but {annexi_dir} not found; running raw-only.")
 
     nghgi_df = nghgi_by_iso_landuse_interval(t4ii, cstock, interval_pairs, jrc_lu=jrc_lu)
     print(f"  NGHGI rows after averaging: {len(nghgi_df):,}")
 
+    nghgi_t3d_df = nghgi_t3d_by_iso_interval(jrc_t3d, interval_pairs) if jrc_t3d is not None else pd.DataFrame()
+    if not nghgi_t3d_df.empty:
+        print(f"  NGHGI Table 3.D rows after averaging: {len(nghgi_t3d_df):,}")
+
     # --- Join ---
     print("\n[3/3] Joining model + NGHGI")
     joined = join_model_nghgi(model_df, nghgi_df)
     print(f"  joined rows: {len(joined):,}")
+
+    joined_t3d = (
+        join_model_nghgi_t3d(model_df, nghgi_t3d_df, T3D_N2O_MODEL_LANDUSE)
+        if not nghgi_t3d_df.empty
+        else pd.DataFrame()
+    )
+    if not joined_t3d.empty:
+        print(
+            f"  Table 3.D joined rows: {len(joined_t3d):,}  "
+            f"(model land-uses summed: {','.join(T3D_N2O_MODEL_LANDUSE)})"
+        )
 
     # --- Write tables ---
     out_data = _join(OUT_DIR, "figures", "data")
@@ -1075,6 +1235,11 @@ def main(argv=None):
         print("    - model_country_landuse.csv")
         print("    - nghgi_country_landuse.csv")
         print("    - model_vs_nghgi.csv")
+        if not joined_t3d.empty:
+            _write_csv_df(writer_con, nghgi_t3d_df, _join(out_data, "nghgi_t3d_country.csv"))
+            _write_csv_df(writer_con, joined_t3d,   _join(out_data, "model_vs_nghgi_t3d.csv"))
+            print("    - nghgi_t3d_country.csv")
+            print("    - model_vs_nghgi_t3d.csv")
     finally:
         writer_con.close()
 
@@ -1143,6 +1308,37 @@ def main(argv=None):
             yscale="log",
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_area_stacked_log_{interval}.png"), dpi=200)
+
+    # --- Table 3.D.1.f figures (per interval) ---
+    if not joined_t3d.empty:
+        landuse_label = "+".join(T3D_N2O_MODEL_LANDUSE)
+        t3d_order = ["Cultivation"]
+        t3d_colors = {"Cultivation": "#D55E00"}
+        for interval in sorted(joined_t3d["interval"].dropna().unique()):
+            sub_t3d = joined_t3d[joined_t3d["interval"] == interval].copy()
+            sub_t3d["land_use"] = "Cultivation"
+
+            fig = _plot_scatter_model_vs_nghgi(
+                sub_t3d,
+                value_model="model_t3d_drained_area_ha",
+                value_nghgi="nghgi_t3d_area_ha",
+                unit_label=f"{landuse_label} drained area (ha)",
+                title=f"Model vs NGHGI 3.D.1.f cultivation area ({interval})",
+                landuse_order=t3d_order,
+                landuse_colors=t3d_colors,
+            )
+            _save_png(fig, _join(OUT_DIR, "figures", f"scatter_t3d_area_{interval}.png"), dpi=200)
+
+            fig = _plot_scatter_model_vs_nghgi(
+                sub_t3d,
+                value_model="model_t3d_drained_n2o_Mg_CO2e_yr",
+                value_nghgi="nghgi_t3d_n2o_Mg_CO2e_yr",
+                unit_label=f"{landuse_label} drained N2O (Mg CO2e/yr)",
+                title=f"Model vs NGHGI 3.D.1.f cultivation N2O ({interval})",
+                landuse_order=t3d_order,
+                landuse_colors=t3d_colors,
+            )
+            _save_png(fig, _join(OUT_DIR, "figures", f"scatter_t3d_n2o_{interval}.png"), dpi=200)
 
     print("Done.")
     return 0
