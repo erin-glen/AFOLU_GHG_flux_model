@@ -51,6 +51,7 @@ import pandas as pd
 
 import src.scripts.zonal_statistics.pub_scripts.pub_assets as pa
 import src.scripts.zonal_statistics.pub_scripts.pub_common as pc
+import src.scripts.zonal_statistics.pub_scripts.extract_organic_soil_jrc as jrc_loader
 from src.scripts.zonal_statistics.run_zonal_stats import (
     build_interval_pairs,
     build_output_parquet,
@@ -63,6 +64,7 @@ OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_NGHGI_DIR", "/mnt/c/tmp/pub_nghgi")
 OUT_DIR = OUT_DIR_ROOT
 
 DEFAULT_NGHGI_DIR = os.environ.get("AFOLU_NGHGI_DATA_DIR", "/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi")
+DEFAULT_JRC_DIR = jrc_loader.DEFAULT_JRC_DIR
 NGHGI_TABLE_4II_NAME = "organic_soil_compiled.csv"
 NGHGI_CSTOCK_NAME = "organic_soil_cstock_compiled.csv"
 
@@ -738,6 +740,161 @@ def _plot_topn_area_stacked(
         return fig
 
 
+# ----------------------------- validation -----------------------------
+
+def _aggregate_raw_cstock_top_level(raw_cstock: pd.DataFrame) -> pd.DataFrame:
+    """
+    Collapse the raw cstock CSV to the same per-(iso3, year, land_use) shape
+    that JRC reports: top-level land-use rows (4.A, 4.B, ...) only.
+
+    Uses sum(min_count=1) so a group of all-NaN values (country reports IE/NE)
+    stays NaN rather than collapsing to 0 — otherwise the comparison flags
+    sentinel-only countries as "raw=0 vs jrc=numeric" disagreements.
+    """
+    top = raw_cstock[raw_cstock["category_code"].str.count(r"\.") == 1].copy()
+    return (
+        top.groupby(["iso3", "year", "land_use"], as_index=False, observed=False)
+        .agg(
+            raw_area_organic_kha=("area_organic_kha", lambda s: s.sum(min_count=1)),
+            raw_cstock_organic_ktC=("cstock_soil_organic_ktC", lambda s: s.sum(min_count=1)),
+        )
+    )
+
+
+def _plot_validation_scatter(
+    df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    unit_label: str,
+    title: str,
+) -> plt.Figure:
+    theme = {**pc.THEME_LIGHT_GRID, "axes.grid.axis": "both"}
+    with pc.use_theme(theme):
+        fig, ax = plt.subplots(figsize=(6.5, 6.0))
+        for lu in LANDUSE_ORDER:
+            sub = df[df["land_use"] == lu]
+            if sub.empty:
+                continue
+            ax.scatter(
+                sub[x_col], sub[y_col],
+                label=lu, color=LANDUSE_COLORS.get(lu, "#444"),
+                alpha=0.6, s=22, edgecolor="white", linewidth=0.4,
+            )
+        if not df.empty:
+            lo = float(min(df[x_col].min(), df[y_col].min()))
+            hi = float(max(df[x_col].max(), df[y_col].max()))
+            ax.plot([lo, hi], [lo, hi], color="#888", linestyle="--", linewidth=1.0, label="1:1")
+        ax.set_xlabel(f"Raw extract  {unit_label}")
+        ax.set_ylabel(f"JRC aggregate  {unit_label}")
+        ax.set_title(title)
+        ax.legend(loc="best", frameon=False, fontsize=9)
+        pc.tidy_axes(ax, grid="both")
+        fig.tight_layout()
+        return fig
+
+
+def run_jrc_validation(
+    nghgi_dir: str,
+    jrc_dir: str,
+    out_dir: str,
+    rel_diff_threshold: float = 0.10,
+) -> int:
+    """
+    Compare raw CRT-extracted Tables 4.A-F against the JRC AnnexI 2026
+    aggregates for the country-year-land-use rows present in both. Writes
+    one scatter PNG per variable and a CSV of the joined rows with diffs.
+    """
+    print("\n[validation] Loading raw cstock CSV")
+    raw_cstock = _load_nghgi_cstock(nghgi_dir)
+    raw_agg = _aggregate_raw_cstock_top_level(raw_cstock)
+    raw_iso = sorted(raw_agg["iso3"].dropna().unique())
+    print(f"  raw iso3 ({len(raw_iso)}): {', '.join(raw_iso)}")
+
+    print("\n[validation] Loading JRC AnnexI 2026 land-use tables")
+    annexi_dir, _btr1 = jrc_loader.default_jrc_paths(jrc_dir)
+    jrc_lu = jrc_loader.load_jrc_landuse_tables(annexi_dir)
+    jrc_iso = sorted(jrc_lu["iso3"].dropna().unique())
+    print(f"  jrc iso3 ({len(jrc_iso)}): {', '.join(jrc_iso)}")
+
+    overlap_iso = sorted(set(raw_iso) & set(jrc_iso))
+    raw_only = sorted(set(raw_iso) - set(jrc_iso))
+    print(f"\n[validation] Overlap iso3 ({len(overlap_iso)}): {', '.join(overlap_iso)}")
+    print(f"  raw-only (kept on raw side permanently): {', '.join(raw_only)}")
+
+    jrc_agg = jrc_lu.rename(
+        columns={
+            "area_organic_kha": "jrc_area_organic_kha",
+            "cstock_organic_ktC": "jrc_cstock_organic_ktC",
+        }
+    )[["iso3", "year", "land_use", "jrc_area_organic_kha", "jrc_cstock_organic_ktC"]]
+
+    # Normalize Int64 dtypes so the merge keys align
+    raw_agg["year"] = pd.to_numeric(raw_agg["year"], errors="coerce").astype("Int64")
+    jrc_agg["year"] = pd.to_numeric(jrc_agg["year"], errors="coerce").astype("Int64")
+
+    merged = raw_agg.merge(jrc_agg, on=["iso3", "year", "land_use"], how="inner")
+    merged = merged[merged["iso3"].isin(overlap_iso)].copy()
+
+    # Relative diff = (jrc - raw) / max(|raw|, |jrc|); avoids div-by-zero on cstock
+    for var, raw_col, jrc_col in [
+        ("area", "raw_area_organic_kha", "jrc_area_organic_kha"),
+        ("cstock", "raw_cstock_organic_ktC", "jrc_cstock_organic_ktC"),
+    ]:
+        denom = np.maximum(merged[raw_col].abs(), merged[jrc_col].abs())
+        merged[f"{var}_abs_diff"] = merged[jrc_col] - merged[raw_col]
+        merged[f"{var}_rel_diff"] = np.where(
+            denom > 0, (merged[jrc_col] - merged[raw_col]) / denom, np.nan
+        )
+
+    out_data = _join(out_dir, "figures", "validation", "data")
+    writer_con = duckdb.connect()
+    try:
+        _write_csv_df(writer_con, merged, _join(out_data, "validation_overlap.csv"))
+    finally:
+        writer_con.close()
+
+    print(f"\n[validation] Joined overlap rows: {len(merged):,}")
+    for var, raw_col, jrc_col, unit_label, fig_label in [
+        ("area",   "raw_area_organic_kha",   "jrc_area_organic_kha",
+         "organic-soil area (kha)",          "area_organic"),
+        ("cstock", "raw_cstock_organic_ktC", "jrc_cstock_organic_ktC",
+         "organic-soil cstock (kt C)",       "cstock_organic"),
+    ]:
+        sub = merged.dropna(subset=[raw_col, jrc_col])
+        n = len(sub)
+        n_disagree = int((sub[f"{var}_rel_diff"].abs() > rel_diff_threshold).sum())
+        worst = sub.assign(_a=sub[f"{var}_rel_diff"].abs()).nlargest(5, "_a")
+        print(
+            f"  [{var}] both-numeric rows: {n:,}  "
+            f">{rel_diff_threshold:.0%} disagree: {n_disagree}"
+        )
+        if n_disagree:
+            print(f"    top-5 worst: ")
+            for _, r in worst.iterrows():
+                print(
+                    f"      {r['iso3']} {int(r['year']):d} {r['land_use']:<10s}  "
+                    f"raw={r[raw_col]:>12.3f}  jrc={r[jrc_col]:>12.3f}  "
+                    f"rel_diff={r[f'{var}_rel_diff']:+.2%}"
+                )
+
+        fig = _plot_validation_scatter(
+            sub, raw_col, jrc_col,
+            unit_label=unit_label,
+            title=f"Raw extract vs JRC aggregate -- {unit_label}",
+        )
+        _save_png(
+            fig,
+            _join(out_dir, "figures", "validation", f"scatter_{fig_label}_raw_vs_jrc.png"),
+            dpi=200,
+        )
+
+    print("\n[validation] Wrote:")
+    print(f"  - figures/validation/scatter_area_organic_raw_vs_jrc.png")
+    print(f"  - figures/validation/scatter_cstock_organic_raw_vs_jrc.png")
+    print(f"  - figures/validation/data/validation_overlap.csv")
+    return 0
+
+
 # ----------------------------- driver -----------------------------
 
 def main(argv=None):
@@ -748,17 +905,23 @@ def main(argv=None):
     p.add_argument(
         "--years",
         nargs="+",
-        required=True,
+        required=False,
+        default=None,
         type=int,
-        help="One or more inventory end years (e.g. 2005 2010 2015 2020 2024).",
+        help=(
+            "One or more inventory end years (e.g. 2005 2010 2015 2020 2024). "
+            "Required unless --validate_jrc is set."
+        ),
     )
     p.add_argument(
         "--run",
         action="append",
-        required=True,
+        required=False,
+        default=None,
         help=(
             "Run spec: run_name=model_version:run_date[|Label] "
-            "(e.g. 'zarr_test_full=0_1_2:20260403|GFW'). One per model source."
+            "(e.g. 'zarr_test_full=0_1_2:20260403|GFW'). One per model source. "
+            "Required unless --validate_jrc is set."
         ),
     )
     p.add_argument(
@@ -768,6 +931,24 @@ def main(argv=None):
             f"Directory with compiled NGHGI CSVs "
             f"({NGHGI_TABLE_4II_NAME}, {NGHGI_CSTOCK_NAME}). "
             f"Default: {DEFAULT_NGHGI_DIR}"
+        ),
+    )
+    p.add_argument(
+        "--jrc_dir",
+        default=DEFAULT_JRC_DIR,
+        help=(
+            f"Directory containing the JRC-aggregated drop "
+            f"(AnnexI_2026/, BTR1_2024_Table3D.xlsx). Default: {DEFAULT_JRC_DIR}"
+        ),
+    )
+    p.add_argument(
+        "--validate_jrc",
+        action="store_true",
+        help=(
+            "Validation-only mode: compare raw-extract Tables 4.A-F against "
+            "the JRC AnnexI 2026 aggregates on overlapping iso3/year/land-use "
+            "rows, write scatter PNGs and a diff CSV under figures/validation/, "
+            "then exit. Skips the model side and the regular figure pipeline."
         ),
     )
     p.add_argument("--aws_region", default=None)
@@ -785,6 +966,20 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     OUT_DIR_ROOT = args.out_dir_root
+
+    if args.validate_jrc:
+        drop_label = os.path.basename(os.path.normpath(args.jrc_dir)) or "jrc"
+        out_dir = _join(OUT_DIR_ROOT, "validation", drop_label)
+        print("NGHGI validation mode (raw extract vs JRC AnnexI 2026)")
+        print("  nghgi_dir:", args.nghgi_dir)
+        print("  jrc_dir  :", args.jrc_dir)
+        print("  output dir:", out_dir)
+        return run_jrc_validation(args.nghgi_dir, args.jrc_dir, out_dir)
+
+    if not args.years:
+        p.error("--years is required (unless --validate_jrc is set)")
+    if not args.run:
+        p.error("--run is required (unless --validate_jrc is set)")
 
     years = sorted({int(y) for y in args.years})
     run_specs = _parse_run_specs(args.run)
