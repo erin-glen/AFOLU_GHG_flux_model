@@ -25,7 +25,7 @@ from src.scripts.utilities import log_utilities as lu
 DATA_TYPES = [
     # "burned_ch4_Mg_CO2e_ha",
     # "burned_co2_Mg_CO2_ha",
-    # "burned_co_Mg_CO2e_ha",
+    # "burned_co_Mg_CO_ha",
     # "burned_total_Mg_CO2e_ha_yr",
     # "burned_total_co2_Mg_CO2_ha_yr",
     # "burned_total_ch4_Mg_CO2e_ha_yr",

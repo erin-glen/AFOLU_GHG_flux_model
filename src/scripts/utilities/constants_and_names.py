@@ -54,7 +54,7 @@ drainage_outputs_to_zarr = [
     "drained_co2_offsite_Mg_CO2_ha_yr",
     "drained_total_Mg_CO2e_ha_yr",
     "burned_co2_Mg_CO2_ha_yr",
-    "burned_co_Mg_CO2e_ha_yr",
+    "burned_co_Mg_CO_ha_yr",
     "burned_ch4_Mg_CO2e_ha_yr",
     "burned_total_Mg_CO2e_ha_yr",
 ]
@@ -80,7 +80,7 @@ drainage_output_dtypes = {
     "drained_co2_offsite_Mg_CO2_ha_yr": "float32",
     "drained_total_Mg_CO2e_ha_yr": "float32",
     "burned_co2_Mg_CO2_ha_yr": "float32",
-    "burned_co_Mg_CO2e_ha_yr": "float32",
+    "burned_co_Mg_CO_ha_yr": "float32",
     "burned_ch4_Mg_CO2e_ha_yr": "float32",
     "burned_total_Mg_CO2e_ha_yr": "float32",
 }
