@@ -467,8 +467,8 @@ def nghgi_by_iso_landuse_interval(
     cstock_per_year = (
         cstock_top.groupby(["iso3", "year", "land_use"], as_index=False, observed=False)
         .agg(
-            cstock_soil_organic_ktC=("cstock_soil_organic_ktC", "sum"),
-            nghgi_area_organic_t4land_kha=("area_organic_kha", "sum"),
+            cstock_soil_organic_ktC=("cstock_soil_organic_ktC", lambda s: s.sum(min_count=1)),
+            nghgi_area_organic_t4land_kha=("area_organic_kha", lambda s: s.sum(min_count=1)),
         )
     )
     # -kt C * 44/12 => kt CO2. Flip sign so a net C loss reads as a positive emission.
