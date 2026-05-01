@@ -234,14 +234,14 @@ def calculate_drainage_and_emissions(
                 ):
                     node = nu.accrete_node(node, 2)
                     drained = True
+                elif extraction > 0:
+                    node = nu.accrete_node(node, 5)
+                    drained = True
                 elif land_cover in (cropland_code, settlement_code):
                     node = nu.accrete_node(node, 3)
                     drained = True
                 elif has_effective_plantation:
                     node = nu.accrete_node(node, 4)
-                    drained = True
-                elif extraction > 0:
-                    node = nu.accrete_node(node, 5)
                     drained = True
                 else:
                     node = nu.accrete_node(node, 6)

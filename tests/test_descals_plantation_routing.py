@@ -21,6 +21,8 @@ SPEC.loader.exec_module(drainage_model)
 
 
 def _meaning(mapping, code):
+    if int(code) == 0:
+        return "unburned"
     return mapping[str(int(code)).zfill(zc.PAD_DIGITS)]
 
 
