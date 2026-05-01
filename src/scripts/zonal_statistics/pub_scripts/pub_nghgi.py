@@ -52,6 +52,7 @@ import pandas as pd
 import src.scripts.zonal_statistics.pub_scripts.pub_assets as pa
 import src.scripts.zonal_statistics.pub_scripts.pub_common as pc
 import src.scripts.zonal_statistics.pub_scripts.extract_organic_soil_jrc as jrc_loader
+from src.scripts.utilities import local_output_paths as lop
 from src.scripts.zonal_statistics.run_zonal_stats import (
     build_interval_pairs,
     build_output_parquet,
@@ -60,7 +61,7 @@ from src.scripts.zonal_statistics.run_zonal_stats import (
 
 # ----------------------------- config -----------------------------
 
-OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_NGHGI_DIR", "/mnt/c/tmp/pub_nghgi")
+OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_NGHGI_DIR", lop.publication_root("nghgi"))
 OUT_DIR = OUT_DIR_ROOT
 
 DEFAULT_NGHGI_DIR = os.environ.get("AFOLU_NGHGI_DATA_DIR", "/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi")

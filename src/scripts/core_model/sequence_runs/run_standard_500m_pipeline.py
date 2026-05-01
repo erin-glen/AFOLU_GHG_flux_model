@@ -35,10 +35,12 @@ from pathlib import Path
 from typing import Iterable, List, Tuple, Optional, Sequence
 
 from src.scripts.utilities import constants_and_names as cn
+from src.scripts.utilities import local_output_paths as lop
 
 
 DEFAULT_RUN_DATE = datetime.utcnow().strftime("%Y%m%d")
 DEFAULT_MODEL_VERSION = cn.model_version_underscore
+DEFAULT_LOG_DIR = Path(lop.pipeline_log_dir("standard_500m"))
 
 
 def _split_cli_values(value: str | Sequence[str | int]) -> List[str]:
@@ -251,7 +253,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Interval end year(s) for aggregate and zonal-statistics steps.",
     )
     p.add_argument("--model-version", default=DEFAULT_MODEL_VERSION, help="Model version for zonal-statistics.")
-    p.add_argument("--log-dir", type=Path, default=Path("../logs"), help="Directory for per-step logs.")
+    p.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR, help="Directory for per-step logs.")
     p.add_argument("--dry-run", action="store_true", help="Print the commands without executing them.")
     p.add_argument("--continue-on-error", action="store_true", help="Keep going if a step fails.")
     p.add_argument("--skip", nargs="*", default=[], help="List of step labels to skip (substring match).")

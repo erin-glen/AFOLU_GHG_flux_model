@@ -41,13 +41,14 @@ import matplotlib.pyplot as plt
 
 import src.scripts.zonal_statistics.pub_scripts.pub_common as pc
 from src.scripts.zonal_statistics import zonal_constants as zc
+from src.scripts.utilities import local_output_paths as lop
 from src.scripts.zonal_statistics.run_zonal_stats import (
     build_output_parquet,
     build_interval_pairs,
 )
 
 # ----------------------------- config -----------------------------
-OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_ASSETS_DIR", "/mnt/c/tmp/pub_assets")
+OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_ASSETS_DIR", lop.publication_root("assets"))
 OUT_DIR = OUT_DIR_ROOT
 CHUNK_STATS_ROOT = os.environ.get(
     "AFOLU_CHUNK_STATS_ROOT",
@@ -87,7 +88,9 @@ def _is_s3(path: str) -> bool:
     return str(path).startswith("s3://")
 
 def _join(base: str, *parts: str) -> str:
-    return posixpath.join(base, *parts) if _is_s3(base) else os.path.join(base, *parts)
+    if _is_s3(base):
+        return posixpath.join(base, *parts)
+    return os.path.join(base, *parts).replace("\\", "/")
 
 def _ensure_parent_dir_local(path: str):
     if _is_s3(path):
@@ -813,6 +816,7 @@ def _make_globs_for_components(base_prefixes: Sequence[str]) -> tuple[list[str],
 # ----------------------------- CLI ----------------------------------------
 
 def main(argv=None):
+    global OUT_DIR_ROOT, OUT_DIR
     p = argparse.ArgumentParser("Build publication tables and figures (PNG-only)")
     p.add_argument("--model_version", required=True)
     p.add_argument("--run_name", required=True)
@@ -829,9 +833,14 @@ def main(argv=None):
     p.add_argument("--do-tables", type=int, default=1)
     p.add_argument("--do-figures", type=int, default=1)
     p.add_argument("--data-only", action="store_true")
+    p.add_argument(
+        "--out-dir-root",
+        default=OUT_DIR_ROOT,
+        help=f"Output root (default: {OUT_DIR_ROOT}).",
+    )
     args = p.parse_args(argv)
 
-    global OUT_DIR
+    OUT_DIR_ROOT = args.out_dir_root
     OUT_DIR = build_output_dir(args.model_version, args.run_name, args.run_date)
 
     years = [int(y) for y in args.years]

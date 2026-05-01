@@ -51,6 +51,7 @@ Example usage
 from __future__ import annotations
 
 import argparse
+import os
 import posixpath
 from dataclasses import dataclass
 from typing import Sequence, Tuple, Optional
@@ -62,6 +63,7 @@ import pandas as pd
 
 import src.scripts.zonal_statistics.pub_scripts.pub_common as pc
 import src.scripts.zonal_statistics.pub_scripts.pub_assets as pa
+from src.scripts.utilities import local_output_paths as lop
 from src.scripts.zonal_statistics.run_zonal_stats import (
     build_interval_pairs,
     build_output_parquet,
@@ -69,7 +71,7 @@ from src.scripts.zonal_statistics.run_zonal_stats import (
 
 # ----------------------------- config -----------------------------
 
-OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_FAO_DIR", "/mnt/c/tmp/pub_fao")
+OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_FAO_DIR", lop.publication_root("fao"))
 OUT_DIR = OUT_DIR_ROOT
 
 # Default FAOSTAT CSV (S3)
@@ -630,6 +632,7 @@ def _plot_landuse_split(landuse: pd.DataFrame) -> plt.Figure:
 # ----------------------------- driver -----------------------------
 
 def main(argv=None):
+    global OUT_DIR_ROOT, OUT_DIR
     p = argparse.ArgumentParser(
         "Build FAO-style cropland/grassland comparison figures "
         "(OGH / GFW / GPD vs FAOSTAT)"
@@ -656,6 +659,11 @@ def main(argv=None):
         ),
     )
     p.add_argument("--data-only", action="store_true")
+    p.add_argument(
+        "--out-dir-root",
+        default=OUT_DIR_ROOT,
+        help=f"Output root (default: {OUT_DIR_ROOT}).",
+    )
     args = p.parse_args(argv)
 
     years = sorted({int(y) for y in args.years})
@@ -668,7 +676,7 @@ def main(argv=None):
 
     # Use the first run (typically OGH) to define the output directory
     primary = run_specs[0]
-    global OUT_DIR
+    OUT_DIR_ROOT = args.out_dir_root
     OUT_DIR = build_output_dir(primary.model_version, primary.run_name, primary.run_date)
 
     print("FAO comparison – model sources:")

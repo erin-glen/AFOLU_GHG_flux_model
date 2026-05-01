@@ -46,6 +46,7 @@ from flox.xarray import xarray_reduce
 
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import log_utilities as lu
+from src.scripts.utilities import local_output_paths as lop
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.zonal_statistics import zonal_constants as zc
@@ -73,6 +74,12 @@ CLIMATE_DOMAIN_VAR_NAME = "climate_domain"
 AREA_SCALE = np.float32(cn.m2_to_ha)
 
 ECOZONE_CODE_TO_NAME = {v: k for k, v in cn.ecozone_codes.items() if v > 0}
+
+
+def default_local_output(probability_date: str, contextual_date: str) -> str:
+    """Return the default local staging directory for this probability run."""
+
+    return lop.probability_area_stats_staging_dir(probability_date, contextual_date)
 
 
 def adm0_zarr_path(date: str) -> str:
@@ -398,7 +405,15 @@ def main(argv=None):
     parser.add_argument("--contextual_date", default="20250925", help="Date tag for adm0/pixel_area contextual zarrs.")
     parser.add_argument("--probability_date", default="20251105", help="Date tag for ogh_unthresholded_probability contextual zarr.")
     parser.add_argument("--chunk_size", type=int, default=10000)
-    parser.add_argument("--local_output", default="/tmp/probability_area_stats")
+    parser.add_argument(
+        "--local_output",
+        default=None,
+        help=(
+            "Local staging directory. Defaults to "
+            "AFOLU_LOCAL_OUTPUT_ROOT/staging/probability_area_stats/"
+            "<probability_date>/<contextual_date>."
+        ),
+    )
     parser.add_argument("--keep_local", action="store_true")
     parser.add_argument("--overwrite_existing", action="store_true")
     parser.add_argument("--debug", action="store_true")
@@ -419,6 +434,8 @@ def main(argv=None):
     parser.add_argument("--tile_ids", action="append", help="Comma-separated 10x10 tile IDs")
 
     args = parser.parse_args(argv)
+    if args.local_output is None:
+        args.local_output = default_local_output(args.probability_date, args.contextual_date)
     run(args)
 
 

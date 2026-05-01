@@ -81,6 +81,7 @@ from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
 from src.scripts.utilities import drainage_zarr_utilities as dzu
+from src.scripts.utilities import local_output_paths as lop
 
 # ------------------------------- config --------------------------------
 SPARSE_DEFAULT = True
@@ -117,6 +118,12 @@ FLUX_SPECS = {
 ALL_DATASETS: Dict[str, Dict[str, Any]] = {**STATE_DATASETS, **FLUX_DATASETS}
 
 CANONICAL_CONTEXTUAL_GROUPER_ORDER = ("wdpa", "kba")
+
+
+def default_local_output(model_version: str, run_name: str, run_date: str) -> str:
+    """Return the default local staging directory for this zonal-stats run."""
+
+    return lop.zonal_stats_staging_dir(model_version, run_name, run_date)
 
 
 def _expected_groups_with_zero(codes: Any, *, dtype: np.dtype) -> np.ndarray:
@@ -1420,7 +1427,14 @@ def main(argv=None):
                         help="Chunk-size segment in mega-zarr path (e.g., 1). If omitted, auto-discovers unique *_pixels store.")
     parser.add_argument("--interval_end_years", nargs="+", type=int, required=True)
     parser.add_argument("--chunk_size", type=int, default=10000)
-    parser.add_argument("--local_output", default="/tmp/zonal_stats")
+    parser.add_argument(
+        "--local_output",
+        default=None,
+        help=(
+            "Local staging directory for Parquet output. Defaults to "
+            "AFOLU_LOCAL_OUTPUT_ROOT/staging/zonal_stats/<model_version>/<run_name>/<run_date>."
+        ),
+    )
     parser.add_argument("--keep_local", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT)
@@ -1460,6 +1474,8 @@ def main(argv=None):
     parser.add_argument("--auto_tile_threshold_tiles", type=int, default=8)
     parser.add_argument("--keep_tile_stage", action="store_true")
     args = parser.parse_args(argv)
+    if args.local_output is None:
+        args.local_output = default_local_output(args.model_version, args.run_name, args.run_date)
     run(args)
 
 if __name__ == "__main__":

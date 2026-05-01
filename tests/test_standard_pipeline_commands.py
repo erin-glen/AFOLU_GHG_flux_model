@@ -36,3 +36,7 @@ def test_standard_pipeline_legacy_stage_points_to_legacy_module():
 
     assert legacy_cmd[2] == "src.scripts.core_model.legacy.2_per_pixel_soils_outputs"
     assert legacy_cmd[legacy_cmd.index("--output_date") + 1] == "20260417"
+
+
+def test_standard_pipeline_log_dir_defaults_to_afolu_namespace():
+    assert pipeline.DEFAULT_LOG_DIR.as_posix().endswith("/afolu/logs/pipelines/standard_500m")

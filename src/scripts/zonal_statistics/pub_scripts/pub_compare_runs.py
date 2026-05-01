@@ -145,10 +145,18 @@ from matplotlib import colors as mcolors
 
 import src.scripts.zonal_statistics.pub_scripts.pub_common as pc
 import src.scripts.zonal_statistics.pub_scripts.pub_assets as pa
+from src.scripts.utilities import local_output_paths as lop
 from src.scripts.zonal_statistics.run_zonal_stats import build_interval_pairs
 
 
-OUT_DIR_ROOT = pa.OUT_DIR_ROOT
+def _default_comparison_root() -> str:
+    legacy_assets_root = os.environ.get("AFOLU_PUB_ASSETS_DIR")
+    if legacy_assets_root:
+        return pa._join(legacy_assets_root, "comparisons")
+    return lop.publication_root("comparisons")
+
+
+OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_COMPARE_DIR", _default_comparison_root())
 
 _join = pa._join
 _save_png = pa._save_png
@@ -274,7 +282,7 @@ def _comparison_out_dir(run_specs: Mapping[str, RunSpec]) -> str:
     """Build comparison output directory segmented by run names only."""
     run_names = sorted(run_specs.keys())
     name_slug = "__".join(run_names) if run_names else "unspecified_runs"
-    return _join(OUT_DIR_ROOT, "comparisons", name_slug)
+    return _join(OUT_DIR_ROOT, name_slug)
 
 
 METRIC_SPECS: Mapping[str, MetricSpec] = {
@@ -327,7 +335,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         key="inventory_source",
         label="Inventory Input Source Comparison",
         run_names=(
-            "ogh_sensitivity_500m_10",
+            "ogh_biome_thresholds",
             "gfw_standard_model_500m",
             "gpd_standard_model_500m",
         ),
@@ -1620,6 +1628,7 @@ def _export_inventory_source_area_disagreement(
 
 
 def main(argv: Sequence[str] | None = None):
+    global OUT_DIR_ROOT
     parser = argparse.ArgumentParser("Build comparison figures across multiple runs")
     parser.add_argument("--years", nargs="+", required=True, help="Inventory period end years (e.g., 2005 2010 2015)")
     parser.add_argument(
@@ -1658,6 +1667,11 @@ def main(argv: Sequence[str] | None = None):
     parser.add_argument("--aws_region", default=None, help="Optional AWS region for S3 access")
     parser.add_argument("--data-only", action="store_true", help="Export CSV data only (skip figures)")
     parser.add_argument(
+        "--out-dir-root",
+        default=OUT_DIR_ROOT,
+        help=f"Output root (default: {OUT_DIR_ROOT}).",
+    )
+    parser.add_argument(
         "--flag-abs-mha",
         type=float,
         default=0.1,
@@ -1684,6 +1698,8 @@ def main(argv: Sequence[str] | None = None):
         ),
     )
     args = parser.parse_args(argv)
+
+    OUT_DIR_ROOT = args.out_dir_root
 
     try:
         years = [int(y) for y in args.years]

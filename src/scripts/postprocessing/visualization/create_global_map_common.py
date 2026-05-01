@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 from src.scripts.utilities import constants_and_names as cn
+from src.scripts.utilities import local_output_paths as lop
 
 
 DEFAULT_NATIVE_DEG = 0.00025
@@ -35,7 +36,7 @@ OUTPUTS_BASE = BASE_URL
 
 DEFAULT_DATE_TAG = "20260418"
 
-DISPLAY_OUT_ROOT = os.environ.get("DISPLAY_OUT_ROOT", "/tmp/create_global_maps/display")
+DISPLAY_OUT_ROOT = os.environ.get("DISPLAY_OUT_ROOT", lop.display_output_root())
 
 
 def deg_to_label(deg: float) -> str:

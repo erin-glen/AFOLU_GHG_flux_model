@@ -9,6 +9,7 @@ from src.scripts.utilities.lulucf_constants_and_names import (
     climate_domain_dir as lulucf_climate_domain_dir,
     climate_domain_pattern as lulucf_climate_domain_pattern,
 )
+from src.scripts.utilities import local_output_paths as lop
 
 # ---------------------------------------------------
 # 1. General Configuration
@@ -133,7 +134,7 @@ old_small_chunk_pattern = r"_-?\d+_-?\d+_-?\d+_-?\d+_"
 sample_tile_id = '{tile_id}'
 
 full_raster_dims = 40000
-local_chunk_stats_path = posixpath.join(local_temp_dir, 'chunk_stats')
+local_chunk_stats_path = lop.chunk_stats_root()
 s3_chunk_stats_path = "climate/AFOLU_flux_model/organic_soils/chunk_stats/"
 
 pixel_area_dir = f"{full_bucket_prefix}/analyses/area_28m/"
@@ -433,7 +434,7 @@ land_cover_pattern = "land_cover"
 # --- Display / cartography constants (for global JPEGs) ---
 
 _SHAPEFILE_DIR = os.environ.get(
-    "AFOLU_WORLD_BOUNDARIES_DIR", "/mnt/c/tmp/viz/world_boundaries"
+    "AFOLU_WORLD_BOUNDARIES_DIR", lop.world_boundaries_dir()
 )
 original_shapefile_path = posixpath.join(_SHAPEFILE_DIR, "admin0_simp_dis.shp")
 reprojected_shapefile_path = posixpath.join(_SHAPEFILE_DIR, "admin0_simp_dis.shp")

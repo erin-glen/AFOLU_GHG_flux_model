@@ -55,12 +55,19 @@ from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities.universal_utilities import timestr
 from src.scripts.utilities import log_utilities as lu
+from src.scripts.utilities import local_output_paths as lop
 
 # --------------------------------- config ---------------------------------
 SPARSE_DEFAULT = True
 
 ROOT = "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs"
 OUTPUT_BASE = "{root}/version_{model_version}"
+
+
+def default_local_output(model_version: str, run_name: str, run_date: str) -> str:
+    """Return the default local staging directory for this zonal-stats run."""
+
+    return lop.zonal_stats_staging_dir(model_version, run_name, run_date)
 
 # Dataset manifest (per-pixel only for flux totals)
 DATASETS: Dict[str, Dict[str, Any]] = {
@@ -678,7 +685,14 @@ def main(argv=None):
         default=4000,  # inputs are 1×1°
         help="Input tile size in pixels (4000 for 1×1°, 40000 for 10×10°).",
     )
-    parser.add_argument("--local_output", default="/tmp/zonal_stats", help="Local staging directory for Parquet output")
+    parser.add_argument(
+        "--local_output",
+        default=None,
+        help=(
+            "Local staging directory for Parquet output. Defaults to "
+            "AFOLU_LOCAL_OUTPUT_ROOT/staging/zonal_stats/<model_version>/<run_name>/<run_date>."
+        ),
+    )
     parser.add_argument("--keep-local", action="store_true", help="Keep staged files after upload")
     parser.add_argument("--debug", action="store_true", help="Verbose logging")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT,
@@ -691,6 +705,8 @@ def main(argv=None):
     parser.add_argument("--tile_ids", action="append", help="Comma separated 10×10 tile IDs (e.g., 00N_110E)")
 
     args = parser.parse_args(argv)
+    if args.local_output is None:
+        args.local_output = default_local_output(args.model_version, args.run_name, args.run_date)
     run(args)
 
 if __name__ == "__main__":
