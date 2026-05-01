@@ -31,9 +31,9 @@ The flux types pub_nghgi reads:
 
 | flux_type pattern              | What it represents                          |
 |--------------------------------|---------------------------------------------|
-| `area__ha`                     | Pixel area in hectares (drained + undrained)|
-| `drained_co2%` (excl. offsite) | Drained-peat CO₂ in Mg CO₂/yr               |
-| `drained_n2o%`                 | Drained-peat N₂O in **Mg CO₂e/yr**          |
+| `area__ha` / `area_ha`         | Pixel area in hectares (split by peat_state into drained vs undrained) |
+| `drained_co2%` (excl. `%offsite%`) | Drained-peat on-site CO₂ in Mg CO₂/yr   |
+| `drained_n2o%`                 | Drained-peat N₂O in **Mg CO₂e/yr** (no offsite filter; offsite N₂O rows are summed in if present) |
 
 The SQL is built by `pub_common.table_nghgi_comparison_subset_sql`. It maps
 the model's `combined_state` / `emissions_state` strings to coarse IPCC
@@ -68,6 +68,9 @@ Loaded by `extract_organic_soil_jrc.py`. Two products:
   cstock_organic_ktC.
 * `load_jrc_table_3d(annexi_dir, btr1_path)` — Table 3.D.1.f "Cultivation
   of organic soils (i.e. histosols)" per `(iso3, year)`: area_ha, n2o_kt.
+  When both AnnexI 2026 and BTR1 2024 cover the same `(iso3, year)`, AnnexI
+  2026 wins (lexicographic-sort + `drop_duplicates(keep="first")` in the
+  loader). BTR1 2024 only contributes rows for parties not in AnnexI 2026.
 
 The 2026-04-30 drop covers years 1990–2024 for AnnexI and 1990–2023 for BTR1.
 
@@ -121,6 +124,13 @@ Plus two non-replaced figures:
 Each `topn_compare_*` figure shows the same 10 focus countries in the same
 order (defined below) with a color scheme distinct to that figure for
 visual differentiation.
+
+For the CO₂ and N₂O figures, the NGHGI value within Table 4(II) is taken
+from the **"Drained organic soils"** sub-row when reported; otherwise it
+falls back to the aggregate **"Total organic soils"** row. The model only
+covers drained-peat emissions, so preferring the drained sub-row is the
+apples-to-apples choice; the Total fallback exists for countries that
+report only at the aggregate level.
 
 ---
 
@@ -180,10 +190,20 @@ change (carbon loss) corresponds to a positive CO₂ emission.
 
 ### Inventory interval averaging
 
-Each model run produces parquet outputs in 4-year intervals (e.g.,
-`2021_2024/`). The NGHGI side averages per-country numeric values across
-the same window — e.g., `--years 2024` triggers comparison against the
-2021–2024 mean of NGHGI annual values where reported.
+Inventory periods come from `cn.five_year_inventory_periods`:
+
+```python
+[(2001, 2005), (2006, 2010), (2011, 2015), (2016, 2020), (2021, 2024)]
+```
+
+The last bucket is currently 4 years pending 2025 model + NGHGI data. Each
+model run produces parquet outputs under `<interval>/` directories named
+`<start>_<end>` (e.g., `2021_2024/`). `--years` accepts only the *end*
+year(s) of these periods; passing a year not in the mapping is a hard
+error. The NGHGI side averages per-country numeric values across the same
+window via `groupby(...).agg(... = "mean")` — e.g., `--years 2024`
+triggers comparison against the 2021–2024 mean of NGHGI annual values
+where reported.
 
 ---
 
@@ -205,10 +225,41 @@ categories the country does not report.
 Affects all five main figures. T3D figures are already country-level
 (no LU breakdown), so the issue does not apply there.
 
-`0` is treated as "not reported" because the upstream
-`nghgi_by_iso_landuse_interval` aggregator silently maps NaN→0 in some
-sub-aggregations; distinguishing real zero from missing is not possible
-without an upstream fix to that aggregator.
+`0` is treated as "not reported" by the figure-side `_matched_sum` filter
+(`df[nghgi_col].notna() & (df[nghgi_col] != 0)`). Originally this was a
+workaround for the upstream NaN→0 bug in `nghgi_by_iso_landuse_interval`;
+that bug has since been fixed (every per-(iso3, year, land_use) sum now
+uses `min_count=1`, so NaN groups stay NaN — see `_collapse_to_toplevel`,
+`_prefer_drained_gas`, the cstock aggregation in commit `16658538`, and
+`_aggregate_raw_cstock_top_level`). The 0-as-missing filter is kept as
+defense-in-depth and to absorb true-zero sentinels that some countries
+emit for "no contribution" rather than `IE`/`NE`.
+
+### Aggregating Table 4(II) sub-categories
+
+CRT Table 4(II) reports each land-use category as a hierarchy:
+`4(II).X` (the land-use total), `4(II).X.1` (remaining), `4(II).X.2`
+(converted), and deeper breakdowns like `4(II).X.2.a/b`. Naïvely summing
+all rows would double-count.
+
+`_collapse_to_toplevel` therefore uses `4(II).X.1` and `4(II).X.2` (the
+canonical non-overlapping partition, identified as exactly-2-dot codes) as
+the parent values. When a parent row is NaN, it falls back to the sum of
+its children (3-dot or deeper). The parents are then summed to the
+land-use total. All sums use `min_count=1` so a country reporting `IE`/`NE`
+for an entire land-use stays NaN rather than collapsing to 0.
+
+### Gas emissions: prefer Drained over Total sub-row
+
+Within Table 4(II), each land-use cell breaks into "Total organic soils"
+and "Drained organic soils" sub-rows. For CO₂, N₂O, and CH₄, we compute
+both totals via `_collapse_to_toplevel` independently and then prefer
+the Drained value (`drn`) when present, falling back to Total (`tot`)
+when Drained is `NaN`. The model only emits drained-peat fluxes, so the
+drained sub-row is the like-for-like comparison; the Total fallback
+exists for the handful of non-Annex I countries that report gas
+emissions only at the aggregate level. Area uses Drained-only (no
+fallback) because Total-organic area is what the cstock side reports.
 
 ### CO₂ source preference (Table 4(II) vs Tables 4.A–F)
 
@@ -316,14 +367,23 @@ The first `--run` determines the output directory.
 | `--t3d_landuse Cropland Grassland`| Broaden the 3.D.1.f model scope to include managed grassland histosols                  |
 | `--validate_jrc`                  | Validation-only mode: raw vs JRC overlap scatter + diff CSV; skip the model side        |
 | `--data-only`                     | Skip figure generation, write CSVs only                                                 |
+| `--out_dir_root <path>`           | Override the output root for this invocation (precedence: CLI > `AFOLU_PUB_NGHGI_DIR` > `AFOLU_LOCAL_OUTPUT_ROOT`-derived default) |
+| `--aws_region <region>`           | AWS region for S3 reads (rarely needed; S3 client autoresolves)                         |
+| `--adm0_lookup_csv <path>`        | CSV with `gadm_adm0,iso3,country` overrides for the model-side join                     |
 
 ### Environment overrides
 
-| Variable                  | Default                                                                                 |
-|---------------------------|-----------------------------------------------------------------------------------------|
-| `AFOLU_PUB_NGHGI_DIR`     | `/mnt/c/tmp/pub_nghgi`                                                                  |
-| `AFOLU_NGHGI_DATA_DIR`    | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi`                                    |
-| `AFOLU_NGHGI_JRC_DIR`     | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi/JRC_aggregations/2026-04-30`        |
+The output root resolves through `local_output_paths.publication_root("nghgi")`,
+which honors `AFOLU_PUB_NGHGI_DIR` first and falls back to the
+`AFOLU_LOCAL_OUTPUT_ROOT`-derived default (introduced in commit
+`9aa8c279`).
+
+| Variable                    | Default                                                                                                                  |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `AFOLU_LOCAL_OUTPUT_ROOT`   | `C:/tmp/afolu` (Windows), `/mnt/c/tmp/afolu` (WSL when `/mnt/c/tmp` exists), `/tmp/afolu` (other POSIX)                  |
+| `AFOLU_PUB_NGHGI_DIR`       | `<AFOLU_LOCAL_OUTPUT_ROOT>/publications/nghgi`                                                                           |
+| `AFOLU_NGHGI_DATA_DIR`      | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi`                                                                     |
+| `AFOLU_NGHGI_JRC_DIR`       | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi/JRC_aggregations/2026-04-30`                                         |
 
 ---
 
@@ -371,15 +431,15 @@ unaffected because Greenland reports under DNK and high-Arctic territories
 are usually not reported as organic soils. Surface as caveat for any
 country totals near the Arctic.
 
-### NaN→0 quirk in `nghgi_by_iso_landuse_interval`
+### NaN→0 quirk (resolved)
 
-The aggregator's per-(iso3, year, land_use) sums use plain `.sum()` in
-several sub-aggregations, which silently maps NaN → 0. So a country that
-reports `IE` / `NE` / `NA` for a category appears as a numeric `0` in the
-joined frame rather than a missing value. The matching logic in §5 treats
-0 and NaN identically as "not reported" to compensate; a future cleanup
-should add `min_count=1` to the upstream aggregations and propagate sentinel
-flags through to the figure-building step.
+Previously, `nghgi_by_iso_landuse_interval`'s per-(iso3, year, land_use)
+sums used plain `.sum()`, which silently mapped all-NaN groups to 0, so a
+country reporting `IE`/`NE`/`NA` for a category appeared as a numeric 0
+in the joined frame. Resolved as of commit `16658538` ("Preserve missing
+NGHGI c-stock sums") — every aggregation now uses `min_count=1` and
+NaN groups stay NaN. The figure-side filter still treats 0 as
+"not reported" in `_matched_sum`; see the discussion in §5.
 
 ### Non-stacked, linear, top-10
 
@@ -400,5 +460,12 @@ aggregation are tracked in
 `~/.claude/projects/<project>/memory/project_pub_nghgi_jrc.md`. Update
 that memory when reporting practice or scope decisions change.
 
-Branch: `feature/organic_soils_time` (commits `27a8c86`..`a06858c` make up
-the JRC integration + figure-format work, 2026-04-15..2026-04-30).
+Branch: `feature/organic_soils_time`. Notable commits:
+
+* `27a8c86`..`a06858c` (2026-04-15..2026-04-30) — JRC integration,
+  figure-format standardization, T3D cropland-only default,
+  matched-scope summation
+* `ba2d62aa` (2026-04-30) — this README
+* `16658538` (2026-05-01) — `min_count=1` fix for NGHGI cstock sums
+* `9aa8c279` (2026-05-01) — output-path centralization under
+  `AFOLU_LOCAL_OUTPUT_ROOT` (changed `AFOLU_PUB_NGHGI_DIR` default)
