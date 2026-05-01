@@ -18,7 +18,7 @@ Usage (examples):
 Notes:
 - Duplicate --run_name arguments in the provided shell snippets were removed.
 - The cluster is left running by default; pass --shutdown-cluster to close it on exit.
-- The legacy per-pixel stage (step 2) is excluded by default because current
+- The legacy per-pixel stage is excluded by default because current
   10x10 zonal workflows consume the driver mega-zarr directly.
 """
 
@@ -32,19 +32,33 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Tuple, Optional
+from typing import Iterable, List, Tuple, Optional, Sequence
+
+from src.scripts.utilities import constants_and_names as cn
+
+
+DEFAULT_RUN_DATE = datetime.utcnow().strftime("%Y%m%d")
+DEFAULT_MODEL_VERSION = cn.model_version_underscore
+
+
+def _split_cli_values(value: str | Sequence[str | int]) -> List[str]:
+    if isinstance(value, str):
+        return [part for part in value.replace(",", " ").split() if part]
+    return [str(part) for part in value]
 
 
 def build_commands(
-    output_date: str = "20251120",
-    run_date: str = "20251120",
-    interval_end_years: str = "2024",
-    model_version: str = "0_9_7",
+    output_date: Optional[str] = None,
+    run_date: str = DEFAULT_RUN_DATE,
+    interval_end_years: str | Sequence[str | int] = "2024",
+    model_version: str = DEFAULT_MODEL_VERSION,
     include_legacy_per_pixel_stage: bool = False,
 ) -> List[Tuple[str, List[str]]]:
     """Return the ordered list of (label, argv) commands to execute."""
 
     cmds: List[Tuple[str, List[str]]] = []
+    output_date = output_date or run_date
+    interval_end_year_values = _split_cli_values(interval_end_years)
 
     # --- 0) Drainage emissions model (GFW and GPD) ---
     base0 = [
@@ -64,6 +78,8 @@ def build_commands(
         "--interval_type",
         "five_year",
         "--create_zarr",
+        "--run_date",
+        run_date,
     ]
 
     cmds.append(
@@ -96,7 +112,7 @@ def build_commands(
         base2 = [
             "python",
             "-m",
-            "src.scripts.core_model.2_per_pixel_soils_outputs",
+            "src.scripts.core_model.legacy.2_per_pixel_soils_outputs",
             "--cluster_name",
             "drainage_cluster",
             "--chunk_size",
@@ -105,42 +121,46 @@ def build_commands(
             output_date,
         ]
         cmds.append(
-            ("2_per_pixel_soils_outputs[gfw]", base2 + ["--run_name", "gfw_standard_model_500m"])
+            ("legacy_2_per_pixel_soils_outputs[gfw]", base2 + ["--run_name", "gfw_standard_model_500m"])
         )
         cmds.append(
-            ("2_per_pixel_soils_outputs[gpd]", base2 + ["--run_name", "gpd_standard_model_500m"])
+            ("legacy_2_per_pixel_soils_outputs[gpd]", base2 + ["--run_name", "gpd_standard_model_500m"])
         )
 
-    # --- 3) Aggregate soils outputs ---
+    # --- Aggregate soils outputs ---
     cmds.append(
         (
-            "3_aggregate_soils_outputs[gfw]",
+            "02_aggregate_soils_outputs[gfw]",
             [
                 "python",
                 "-m",
-                "src.scripts.core_model.3_aggregate_soils_outputs",
+                "src.scripts.core_model.02_aggregate_soils_outputs",
                 "-cn",
                 "drainage_cluster",
                 "--run_name",
                 "gfw_standard_model_500m",
                 "--output_date",
                 output_date,
+                "--interval_end_years",
+                *interval_end_year_values,
             ],
         )
     )
     cmds.append(
         (
-            "3_aggregate_soils_outputs[gpd]",
+            "02_aggregate_soils_outputs[gpd]",
             [
                 "python",
                 "-m",
-                "src.scripts.core_model.3_aggregate_soils_outputs",
+                "src.scripts.core_model.02_aggregate_soils_outputs",
                 "-cn",
                 "drainage_cluster",
                 "--run_name",
                 "gpd_standard_model_500m",
                 "--output_date",
                 output_date,
+                "--interval_end_years",
+                *interval_end_year_values,
             ],
         )
     )
@@ -151,7 +171,7 @@ def build_commands(
         "-m",
         "src.scripts.zonal_statistics.02_run_zonal_stats",
         "--interval_end_years",
-        str(interval_end_years),
+        *interval_end_year_values,
         "--cluster_name",
         "drainage_cluster",
         "--run_date",
@@ -160,8 +180,6 @@ def build_commands(
         model_version,
         "--interval_type",
         "five_year",
-        "--zarr_chunk_size_pixels",
-        "1",
         "--chunk_size",
         "10000",
         "--diagnostics",
@@ -216,10 +234,23 @@ def run_cmd(
 
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Run GFW+GPD 500m pipeline on one Coiled cluster.")
-    p.add_argument("--output-date", default="20251120", help="YYYYMMDD for aggregate steps (and optional legacy per-pixel step).")
-    p.add_argument("--run-date", default="20251120", help="YYYYMMDD for zonal-statistics steps.")
-    p.add_argument("--interval-end-years", default="2024", help="Interval end year(s) for zonal-statistics.")
-    p.add_argument("--model-version", default="0_9_7", help="Model version for zonal-statistics.")
+    p.add_argument(
+        "--output-date",
+        default=None,
+        help="YYYYMMDD for aggregate steps. Defaults to --run-date.",
+    )
+    p.add_argument(
+        "--run-date",
+        default=DEFAULT_RUN_DATE,
+        help="YYYYMMDD for drainage, aggregate input, and zonal-statistics steps.",
+    )
+    p.add_argument(
+        "--interval-end-years",
+        nargs="+",
+        default=["2024"],
+        help="Interval end year(s) for aggregate and zonal-statistics steps.",
+    )
+    p.add_argument("--model-version", default=DEFAULT_MODEL_VERSION, help="Model version for zonal-statistics.")
     p.add_argument("--log-dir", type=Path, default=Path("../logs"), help="Directory for per-step logs.")
     p.add_argument("--dry-run", action="store_true", help="Print the commands without executing them.")
     p.add_argument("--continue-on-error", action="store_true", help="Keep going if a step fails.")
