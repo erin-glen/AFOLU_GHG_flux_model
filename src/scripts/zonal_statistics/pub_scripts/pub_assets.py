@@ -411,6 +411,22 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
             AS INTEGER)
         """
 
+    # The drained/ and drained_co2_n2o/ outputs both write byte-identical
+    # area__ha rows. When both are loaded into the same view, area__ha gets
+    # double-counted while the gas-specific emission flux_types remain unique.
+    # Drop area__ha rows from drained_co2_n2o/ when drained/ is also present.
+    has_drained_dir = any("/drained/" in g for g in globs)
+    has_drained_co2_n2o_dir = any("/drained_co2_n2o/" in g for g in globs)
+    if kind == "drained" and has_drained_dir and has_drained_co2_n2o_dir:
+        area_dedup_filter = (
+            f"AND NOT ("
+            f"  lower(CAST({flux_type_expr} AS VARCHAR)) = 'area__ha' "
+            f"  AND CAST({filename_expr} AS VARCHAR) LIKE '%/drained_co2_n2o/%'"
+            f")"
+        )
+    else:
+        area_dedup_filter = ""
+
     if kind == "drained":
         component_filter = (
             f"(CAST({flux_type_expr} AS VARCHAR) IS NULL OR "
@@ -434,7 +450,8 @@ def _make_component_view(con: duckdb.DuckDBPyConnection, name: str,
                 {meaning_expr}                     AS drained_state_meaning
             FROM raw_{name}
             WHERE {value_expr} IS NOT NULL
-              AND {component_filter};
+              AND {component_filter}
+              {area_dedup_filter};
         """)
     else:
         component_filter = (
