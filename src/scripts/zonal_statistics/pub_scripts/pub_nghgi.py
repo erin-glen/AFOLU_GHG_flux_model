@@ -1377,7 +1377,7 @@ def main(argv=None):
             subtitle="Model = drained + undrained peat extent; NGHGI = total organic soils from Tables 4.A–4.F",
             interval_label=interval_label,
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"barh_total_area_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_total_area_{interval}.png"), dpi=200)
 
         fig = _plot_country_grouped_barh(
             per_ctry,
@@ -1388,7 +1388,7 @@ def main(argv=None):
             subtitle="NGHGI = Table 4(II) drained organic soils, summed across land-use categories (raw-extract countries only)",
             interval_label=interval_label,
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"barh_drained_area_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_drained_area_{interval}.png"), dpi=200)
 
         fig = _plot_country_grouped_barh(
             per_ctry,
@@ -1399,7 +1399,7 @@ def main(argv=None):
             subtitle="NGHGI = Table 4(II) numeric where reported, else cstock-derived from Tables 4.A–4.F",
             interval_label=interval_label,
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"barh_co2_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_co2_{interval}.png"), dpi=200)
 
         # Stacked drained + undrained area (linear)
         fig = _plot_topn_area_stacked(
@@ -1436,7 +1436,7 @@ def main(argv=None):
                 subtitle=f"Model side: drained {landuse_label} on organic soils",
                 interval_label=interval_label,
             )
-            _save_png(fig, _join(OUT_DIR, "figures", f"barh_t3d_area_{interval}.png"), dpi=200)
+            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_area_{interval}.png"), dpi=200)
 
             fig = _plot_country_grouped_barh(
                 sub_t3d,
@@ -1447,7 +1447,7 @@ def main(argv=None):
                 subtitle=f"Model side: drained {landuse_label} N₂O; NGHGI converted via GWP={T3D_N2O_GWP:g}",
                 interval_label=interval_label,
             )
-            _save_png(fig, _join(OUT_DIR, "figures", f"barh_t3d_n2o_{interval}.png"), dpi=200)
+            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_n2o_{interval}.png"), dpi=200)
 
     print("Done.")
     return 0
