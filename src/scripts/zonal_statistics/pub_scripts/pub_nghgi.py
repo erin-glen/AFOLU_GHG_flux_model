@@ -371,22 +371,37 @@ def _load_nghgi_cstock(nghgi_dir: str) -> pd.DataFrame:
     return df
 
 
-def nghgi_by_iso_landuse_interval(
+def _count_non_null(series: pd.Series) -> int:
+    return int(series.notna().sum())
+
+
+def _sum_true(series: pd.Series) -> int:
+    return int(series.fillna(False).astype(bool).sum())
+
+
+def _any_true(series: pd.Series) -> bool:
+    return bool(series.fillna(False).astype(bool).any())
+
+
+def _source_summary(series: pd.Series) -> Optional[str]:
+    vals = sorted({str(v) for v in series.dropna().unique() if str(v)})
+    if not vals:
+        return None
+    return vals[0] if len(vals) == 1 else "mixed_" + "_".join(vals)
+
+
+def nghgi_annual_by_iso_landuse(
     nghgi_t4ii: pd.DataFrame,
     nghgi_cstock: pd.DataFrame,
-    interval_pairs: Sequence[Tuple[int, int]],
     jrc_lu: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
-    Average NGHGI values over each (start_year, end_year) interval.
+    Build the annual NGHGI land-use table used by interval averaging and the
+    availability matrix.
 
-    Returns one row per (iso3, land_use, interval_end) with:
-        nghgi_area_drained_organic_ha
-        nghgi_em_co2_Mg_yr   (preferred: T4(II) numeric; fallback: cstock * 44/12)
-        nghgi_em_co2_source  ('T4II' | 'T4land_cstock' | None)
-        nghgi_em_n2o_kt_yr
-        nghgi_em_ch4_kt_yr
-        nghgi_years_available  (count of years with any numeric value in window)
+    Returns one row per (iso3, year, land_use). Values remain NaN when a
+    country reports only notation keys or lacks the relevant table for a
+    given metric.
     """
     # --------- Drained organic-soil area (kha -> ha) from T4(II) ---------
     area_df = nghgi_t4ii[nghgi_t4ii["soil_type"] == "Drained organic soils"].copy()
@@ -526,6 +541,71 @@ def nghgi_by_iso_landuse_interval(
         .merge(raw_area_per_year, on=["iso3", "year", "land_use"], how="outer")
     )
 
+    # CO2 preference is annual: use T4(II) for years where it is numeric,
+    # otherwise fall back to the land-table C-stock conversion for that year.
+    annual["nghgi_em_co2_kt_preferred"] = annual["nghgi_em_co2_kt"].where(
+        annual["nghgi_em_co2_kt"].notna(),
+        annual["nghgi_em_co2_from_cstock_kt"],
+    )
+    annual["nghgi_em_co2_source"] = np.where(
+        annual["nghgi_em_co2_kt"].notna(),
+        "T4II",
+        np.where(annual["nghgi_em_co2_from_cstock_kt"].notna(), "T4land_cstock", None),
+    )
+
+    # Undrained proxy is annual too, so availability requires raw total area
+    # and raw drained area in the same inventory year.
+    annual["nghgi_area_undrained_basis_available"] = (
+        annual["nghgi_area_organic_t4land_raw_kha"].notna()
+        & annual["nghgi_area_drained_organic_kha"].notna()
+    )
+    annual["nghgi_area_undrained_organic_unclipped_ha"] = (
+        (
+            annual["nghgi_area_organic_t4land_raw_kha"]
+            - annual["nghgi_area_drained_organic_kha"]
+        )
+        * 1_000.0
+    )
+    annual["nghgi_area_undrained_negative_flag"] = (
+        annual["nghgi_area_undrained_organic_unclipped_ha"]
+        < -UNDRAINED_NEGATIVE_TOL_HA
+    )
+    annual["nghgi_area_undrained_organic_ha"] = (
+        annual["nghgi_area_undrained_organic_unclipped_ha"]
+        .where(~annual["nghgi_area_undrained_negative_flag"])
+        .clip(lower=0)
+    )
+    annual["nghgi_area_undrained_organic_source"] = np.where(
+        annual["nghgi_area_undrained_organic_ha"].notna(),
+        "raw_T4land_minus_raw_T4II",
+        None,
+    )
+
+    return annual
+
+
+def nghgi_by_iso_landuse_interval(
+    nghgi_t4ii: pd.DataFrame,
+    nghgi_cstock: pd.DataFrame,
+    interval_pairs: Sequence[Tuple[int, int]],
+    jrc_lu: Optional[pd.DataFrame] = None,
+    annual_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """
+    Average NGHGI values over each (start_year, end_year) interval.
+
+    Returns one row per (iso3, land_use, interval_end) with metric-specific
+    availability counts. A metric is chartable only when its corresponding
+    ``*_years_available`` column is at least 1.
+    """
+    annual = (
+        annual_df.copy()
+        if annual_df is not None
+        else nghgi_annual_by_iso_landuse(nghgi_t4ii, nghgi_cstock, jrc_lu=jrc_lu)
+    )
+    if annual.empty:
+        return pd.DataFrame()
+
     # --------- Window-average over each interval pair ---------
     rows: list[dict] = []
     for start, end in interval_pairs:
@@ -541,12 +621,74 @@ def nghgi_by_iso_landuse_interval(
                 nghgi_em_n2o_kt=("nghgi_em_n2o_kt", "mean"),
                 nghgi_em_ch4_kt=("nghgi_em_ch4_kt", "mean"),
                 nghgi_em_co2_from_cstock_kt=("nghgi_em_co2_from_cstock_kt", "mean"),
+                nghgi_em_co2_kt_preferred=("nghgi_em_co2_kt_preferred", "mean"),
+                nghgi_em_co2_source=("nghgi_em_co2_source", _source_summary),
                 nghgi_area_organic_t4land_raw_kha=(
                     "nghgi_area_organic_t4land_raw_kha",
                     "mean",
                 ),
-                nghgi_t4land_source=("nghgi_t4land_source", _source_mode),
+                nghgi_t4land_source=("nghgi_t4land_source", _source_summary),
+                nghgi_area_undrained_basis_available=(
+                    "nghgi_area_undrained_basis_available",
+                    _sum_true,
+                ),
+                nghgi_area_undrained_organic_unclipped_ha=(
+                    "nghgi_area_undrained_organic_unclipped_ha",
+                    "mean",
+                ),
+                nghgi_area_undrained_negative_flag=(
+                    "nghgi_area_undrained_negative_flag",
+                    _any_true,
+                ),
+                nghgi_area_undrained_organic_ha=(
+                    "nghgi_area_undrained_organic_ha",
+                    "mean",
+                ),
+                nghgi_area_undrained_organic_source=(
+                    "nghgi_area_undrained_organic_source",
+                    _source_summary,
+                ),
                 nghgi_years_available=("year", "nunique"),
+                nghgi_area_drained_years_available=(
+                    "nghgi_area_drained_organic_kha",
+                    _count_non_null,
+                ),
+                nghgi_area_total_years_available=(
+                    "nghgi_area_organic_t4land_kha",
+                    _count_non_null,
+                ),
+                nghgi_area_total_raw_years_available=(
+                    "nghgi_area_organic_t4land_raw_kha",
+                    _count_non_null,
+                ),
+                nghgi_area_undrained_basis_years_available=(
+                    "nghgi_area_undrained_basis_available",
+                    _sum_true,
+                ),
+                nghgi_area_undrained_years_available=(
+                    "nghgi_area_undrained_organic_ha",
+                    _count_non_null,
+                ),
+                nghgi_em_co2_t4ii_years_available=(
+                    "nghgi_em_co2_kt",
+                    _count_non_null,
+                ),
+                nghgi_em_co2_cstock_years_available=(
+                    "nghgi_em_co2_from_cstock_kt",
+                    _count_non_null,
+                ),
+                nghgi_em_co2_years_available=(
+                    "nghgi_em_co2_kt_preferred",
+                    _count_non_null,
+                ),
+                nghgi_em_n2o_years_available=(
+                    "nghgi_em_n2o_kt",
+                    _count_non_null,
+                ),
+                nghgi_em_ch4_years_available=(
+                    "nghgi_em_ch4_kt",
+                    _count_non_null,
+                ),
             )
         )
         grouped["interval_start"] = start
@@ -559,16 +701,6 @@ def nghgi_by_iso_landuse_interval(
 
     out = pd.concat(rows, ignore_index=True)
 
-    # CO2 preference: use T4(II) value if present, else cstock conversion
-    t4ii_co2 = out["nghgi_em_co2_kt"]
-    cstock_co2 = out["nghgi_em_co2_from_cstock_kt"]
-    out["nghgi_em_co2_kt_preferred"] = t4ii_co2.where(t4ii_co2.notna(), cstock_co2)
-    out["nghgi_em_co2_source"] = np.where(
-        t4ii_co2.notna(),
-        "T4II",
-        np.where(cstock_co2.notna(), "T4land_cstock", None),
-    )
-
     # Area columns (kha -> ha)
     t4ii_area = out["nghgi_area_drained_organic_kha"]
     t4land_area = out["nghgi_area_organic_t4land_kha"]
@@ -579,21 +711,14 @@ def nghgi_by_iso_landuse_interval(
     out["nghgi_area_total_organic_ha"] = t4land_area * 1_000.0
     out["nghgi_area_total_organic_source"] = out["nghgi_t4land_source"]
 
-    # Undrained proxy = raw total organic area - raw drained area. Do not use
-    # JRC-overridden totals here because Table 4(II) drained areas still come
-    # from the raw CRT extract; mixing cycles can create artificial negatives.
-    undrained_basis = out["nghgi_area_organic_t4land_raw_kha"]
-    undrained_unclipped = (undrained_basis - t4ii_area) * 1_000.0
-    out["nghgi_area_undrained_organic_unclipped_ha"] = undrained_unclipped
-    out["nghgi_area_undrained_negative_flag"] = (
-        undrained_unclipped < -UNDRAINED_NEGATIVE_TOL_HA
-    )
-    out["nghgi_area_undrained_organic_ha"] = undrained_unclipped.where(
-        ~out["nghgi_area_undrained_negative_flag"]
-    ).clip(lower=0)
+    # If any same-year raw undrained basis is materially negative in the
+    # interval, leave the interval undrained proxy missing and expose the flag.
+    neg_mask = out["nghgi_area_undrained_negative_flag"].fillna(False)
+    out.loc[neg_mask, "nghgi_area_undrained_organic_ha"] = np.nan
+    out.loc[neg_mask, "nghgi_area_undrained_years_available"] = 0
     out["nghgi_area_undrained_organic_source"] = np.where(
         out["nghgi_area_undrained_organic_ha"].notna(),
-        "raw_T4land_minus_raw_T4II",
+        out["nghgi_area_undrained_organic_source"],
         None,
     )
 
@@ -685,6 +810,11 @@ def join_model_nghgi(
         "nghgi_n2o_gwp",
         "nghgi_years_available",
     ]
+    availability_cols = [
+        c for c in nghgi_df.columns
+        if c.startswith("nghgi_") and c.endswith("_years_available")
+    ]
+    nghgi_cols = list(dict.fromkeys(nghgi_cols + availability_cols))
     nghgi_cols = [c for c in nghgi_cols if c in nghgi_df.columns]
     nghgi_join = nghgi_df.loc[:, nghgi_cols]
 
@@ -920,9 +1050,22 @@ def _plot_country_grouped_barh(
 
 # ----------------------------- Table 3.D.1.f N2O -----------------------------
 
+def nghgi_t3d_annual(jrc_t3d: Optional[pd.DataFrame]) -> pd.DataFrame:
+    if jrc_t3d is None or jrc_t3d.empty:
+        return pd.DataFrame(
+            columns=["iso3", "year", "area_ha", "n2o_kt", "source"]
+        )
+    df = jrc_t3d.copy()
+    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+    df["area_ha"] = pd.to_numeric(df["area_ha"], errors="coerce")
+    df["n2o_kt"] = pd.to_numeric(df["n2o_kt"], errors="coerce")
+    return df[["iso3", "year", "area_ha", "n2o_kt", "source"]]
+
+
 def nghgi_t3d_by_iso_interval(
     jrc_t3d: pd.DataFrame,
     interval_pairs: Sequence[Tuple[int, int]],
+    annual_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Average JRC Table 3.D.1.f cultivation-of-organic-soils area + N2O over each
@@ -932,11 +1075,13 @@ def nghgi_t3d_by_iso_interval(
         nghgi_t3d_n2o_Mg_CO2e_yr   (kt N2O * inventory GWP * 1000)
         nghgi_t3d_source           ('JRC_AnnexI_2026' | 'JRC_BTR1_2024')
     """
-    if jrc_t3d is None or jrc_t3d.empty:
+    df = (
+        annual_df.copy()
+        if annual_df is not None
+        else nghgi_t3d_annual(jrc_t3d)
+    )
+    if df.empty:
         return pd.DataFrame()
-
-    df = jrc_t3d.copy()
-    df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
 
     rows: list[pd.DataFrame] = []
     for start, end in interval_pairs:
@@ -951,8 +1096,10 @@ def nghgi_t3d_by_iso_interval(
             .agg(
                 nghgi_t3d_area_ha=("area_ha", "mean"),
                 nghgi_t3d_n2o_kt=("n2o_kt", "mean"),
-                nghgi_t3d_source=("source", lambda s: s.mode().iloc[0] if not s.mode().empty else None),
+                nghgi_t3d_source=("source", _source_summary),
                 nghgi_t3d_years_available=("year", "nunique"),
+                nghgi_t3d_area_years_available=("area_ha", _count_non_null),
+                nghgi_t3d_n2o_years_available=("n2o_kt", _count_non_null),
             )
         )
         grouped["interval_start"] = start
@@ -966,6 +1113,210 @@ def nghgi_t3d_by_iso_interval(
     out["nghgi_t3d_n2o_Mg_CO2e_yr"] = out["nghgi_t3d_n2o_kt"] * N2O_GWP * 1_000.0
     out["nghgi_t3d_n2o_gwp"] = N2O_GWP
     return out
+
+
+def _interval_year_grid(interval_pairs: Sequence[Tuple[int, int]]) -> pd.DataFrame:
+    rows = []
+    for start, end in interval_pairs:
+        for year in range(start, end + 1):
+            rows.append(
+                {
+                    "interval_start": start,
+                    "interval_end": end,
+                    "interval": f"{start}_{end}",
+                    "year": year,
+                    "interval_year_count": end - start + 1,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_nghgi_availability_matrix(
+    annual_df: pd.DataFrame,
+    interval_pairs: Sequence[Tuple[int, int]],
+    t3d_annual_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """
+    Build a long country/year/metric availability matrix for the NGHGI inputs.
+
+    The matrix is intentionally annual, with interval labels attached, so a
+    missing comparison value can be traced to the exact country, land use,
+    metric, and inventory year that is unavailable.
+    """
+    columns = [
+        "iso3",
+        "land_use",
+        "interval",
+        "interval_start",
+        "interval_end",
+        "year",
+        "interval_year_count",
+        "inventory_table",
+        "metric",
+        "gas",
+        "unit",
+        "source",
+        "has_value",
+        "value",
+    ]
+    year_grid = _interval_year_grid(interval_pairs)
+    if year_grid.empty:
+        return pd.DataFrame(columns=columns)
+
+    pieces: list[pd.DataFrame] = []
+
+    if annual_df is not None and not annual_df.empty:
+        annual = annual_df.copy()
+        annual["year"] = pd.to_numeric(annual["year"], errors="coerce").astype("Int64")
+        combos = annual[["iso3", "land_use"]].drop_duplicates()
+        combos["_key"] = 1
+        years = year_grid.copy()
+        years["_key"] = 1
+        full = (
+            combos.merge(years, on="_key", how="outer")
+            .drop(columns=["_key"])
+            .merge(annual, on=["iso3", "land_use", "year"], how="left")
+        )
+
+        metric_defs = [
+            (
+                "Table 4(II)",
+                "area_drained_organic",
+                None,
+                "kha",
+                "nghgi_area_drained_organic_kha",
+                "T4II",
+            ),
+            (
+                "Tables 4.A-4.F",
+                "area_total_organic",
+                None,
+                "kha",
+                "nghgi_area_organic_t4land_kha",
+                "nghgi_t4land_source",
+            ),
+            (
+                "Tables 4.A-4.F raw",
+                "area_total_organic_raw",
+                None,
+                "kha",
+                "nghgi_area_organic_t4land_raw_kha",
+                "raw_CRT_extract",
+            ),
+            (
+                "Derived",
+                "area_undrained_organic",
+                None,
+                "ha",
+                "nghgi_area_undrained_organic_ha",
+                "nghgi_area_undrained_organic_source",
+            ),
+            (
+                "Table 4(II)",
+                "co2_t4ii",
+                "CO2",
+                "kt CO2/yr",
+                "nghgi_em_co2_kt",
+                "T4II",
+            ),
+            (
+                "Tables 4.A-4.F",
+                "co2_cstock",
+                "CO2",
+                "kt CO2/yr",
+                "nghgi_em_co2_from_cstock_kt",
+                "nghgi_t4land_source",
+            ),
+            (
+                "Preferred",
+                "co2_preferred",
+                "CO2",
+                "kt CO2/yr",
+                "nghgi_em_co2_kt_preferred",
+                "nghgi_em_co2_source",
+            ),
+            (
+                "Table 4(II)",
+                "n2o_t4ii",
+                "N2O",
+                "kt N2O/yr",
+                "nghgi_em_n2o_kt",
+                "T4II",
+            ),
+            (
+                "Table 4(II)",
+                "ch4_t4ii",
+                "CH4",
+                "kt CH4/yr",
+                "nghgi_em_ch4_kt",
+                "T4II",
+            ),
+        ]
+        base_cols = [
+            "iso3",
+            "land_use",
+            "interval",
+            "interval_start",
+            "interval_end",
+            "year",
+            "interval_year_count",
+        ]
+        for table, metric, gas, unit, value_col, source_spec in metric_defs:
+            tmp = full[base_cols].copy()
+            tmp["inventory_table"] = table
+            tmp["metric"] = metric
+            tmp["gas"] = gas
+            tmp["unit"] = unit
+            tmp["value"] = full[value_col]
+            tmp["has_value"] = tmp["value"].notna()
+            if source_spec in full.columns:
+                source = full[source_spec]
+            else:
+                source = source_spec
+            tmp["source"] = np.where(tmp["has_value"], source, None)
+            pieces.append(tmp[columns])
+
+    if t3d_annual_df is not None and not t3d_annual_df.empty:
+        t3d = t3d_annual_df.copy()
+        t3d["year"] = pd.to_numeric(t3d["year"], errors="coerce").astype("Int64")
+        combos = t3d[["iso3"]].drop_duplicates()
+        combos["land_use"] = "All"
+        combos["_key"] = 1
+        years = year_grid.copy()
+        years["_key"] = 1
+        full = (
+            combos.merge(years, on="_key", how="outer")
+            .drop(columns=["_key"])
+            .merge(t3d, on=["iso3", "year"], how="left", suffixes=("", "_t3d"))
+        )
+        full["land_use"] = full["land_use"].fillna("All")
+        metric_defs = [
+            ("area_t3d", None, "ha", "area_ha"),
+            ("n2o_t3d", "N2O", "kt N2O/yr", "n2o_kt"),
+        ]
+        base_cols = [
+            "iso3",
+            "land_use",
+            "interval",
+            "interval_start",
+            "interval_end",
+            "year",
+            "interval_year_count",
+        ]
+        for metric, gas, unit, value_col in metric_defs:
+            tmp = full[base_cols].copy()
+            tmp["inventory_table"] = "Table 3.D.1.f"
+            tmp["metric"] = metric
+            tmp["gas"] = gas
+            tmp["unit"] = unit
+            tmp["value"] = full[value_col]
+            tmp["has_value"] = tmp["value"].notna()
+            tmp["source"] = np.where(tmp["has_value"], full["source"], None)
+            pieces.append(tmp[columns])
+
+    if not pieces:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(pieces, ignore_index=True)
 
 
 def join_model_nghgi_t3d(
@@ -1043,6 +1394,11 @@ def join_model_nghgi_t3d(
         "nghgi_t3d_source",
         "nghgi_t3d_years_available",
     ]
+    availability_cols = [
+        c for c in t3d_df.columns
+        if c.startswith("nghgi_t3d_") and c.endswith("_years_available")
+    ]
+    t3d_cols = list(dict.fromkeys(t3d_cols + availability_cols))
     t3d_cols = [c for c in t3d_cols if c in t3d_df.columns]
     joined = model_t3d.merge(
         t3d_df.loc[:, t3d_cols],
@@ -1389,12 +1745,30 @@ def main(argv=None):
         else:
             print(f"  [warn] --jrc_dir present but {annexi_dir} not found; running raw-only.")
 
-    nghgi_df = nghgi_by_iso_landuse_interval(t4ii, cstock, interval_pairs, jrc_lu=jrc_lu)
+    nghgi_annual_df = nghgi_annual_by_iso_landuse(t4ii, cstock, jrc_lu=jrc_lu)
+    nghgi_df = nghgi_by_iso_landuse_interval(
+        t4ii,
+        cstock,
+        interval_pairs,
+        jrc_lu=jrc_lu,
+        annual_df=nghgi_annual_df,
+    )
     print(f"  NGHGI rows after averaging: {len(nghgi_df):,}")
 
-    nghgi_t3d_df = nghgi_t3d_by_iso_interval(jrc_t3d, interval_pairs) if jrc_t3d is not None else pd.DataFrame()
+    t3d_annual_df = nghgi_t3d_annual(jrc_t3d) if jrc_t3d is not None else pd.DataFrame()
+    nghgi_t3d_df = (
+        nghgi_t3d_by_iso_interval(jrc_t3d, interval_pairs, annual_df=t3d_annual_df)
+        if jrc_t3d is not None
+        else pd.DataFrame()
+    )
     if not nghgi_t3d_df.empty:
         print(f"  NGHGI Table 3.D rows after averaging: {len(nghgi_t3d_df):,}")
+    nghgi_availability_df = build_nghgi_availability_matrix(
+        nghgi_annual_df,
+        interval_pairs,
+        t3d_annual_df=t3d_annual_df,
+    )
+    print(f"  NGHGI availability matrix rows: {len(nghgi_availability_df):,}")
 
     # --- Join ---
     print("\n[3/3] Joining model + NGHGI")
@@ -1443,10 +1817,12 @@ def main(argv=None):
     try:
         _write_csv_df(writer_con, model_df,  _join(out_data, "model_country_landuse.csv"))
         _write_csv_df(writer_con, nghgi_df,  _join(out_data, "nghgi_country_landuse.csv"))
+        _write_csv_df(writer_con, nghgi_availability_df, _join(out_data, "nghgi_availability_matrix.csv"))
         _write_csv_df(writer_con, joined,    _join(out_data, "model_vs_nghgi.csv"))
         print("  wrote:")
         print("    - model_country_landuse.csv")
         print("    - nghgi_country_landuse.csv")
+        print("    - nghgi_availability_matrix.csv")
         print("    - model_vs_nghgi.csv")
         if not joined_t3d.empty:
             _write_csv_df(writer_con, nghgi_t3d_df, _join(out_data, "nghgi_t3d_country.csv"))

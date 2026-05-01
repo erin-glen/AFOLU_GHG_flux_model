@@ -1,471 +1,413 @@
-# pub_nghgi — model vs NGHGI organic-soil comparison
+# pub_nghgi: model vs NGHGI organic-soil comparison
 
 `pub_nghgi.py` compares this repository's drained organic-soil model outputs
-against country-reported greenhouse-gas inventories (NGHGI) from the UNFCCC
-Common Reporting Tables (CRT) for 36+ Annex I parties and ~30 BTR1 reporters.
+with country-reported greenhouse-gas inventory data from UNFCCC Common
+Reporting Tables (CRTs) and JRC pre-aggregated inventory extracts.
 
-The companion loader `extract_organic_soil_jrc.py` ingests the JRC-aggregated
-data drop; per-country CRT extracts are loaded from compiled CSVs prepared
-upstream of this repo.
+The pipeline is intended for publication figures and diagnostic CSVs. It is
+not a generic NGHGI parser: upstream extraction/aggregation is expected to
+have already produced the raw compiled CSVs and the JRC workbook drop.
 
 ```text
 src/scripts/zonal_statistics/pub_scripts/
-├── pub_nghgi.py                    main driver
-├── extract_organic_soil_jrc.py     JRC xlsx loader
-└── README_pub_nghgi.md             this file
+|-- pub_nghgi.py                 main comparison and figure driver
+|-- extract_organic_soil_jrc.py  loader for the JRC xlsx drop
+`-- README_pub_nghgi.md          this file
 ```
 
----
+## Quick Start
 
-## 1. Inputs
+Run the latest interval for one model source:
 
-### Model side: zonal-statistics parquets on S3
+```bash
+cd /mnt/c/GIS/git/AFOLU_GHG_flux_model
 
-`s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_<v>/zonal_stats/<run_name>/<run_date>/<interval>/combined_state/*.parquet`
+python -m src.scripts.zonal_statistics.pub_scripts.pub_nghgi \
+  --years 2024 \
+  --run "ogh_biome_thresholds=0_1_4:20260417|OGH"
+```
 
-`combined_state/` is the unified output that merges what used to be separate
-`drained/` and `drained_co2_n2o/` directories. It contains rows of
-`(gadm_adm0, drained_state_meaning, flux_type, value, ...)`.
+Run all inventory intervals and write only CSVs:
 
-The flux types pub_nghgi reads:
+```bash
+python -m src.scripts.zonal_statistics.pub_scripts.pub_nghgi \
+  --years 2005 2010 2015 2020 2024 \
+  --run "ogh_biome_thresholds=0_1_4:20260417|OGH" \
+  --data-only
+```
 
-| flux_type pattern              | What it represents                          |
-|--------------------------------|---------------------------------------------|
-| `area__ha` / `area_ha`         | Pixel area in hectares (split by peat_state into drained vs undrained) |
-| `drained_co2%` (excl. `%offsite%`) | Drained-peat on-site CO₂ in Mg CO₂/yr   |
-| `drained_n2o%`                 | Drained-peat N₂O in **Mg CO₂e/yr** (no offsite filter; offsite N₂O rows are summed in if present) |
+Validate the JRC Annex I 2026 aggregate against the raw CRT extracts:
 
-The SQL is built by `pub_common.table_nghgi_comparison_subset_sql`. It maps
-the model's `combined_state` / `emissions_state` strings to coarse IPCC
-land-use categories (Forest, Cropland, Grassland, Wetland, Settlement,
-Otherland) with:
+```bash
+python -m src.scripts.zonal_statistics.pub_scripts.pub_nghgi \
+  --validate_jrc
+```
 
-* `Oil Palm` and `Other plantation` folded into **Cropland**
-* `Extraction` and `Undrained (unclassified)` folded into **Wetland**
+## Inputs
 
-### NGHGI side: two compiled sources
+### Model zonal statistics
 
-**Raw extracts** (12 countries, deeper variable detail) at:
-`C:\GIS\Data\Global\Wetlands\organic_soil_nghgi\`
+The model side is read from `combined_state` parquet tiles on S3:
 
-| File                                | CRT origin   | Key columns                                         |
-|-------------------------------------|--------------|-----------------------------------------------------|
-| `organic_soil_compiled.csv`         | Table 4(II)  | drained-organic area, gas-specific emissions, EFs   |
-| `organic_soil_cstock_compiled.csv`  | Tables 4.A–F | total-organic area, organic-soil C-stock change     |
+```text
+s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/
+  version_<model_version>/zonal_stats/<run_name>/<run_date>/
+  <interval>/combined_state/*.parquet
+```
 
-Countries: CAN, CHN, DEU, FIN, IDN, IRL, KAZ, MYS, NOR, RUS, SWE, USA.
-Extracted from raw CRT workbooks under `WRI/WRI/{2024_ETF,2025_AnnexI}/<ISO3>/`.
-The extraction scripts referenced in the source README are not in this repo —
-they were ephemeral one-offs.
+The interval folder is named `<start>_<end>`, such as `2021_2024`. The SQL
+used for this comparison is `pub_common.table_nghgi_comparison_subset_sql`.
+It returns country, interval, coarse land-use, drained area, undrained area,
+drained on-site CO2, and drained N2O.
 
-**JRC pre-aggregated drop** (36 Annex I + 88 BTR1, shallower variable detail) at:
-`C:\GIS\Data\Global\Wetlands\organic_soil_nghgi\JRC_aggregations\<date>\`
+Model N2O is stored upstream as CO2e using the project-wide AR6 GWP100 value
+for N2O (`273`). In this comparison pipeline, that original value is preserved
+in `drained_n2o_Mg_CO2e_yr_model_gwp`, and the comparison value
+`drained_n2o_Mg_CO2e_yr` is rescaled to the inventory GWP described below.
 
-Loaded by `extract_organic_soil_jrc.py`. Two products:
+### Raw NGHGI compiled CSVs
 
-* `load_jrc_landuse_tables(annexi_dir)` — Tables 4.A–F top-level "Total"
-  rows per `(iso3, year, land_use)`: area_total_kha, area_organic_kha,
-  cstock_organic_ktC.
-* `load_jrc_table_3d(annexi_dir, btr1_path)` — Table 3.D.1.f "Cultivation
-  of organic soils (i.e. histosols)" per `(iso3, year)`: area_ha, n2o_kt.
-  When both AnnexI 2026 and BTR1 2024 cover the same `(iso3, year)`, AnnexI
-  2026 wins (lexicographic-sort + `drop_duplicates(keep="first")` in the
-  loader). BTR1 2024 only contributes rows for parties not in AnnexI 2026.
+Default directory:
 
-The 2026-04-30 drop covers years 1990–2024 for AnnexI and 1990–2023 for BTR1.
+```text
+C:/GIS/Data/Global/Wetlands/organic_soil_nghgi
+```
 
----
+Required files:
 
-## 2. Country source routing
+| File | CRT origin | Used for |
+| --- | --- | --- |
+| `organic_soil_compiled.csv` | Table 4(II) | Drained organic-soil area, CO2, N2O, CH4, implied EFs |
+| `organic_soil_cstock_compiled.csv` | Tables 4.A-4.F | Total organic-soil area and organic-soil carbon-stock change |
 
-The two NGHGI sources cover overlapping but distinct iso3 sets. pub_nghgi
-routes per-country to keep the comparison consistent:
+The current raw extract covers the detailed 12-country set:
+`CAN, CHN, DEU, FIN, IDN, IRL, KAZ, MYS, NOR, RUS, SWE, USA`.
 
-| Bucket                          | Count | Members                                  | Source for area + cstock-CO₂ | Source for T4(II) drained / EFs |
-|---------------------------------|-------|------------------------------------------|------------------------------|---------------------------------|
-| **Overlap** (raw + JRC)         | 6     | CAN, DEU, FIN, IRL, NOR, SWE             | **JRC 2026** (overrides raw) | Raw 2025                         |
-| **JRC-only**                    | 30    | AUS, AUT, BEL, BGR, BLR, CHE, CYP, CZE, DNK, ESP, EST, GRC, HRV, ISL, ITA, JPN, LIE, LTU, LUX, LVA, MCO, MLT, NLD, NZL, POL, ROU, SVK, SVN, TUR, UKR | JRC 2026                     | (not available)                  |
-| **Raw-only** (excluded by JRC)  | 6     | CHN, IDN, KAZ, MYS, RUS, USA             | Raw 2025                     | Raw 2025                         |
+### JRC pre-aggregated drop
 
-Russia is excluded from the EEA-aggregated JRC drop post-invasion; the
-others are non-Annex I or BTR1 parties not covered by the AnnexI 2026
-distribution. `--no_jrc` opts out of JRC entirely (raw-only fallback).
+Default directory:
 
-JRC 2026 overrides raw 2025 for the 6 overlap countries because it reflects
-each country's most recent submission cycle. Validation against the 6
-overlap iso3s found ~13% area / ~14% cstock rows differ by >10% between
-2025 and 2026 cycles — country revisions, not extraction errors. Run
-`--validate_jrc` to regenerate the overlap scatter PNGs and diff CSV.
+```text
+C:/GIS/Data/Global/Wetlands/organic_soil_nghgi/JRC_aggregations/2026-04-30
+```
 
----
+`extract_organic_soil_jrc.py` loads two products:
 
-## 3. Comparison metrics and figure inventory
+| Loader | Source | Used for |
+| --- | --- | --- |
+| `load_jrc_landuse_tables()` | Annex I 2026 Tables 4.A-4.F | Top-level total area, organic-soil area, and organic-soil carbon-stock change by country, year, and land-use |
+| `load_jrc_table_3d()` | Annex I 2026 Table 3.D plus BTR1 2024 Table 3.D | Table 3.D.1.f cultivation-of-organic-soils area and N2O |
 
-Five "main" comparisons aggregated across IPCC LULUCF categories (4.A–F),
-plus two "Table 3.D" comparisons restricted to cultivated organic soils:
+When Annex I 2026 and BTR1 2024 both cover the same `(iso3, year)` in
+Table 3.D, the Annex I 2026 row is retained.
 
-| Figure                                | Model side                                | NGHGI side                                                               | Unit          |
-|---------------------------------------|-------------------------------------------|--------------------------------------------------------------------------|---------------|
-| `topn_compare_total_area_<int>`       | drained + undrained peat extent           | Tables 4.A–F `area_organic_kha` (total organic, includes drained + undrained) | Mha           |
-| `topn_compare_drained_area_<int>`     | drained area                              | Table 4(II) "Drained organic soils" `area_kha`                          | Mha           |
-| `topn_compare_undrained_area_<int>`   | undrained area                            | total organic (4.A–F) − drained (4(II))                                 | Mha           |
-| `topn_compare_co2_<int>`              | drained `drained_co2%` excl. offsite      | Table 4(II) `em_co2_kt` numeric **else** Tables 4.A–F `cstock_soil_organic_ktC × −44/12` | Mt CO₂e/yr    |
-| `topn_compare_n2o_<int>`              | drained `drained_n2o%` (already CO₂e)     | Table 4(II) `em_n2o_kt × N2O_GWP × 1000`                                | Mt CO₂e/yr    |
-| `topn_compare_t3d_area_<int>`         | drained area filtered to `T3D_N2O_MODEL_LANDUSE` | Table 3.D.1.f `Area (ha)`                                          | Mha           |
-| `topn_compare_t3d_n2o_<int>`          | drained N₂O filtered to `T3D_N2O_MODEL_LANDUSE` | Table 3.D.1.f `n2o_kt × N2O_GWP × 1000`                            | Mt CO₂e/yr    |
+## Source Routing
 
-Plus two non-replaced figures:
+By default, JRC data are used where available.
 
-| Figure                  | Purpose                                                                |
-|-------------------------|------------------------------------------------------------------------|
-| `scatter_area_<int>`    | All-country distribution view (model vs NGHGI on log-log axes)         |
-| `scatter_co2_<int>`     | Same, for CO₂                                                          |
+| Country bucket | Members | Source use |
+| --- | --- | --- |
+| Raw + JRC overlap | `CAN, DEU, FIN, IRL, NOR, SWE` | JRC 2026 replaces raw Tables 4.A-4.F total organic area and C-stock CO2. Raw Table 4(II) remains the source for drained area and gases. |
+| JRC-only | Annex I countries present in the JRC drop but absent from the raw extract | JRC 2026 supplies total organic area and C-stock CO2. Table 4(II) drained area and gases are unavailable. |
+| Raw-only | `CHN, IDN, KAZ, MYS, RUS, USA` | Raw compiled CSVs supply both Table 4(II) and Tables 4.A-4.F values. |
 
-Each `topn_compare_*` figure shows the same 10 focus countries in the same
-order (defined below) with a color scheme distinct to that figure for
-visual differentiation.
+The undrained-area proxy deliberately does not subtract raw Table 4(II)
+drained area from a JRC 2026 total. Instead, it uses raw Tables 4.A-4.F total
+organic area minus raw Table 4(II) drained area. This avoids creating
+artificial negative undrained values from mixed inventory cycles while still
+allowing the total-area and C-stock CO2 comparison to use newer JRC data.
 
-For the CO₂ and N₂O figures, the NGHGI value within Table 4(II) is taken
-from the **"Drained organic soils"** sub-row when reported; otherwise it
-falls back to the aggregate **"Total organic soils"** row. The model only
-covers drained-peat emissions, so preferring the drained sub-row is the
-apples-to-apples choice; the Total fallback exists for countries that
-report only at the aggregate level.
+Use `--no_jrc` to run the raw-only 12-country comparison.
 
----
+## Core Methods
 
-## 4. Key assumptions and parameters
+### Inventory intervals
 
-### `FOCUS_COUNTRIES_ISO3`
+`--years` accepts inventory end years only. Valid values are the end years in
+`cn.five_year_inventory_periods`, currently:
+
+```text
+2005, 2010, 2015, 2020, 2024
+```
+
+Each NGHGI metric is averaged across the corresponding inventory window, so
+`--years 2024` compares the model's `2021_2024` interval with the mean of
+reported annual inventory values for 2021-2024.
+
+Every interval output carries metric-specific `*_years_available` columns.
+Those counts are the number of non-null annual reported values inside the
+model window for that metric. A comparison value should be treated as chartable
+only when the corresponding count is at least 1.
+
+### Land-use matching
+
+NGHGI category codes are mapped to the six coarse IPCC LULUCF classes:
+
+| NGHGI category | Land-use label |
+| --- | --- |
+| `4(II).A`, `4.A` | Forest |
+| `4(II).B`, `4.B` | Cropland |
+| `4(II).C`, `4.C` | Grassland |
+| `4(II).D`, `4.D` | Wetland |
+| `4(II).E`, `4.E` | Settlement |
+| `4(II).F`, `4.F` | Otherland |
+
+Model labels are folded to the same reporting level:
+
+| Model label | Comparison label |
+| --- | --- |
+| Oil Palm | Cropland |
+| Other plantation | Cropland |
+| Extraction | Wetland |
+| Undrained (unclassified) | Wetland |
+
+### Table 4(II) hierarchy collapse
+
+Table 4(II) is hierarchical. The pipeline avoids double-counting by summing
+the non-overlapping parent rows (`4(II).X.1` and `4(II).X.2`) and only falling
+back to deeper children when a parent is missing. All sums use `min_count=1`
+so all-missing `IE`/`NE` groups remain `NaN` instead of becoming numeric zero.
+
+### Table 4(II) gas sub-row preference
+
+For CO2, N2O, and CH4, Table 4(II) can contain both "Total organic soils" and
+"Drained organic soils" sub-rows. The comparison prefers the Drained row when
+it is numeric and falls back to Total only when Drained is missing. This keeps
+the NGHGI gas comparison as close as possible to the model's drained-peat
+emissions while still supporting countries that only report the aggregate row.
+
+Drained area uses the Drained row only. Total organic area comes from Tables
+4.A-4.F, not from the Table 4(II) Total row.
+
+### CO2 source preference
+
+For each `(iso3, land_use, year)`, NGHGI CO2 is:
+
+1. Table 4(II) `em_co2_kt` when numeric.
+2. Otherwise, Tables 4.A-4.F organic-soil C-stock change converted as
+   `-cstock_soil_organic_ktC * 44/12`.
+
+The selected source is stored in `nghgi_em_co2_source`.
+
+### N2O GWP convention
+
+For the NGHGI comparison outputs, both model and inventory N2O are normalized
+to the current inventory convention: AR5 GWP100 for N2O = `265`.
+
+The output keeps enough metadata to avoid ambiguity:
+
+| Column | Meaning |
+| --- | --- |
+| `drained_n2o_Mg_CO2e_yr_model_gwp` | Original model-side N2O CO2e using project-wide GWP100 = 273 |
+| `drained_n2o_Mg_CO2e_yr` | Model N2O rescaled to inventory GWP100 = 265 |
+| `model_n2o_gwp_original` | Original model GWP value |
+| `comparison_n2o_gwp` | GWP used for comparison outputs |
+| `nghgi_n2o_gwp`, `nghgi_t3d_n2o_gwp` | GWP used to convert NGHGI N2O mass to CO2e |
+
+The upstream model output is not changed; normalization happens only in this
+comparison layer.
+
+### Undrained organic-soil area
+
+Countries do not report undrained organic-soil area directly. The proxy is:
+
+```text
+undrained = raw Tables 4.A-4.F total organic area - raw Table 4(II) drained area
+```
+
+Values more than `1 ha` below zero are treated as source inconsistencies:
+`nghgi_area_undrained_negative_flag = True`, the unclipped value is retained in
+`nghgi_area_undrained_organic_unclipped_ha`, and the chartable undrained value
+is left missing. Smaller negatives are treated as rounding noise and clipped
+to zero.
+
+The interval count `nghgi_area_undrained_years_available` requires same-year
+raw total area and same-year raw drained area. `nghgi_area_undrained_basis_years_available`
+records how many years had both inputs before the negative-consistency check.
+
+### Matched-scope country rollups
+
+Country bars are built by summing the model side only across land-use cells
+where the NGHGI side has a numeric value for that metric. This keeps the
+model from being inflated by categories a country did not report.
+
+Reported zeroes are retained. A zero inventory value is information, and it
+should reveal model false positives in the paired country bars.
+
+## Table 3.D.1.f Scope
+
+Table 3.D.1.f is "Cultivation of organic soils (i.e. histosols)" in the
+Agriculture sector. Its inventory scope can include cultivated cropland and
+managed grassland histosols, but countries often define reportable cultivated
+grassland more narrowly than the model's coarse "drained Grassland on organic
+soil" class.
+
+For that reason, the default headline comparison is Cropland-only on the
+model side:
+
+```python
+T3D_N2O_MODEL_LANDUSE = ("Cropland",)
+```
+
+When `--t3d_landuse` is omitted, the pipeline also writes an automatic
+Cropland+Grassland sensitivity:
+
+```text
+model_vs_nghgi_t3d_cropland_grassland.csv
+topn_compare_t3d_area_cropland_grassland_<interval>.png
+topn_compare_t3d_n2o_cropland_grassland_<interval>.png
+```
+
+Pass `--t3d_landuse Cropland Grassland` if the broader scope should be the
+explicit primary output for a run.
+
+## Outputs
+
+Default output root:
+
+```text
+<AFOLU_PUB_NGHGI_DIR or publication_root("nghgi")>/
+  version_<model_version>/<run_name>/<run_date>/
+```
+
+The first `--run` entry determines the output directory.
+
+### Data CSVs
+
+With the default T3D settings, the data folder contains:
+
+```text
+figures/data/
+  model_country_landuse.csv
+  nghgi_country_landuse.csv
+  nghgi_availability_matrix.csv
+  model_vs_nghgi.csv
+  nghgi_t3d_country.csv
+  model_vs_nghgi_t3d.csv
+  model_vs_nghgi_t3d_cropland_grassland.csv   # default T3D sensitivity
+```
+
+`model_vs_nghgi.csv` and the T3D joined CSVs are outer joins. NGHGI-only rows
+are expected and retain interval metadata.
+
+`nghgi_availability_matrix.csv` is a long annual matrix with one row per
+country, land-use, interval, year, and metric. Important columns:
+
+| Column | Meaning |
+| --- | --- |
+| `inventory_table` | Source table or derived product (`Table 4(II)`, `Tables 4.A-4.F`, `Table 3.D.1.f`, etc.) |
+| `metric` | Availability metric, such as `area_drained_organic`, `co2_preferred`, `n2o_t4ii`, or `n2o_t3d` |
+| `gas` | Gas when applicable (`CO2`, `N2O`, `CH4`) |
+| `source` | Raw/JRC/source-preference label when a value is present |
+| `has_value` | Whether that annual metric is non-null |
+| `value` | The annual value used to compute interval means |
+
+### Figures
+
+With the default T3D settings, each requested interval writes:
+
+```text
+figures/
+  scatter_area_<interval>.png
+  scatter_co2_<interval>.png
+  topn_compare_total_area_<interval>.png
+  topn_compare_drained_area_<interval>.png
+  topn_compare_undrained_area_<interval>.png
+  topn_compare_co2_<interval>.png
+  topn_compare_n2o_<interval>.png
+  topn_compare_t3d_area_<interval>.png
+  topn_compare_t3d_n2o_<interval>.png
+  topn_compare_t3d_area_cropland_grassland_<interval>.png
+  topn_compare_t3d_n2o_cropland_grassland_<interval>.png
+```
+
+The `topn_compare_*` figures use the same focus-country set and ordering for
+visual comparability:
 
 ```python
 ("CAN", "DEU", "FIN", "IDN", "IRL", "MYS", "NOR", "RUS", "SWE", "USA")
 ```
 
-The 10 raw-extract countries with full Table 4(II) reporting. Used to
-restrict every `topn_compare_*` figure to the same country set so
-cross-figure comparison is meaningful.
+The order is computed from latest-interval NGHGI total organic-soil area and
+then reused across figures.
 
-The y-axis order is computed once per run from each country's NGHGI total
-organic-soil area (latest interval, descending), then applied identically
-to every figure. Largest reporter at top of plot, smallest at bottom.
+### JRC validation mode
 
-### `T3D_N2O_MODEL_LANDUSE`
+`--validate_jrc` writes:
 
-```python
-("Cropland",)   # 2026-04-30 default
-```
-
-Land uses summed on the model side for the Table 3.D.1.f "Cultivation of
-organic soils" comparison. Cropland-only because the model classifies
-most countries' cultivated histosols as Grassland, but most of that
-"drained Grassland on organic soils" is non-cultivated peatland that
-countries do not report under 3.D.1.f. Including grassland inflated the
-model side wildly.
-
-`--t3d_landuse Cropland Grassland` overrides for the broader IPCC 2006
-Vol. 4 Ch. 11 scope (cultivated cropland + managed grassland histosols)
-as a sensitivity test.
-
-### `N2O_GWP`
-
-```python
-N2O_GWP = 273.0
-```
-
-AR6 100-year GWP. Converts NGHGI N₂O (kt N₂O mass) to CO₂e for like-for-like
-comparison with the model's `drained_n2o_Mg_CO2e` flux. Matches `pub_fao`
-convention. AR4 (265) and AR5 (298) are alternatives if you need to match a
-specific country's reporting cycle exactly.
-
-### `C_TO_CO2`
-
-```python
-C_TO_CO2 = 44.0 / 12.0
-```
-
-Stoichiometric ratio used to convert organic-soil C-stock change (kt C in
-Tables 4.A–F) to CO₂ emissions. Sign is flipped because a negative cstock
-change (carbon loss) corresponds to a positive CO₂ emission.
-
-### Inventory interval averaging
-
-Inventory periods come from `cn.five_year_inventory_periods`:
-
-```python
-[(2001, 2005), (2006, 2010), (2011, 2015), (2016, 2020), (2021, 2024)]
-```
-
-The last bucket is currently 4 years pending 2025 model + NGHGI data. Each
-model run produces parquet outputs under `<interval>/` directories named
-`<start>_<end>` (e.g., `2021_2024/`). `--years` accepts only the *end*
-year(s) of these periods; passing a year not in the mapping is a hard
-error. The NGHGI side averages per-country numeric values across the same
-window via `groupby(...).agg(... = "mean")` — e.g., `--years 2024`
-triggers comparison against the 2021–2024 mean of NGHGI annual values
-where reported.
-
----
-
-## 5. Methodological choices
-
-### Apples-to-apples matching of land-use categories
-
-Most NGHGI reporters cover only a subset of IPCC LULUCF categories per
-metric (CAN reports drained area only for Forest + Wetland; FIN no
-Cropland/Grassland drained; USA same; etc.). The model produces non-zero
-values in every `(iso3, land_use)` cell.
-
-Per-country roll-up therefore uses **matched-scope summation**: for each
-`(model, nghgi)` column pair, the model side sums across only the
-`(iso3, land_use)` tuples where the NGHGI metric has reported numeric
-data on that axis. Otherwise the model side inflates by including
-categories the country does not report.
-
-Affects all five main figures. T3D figures are already country-level
-(no LU breakdown), so the issue does not apply there.
-
-`0` is treated as "not reported" by the figure-side `_matched_sum` filter
-(`df[nghgi_col].notna() & (df[nghgi_col] != 0)`). Originally this was a
-workaround for the upstream NaN→0 bug in `nghgi_by_iso_landuse_interval`;
-that bug has since been fixed (every per-(iso3, year, land_use) sum now
-uses `min_count=1`, so NaN groups stay NaN — see `_collapse_to_toplevel`,
-`_prefer_drained_gas`, the cstock aggregation in commit `16658538`, and
-`_aggregate_raw_cstock_top_level`). The 0-as-missing filter is kept as
-defense-in-depth and to absorb true-zero sentinels that some countries
-emit for "no contribution" rather than `IE`/`NE`.
-
-### Aggregating Table 4(II) sub-categories
-
-CRT Table 4(II) reports each land-use category as a hierarchy:
-`4(II).X` (the land-use total), `4(II).X.1` (remaining), `4(II).X.2`
-(converted), and deeper breakdowns like `4(II).X.2.a/b`. Naïvely summing
-all rows would double-count.
-
-`_collapse_to_toplevel` therefore uses `4(II).X.1` and `4(II).X.2` (the
-canonical non-overlapping partition, identified as exactly-2-dot codes) as
-the parent values. When a parent row is NaN, it falls back to the sum of
-its children (3-dot or deeper). The parents are then summed to the
-land-use total. All sums use `min_count=1` so a country reporting `IE`/`NE`
-for an entire land-use stays NaN rather than collapsing to 0.
-
-### Gas emissions: prefer Drained over Total sub-row
-
-Within Table 4(II), each land-use cell breaks into "Total organic soils"
-and "Drained organic soils" sub-rows. For CO₂, N₂O, and CH₄, we compute
-both totals via `_collapse_to_toplevel` independently and then prefer
-the Drained value (`drn`) when present, falling back to Total (`tot`)
-when Drained is `NaN`. The model only emits drained-peat fluxes, so the
-drained sub-row is the like-for-like comparison; the Total fallback
-exists for the handful of non-Annex I countries that report gas
-emissions only at the aggregate level. Area uses Drained-only (no
-fallback) because Total-organic area is what the cstock side reports.
-
-### CO₂ source preference (Table 4(II) vs Tables 4.A–F)
-
-For each `(iso3, land_use, year)`, the NGHGI CO₂ value is:
-
-1. Table 4(II) `em_co2_kt` if numeric (some non-Annex I countries report CO₂
-   directly in Table 4(II));
-2. Otherwise derived from Tables 4.A–F: `−cstock_soil_organic_ktC × 44/12`
-   (most Annex I countries flag T4(II) CO₂ as `IE` and put the value here).
-
-The chosen source per country-year-LU is recorded in the
-`nghgi_em_co2_source` column of `nghgi_country_landuse.csv`.
-
-### NGHGI undrained area derivation
-
-Undrained organic-soil area is not reported directly by countries. We
-derive it as:
-
-```
-undrained = max(0, total_organic_4.A-F  −  drained_4(II))
-```
-
-where both sides are summed up from the per-LU rows. Where T4(II) drained
-is not reported, undrained is `NaN` (not a derivable proxy).
-
-### Model land-use folding for NGHGI comparability
-
-Within `pub_common.table_nghgi_comparison_subset_sql`:
-
-* Coastal mangrove / tidal marsh → **Wetland**
-* Oil palm, other plantation, planted, tree-crop → **Oil Palm** / **Other plantation**
-  (then folded to **Cropland** in pub_nghgi.MODEL_LANDUSE_FOLD)
-* Settlement, built-up, urban → **Settlement**
-* Peat extraction, cutover → **Extraction** (folded to **Wetland**)
-* Otherwise model's native land-use string
-
-This matches the IPCC LULUCF taxonomy that countries report under.
-
----
-
-## 6. Outputs
-
-For each `--years` end-year and `--run`, pub_nghgi writes:
-
-```
-<OUT_DIR_ROOT>/version_<v>/<run_name>/<run_date>/
-  figures/
-    scatter_area_<interval>.png
-    scatter_co2_<interval>.png
-    topn_compare_total_area_<interval>.png
-    topn_compare_drained_area_<interval>.png
-    topn_compare_undrained_area_<interval>.png
-    topn_compare_co2_<interval>.png
-    topn_compare_n2o_<interval>.png
-    topn_compare_t3d_area_<interval>.png
-    topn_compare_t3d_n2o_<interval>.png
-    data/
-      model_country_landuse.csv          per (iso3, land_use, interval)
-      nghgi_country_landuse.csv          per (iso3, land_use, interval)
-      model_vs_nghgi.csv                 outer-joined comparison frame
-      nghgi_t3d_country.csv              per (iso3, interval), 3.D.1.f only
-      model_vs_nghgi_t3d.csv             outer-joined 3.D comparison
-```
-
-`--validate_jrc` mode writes to a separate path:
-
-```
-<OUT_DIR_ROOT>/validation/<jrc_drop_label>/
+```text
+validation/<jrc_drop_label>/
   figures/validation/
     scatter_area_organic_raw_vs_jrc.png
     scatter_cstock_organic_raw_vs_jrc.png
     data/validation_overlap.csv
 ```
 
----
+This mode skips the model side and does not require `--years` or `--run`.
 
-## 7. Usage
+## CLI Reference
 
-### Standard run
+| Flag | Meaning |
+| --- | --- |
+| `--years 2024 [2015 ...]` | Inventory end years to compare. Required unless `--validate_jrc` is set. |
+| `--run "run_name=model_version:run_date|Label"` | Model run spec. May be repeated. Required unless `--validate_jrc` is set. |
+| `--nghgi_dir <path>` | Directory containing the two compiled raw NGHGI CSVs. |
+| `--jrc_dir <path>` | Directory containing `AnnexI_2026/` and optional `BTR1_2024_Table3D.xlsx`. |
+| `--no_jrc` | Disable JRC replacement and run raw-only. |
+| `--t3d_landuse Cropland Grassland` | Override the model land-use set used for the primary T3D comparison. |
+| `--validate_jrc` | Run raw-vs-JRC validation and exit. |
+| `--data-only` | Write CSVs and skip figures. |
+| `--out-dir-root <path>` | Override the publication output root for this invocation. |
+| `--aws_region <region>` | Optional AWS region for S3 reads. |
+| `--adm0_lookup_csv <path>` | Optional `gadm_adm0,iso3,country` lookup override. |
 
-```bash
-cd /mnt/c/gis/git/AFOLU_GHG_flux_model
-python -m src.scripts.zonal_statistics.pub_scripts.pub_nghgi \
-    --years 2024 \
-    --run "ogh_biome_thresholds=0_1_4:20260417|OGH"
-```
+## Environment Variables
 
-### Multi-source comparison
+| Variable | Default |
+| --- | --- |
+| `AFOLU_PUB_NGHGI_DIR` | `publication_root("nghgi")` |
+| `AFOLU_NGHGI_DATA_DIR` | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi` |
+| `AFOLU_NGHGI_JRC_DIR` | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi/JRC_aggregations/2026-04-30` |
 
-```bash
-python -m src.scripts.zonal_statistics.pub_scripts.pub_nghgi \
-    --years 2005 2010 2015 2020 2024 \
-    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH" \
-    --run "gfw_standard_model_500m=0_9_7:20251120|GFW" \
-    --run "gpd_standard_model_500m=0_9_7:20251120|GPD"
-```
+`publication_root("nghgi")` is resolved by
+`src/scripts/utilities/local_output_paths.py`, usually under `C:/tmp/afolu`
+on Windows.
 
-The first `--run` determines the output directory.
+## Known Caveats
 
-### Sensitivity flags
+### Cultivated grassland is not a clean model class
 
-| Flag                              | Effect                                                                                  |
-|-----------------------------------|-----------------------------------------------------------------------------------------|
-| `--no_jrc`                        | Skip the JRC drop entirely (raw-only 12-country comparison)                             |
-| `--t3d_landuse Cropland Grassland`| Broaden the 3.D.1.f model scope to include managed grassland histosols                  |
-| `--validate_jrc`                  | Validation-only mode: raw vs JRC overlap scatter + diff CSV; skip the model side        |
-| `--data-only`                     | Skip figure generation, write CSVs only                                                 |
-| `--out_dir_root <path>`           | Override the output root for this invocation (precedence: CLI > `AFOLU_PUB_NGHGI_DIR` > `AFOLU_LOCAL_OUTPUT_ROOT`-derived default) |
-| `--aws_region <region>`           | AWS region for S3 reads (rarely needed; S3 client autoresolves)                         |
-| `--adm0_lookup_csv <path>`        | CSV with `gadm_adm0,iso3,country` overrides for the model-side join                     |
+Including all modeled Grassland in Table 3.D.1.f usually overstates the
+model side because natural or protected grassland organic soils can be outside
+countries' cultivated/agricultural-management definitions. The Cropland-only
+primary and Cropland+Grassland sensitivity are intended to bracket this
+classification issue rather than hide it.
 
-### Environment overrides
+### Total peat extent and country reporting scope can diverge sharply
 
-The output root resolves through `local_output_paths.publication_root("nghgi")`,
-which honors `AFOLU_PUB_NGHGI_DIR` first and falls back to the
-`AFOLU_LOCAL_OUTPUT_ROOT`-derived default (introduced in commit
-`9aa8c279`).
+Some countries report a narrow inventory subset of organic soils relative to
+the model's mapped peat extent. Canada is the most visible example: sparse
+reported organic-soil area in Tables 4.A-4.F should be interpreted as a CRT
+taxonomy/reporting-scope issue, not automatically as a model extent failure.
 
-| Variable                    | Default                                                                                                                  |
-|-----------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| `AFOLU_LOCAL_OUTPUT_ROOT`   | `C:/tmp/afolu` (Windows), `/mnt/c/tmp/afolu` (WSL when `/mnt/c/tmp` exists), `/tmp/afolu` (other POSIX)                  |
-| `AFOLU_PUB_NGHGI_DIR`       | `<AFOLU_LOCAL_OUTPUT_ROOT>/publications/nghgi`                                                                           |
-| `AFOLU_NGHGI_DATA_DIR`      | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi`                                                                     |
-| `AFOLU_NGHGI_JRC_DIR`       | `/mnt/c/GIS/Data/Global/Wetlands/organic_soil_nghgi/JRC_aggregations/2026-04-30`                                         |
+### Remaining negative undrained flags are diagnostics
 
----
+The mixed-cycle artifact from subtracting raw drained area from JRC totals has
+been removed. Any remaining `nghgi_area_undrained_negative_flag = True` rows
+come from the raw-basis subtraction itself and should be inspected as inventory
+or extraction consistency issues.
 
-## 8. Known caveats and findings
+### Arctic mask limitations
 
-### Russia (RUS) is a 3.D.1.f outlier by design
+The current OGH peat-probability raster excludes Greenland and areas north of
+about 76 degrees N. Model-side country totals near the high Arctic can
+therefore be zero or incomplete even when an inventory reports some area.
 
-Russia's BTR1 reports Table 3.D.1.f as actively cultivated histosols only;
-the model counts every drained-peatland pixel labeled cropland or grassland
-across the country. Even with cropland-only model scope, RUS is ~22× NGHGI
-on cultivation N₂O. Treat as a definitional gap, not a model bug.
+## Maintenance Checklist
 
-### Canada (CAN) total-area divergence is a CRT taxonomy gap
+When the comparison method changes, update this README together with:
 
-Canada's Tables 4.A–F barely classify any Canadian peatland as "organic
-soils" under the LULUCF taxonomy — most boreal peatland is reported
-elsewhere or not at all. The model finds extensive Canadian peat, giving
-~3000× model/NGHGI on total organic area. The matching logic does not
-fix this because the sparse-but-reported categories (Wetland, Settlement)
-on the NGHGI side are tiny relative to the model's full Canadian peat
-extent. Real methodological gap, surface as caveat in any presentation.
-
-### Model classifies most cultivated histosols as Grassland
-
-For most NGHGI-reporting countries, the unified-state SQL classifies
-drained cultivated histosols as **Grassland rather than Cropland**.
-Grassland share of model 3.D.1.f-equivalent N₂O: BLR 98%, GBR 99%,
-DEU/NLD/COL/SWE 95–96%, FIN 86%, POL 76%, NZL 66%, UKR 64%, USA 55%,
-RUS 45%, IDN 30%, MYS 8%.
-
-Implication: cropland-only model scope (the default for `topn_compare_t3d_*`)
-under-reports for EU/Annex-I countries (DEU/IRL ~0.0× NGHGI). The
-under-reporting is a model land-use classification artifact, not a
-peat-detection failure. Including grassland inflates against country
-reporting practice. The current default is the most defensible single
-choice; document the artifact when presenting.
-
-### OGH peat probability raster excludes Greenland and >76°N
-
-The upstream OGH peat-probability raster has spatial bounds [−56°S, +76°N]
-and is nodata-masked over all of Greenland even within that band. Country
-totals for GRL, SVB (Svalbard), and the high Canadian Arctic Archipelago
-report as zero, not estimated. Affects model side only; NGHGI side is
-unaffected because Greenland reports under DNK and high-Arctic territories
-are usually not reported as organic soils. Surface as caveat for any
-country totals near the Arctic.
-
-### NaN→0 quirk (resolved)
-
-Previously, `nghgi_by_iso_landuse_interval`'s per-(iso3, year, land_use)
-sums used plain `.sum()`, which silently mapped all-NaN groups to 0, so a
-country reporting `IE`/`NE`/`NA` for a category appeared as a numeric 0
-in the joined frame. Resolved as of commit `16658538` ("Preserve missing
-NGHGI c-stock sums") — every aggregation now uses `min_count=1` and
-NaN groups stay NaN. The figure-side filter still treats 0 as
-"not reported" in `_matched_sum`; see the discussion in §5.
-
-### Non-stacked, linear, top-10
-
-Stacked drained+undrained or CO₂+N₂O figures were tried and removed:
-log scale on stacked bars distorts segment proportionality; linear scale
-on stacked bars has cross-country range that buries smaller reporters.
-Each metric is now its own figure on linear scale, with the same 10 focus
-countries in the same order, allowing direct visual comparison across the
-figure set.
-
----
-
-## 9. Memory / decision log
-
-The current architecture and the design rationale for the cropland-only
-T3D scope, the 6/30/6 country-routing split, and the matched-scope
-aggregation are tracked in
-`~/.claude/projects/<project>/memory/project_pub_nghgi_jrc.md`. Update
-that memory when reporting practice or scope decisions change.
-
-Branch: `feature/organic_soils_time`. Notable commits:
-
-* `27a8c86`..`a06858c` (2026-04-15..2026-04-30) — JRC integration,
-  figure-format standardization, T3D cropland-only default,
-  matched-scope summation
-* `ba2d62aa` (2026-04-30) — this README
-* `16658538` (2026-05-01) — `min_count=1` fix for NGHGI cstock sums
-* `9aa8c279` (2026-05-01) — output-path centralization under
-  `AFOLU_LOCAL_OUTPUT_ROOT` (changed `AFOLU_PUB_NGHGI_DIR` default)
+1. `pub_nghgi.py` constants and CLI help.
+2. Regression tests under `tests/test_pub_nghgi_missing_cstock.py`.
+3. Any downstream slide/deck notes that describe T3D scope or N2O GWP.
+4. The JRC drop README if a new dated aggregation folder becomes the default.

@@ -104,6 +104,191 @@ def test_undrained_area_uses_raw_area_when_jrc_overrides_cstock():
     assert np.isclose(row["nghgi_em_co2_Mg_yr"], 4.0 * pub_nghgi.C_TO_CO2 * 1_000.0)
 
 
+def test_metric_specific_availability_counts_by_interval():
+    nghgi_t4ii = pd.DataFrame(
+        [
+            {
+                "iso3": "AAA",
+                "year": 2001,
+                "land_use": "Forest",
+                "category_code": "4(II).A.1",
+                "soil_type": "Drained organic soils",
+                "area_kha": 10.0,
+                "em_co2_kt": np.nan,
+                "em_n2o_kt": 1.0,
+                "em_ch4_kt": np.nan,
+            },
+            {
+                "iso3": "AAA",
+                "year": 2002,
+                "land_use": "Forest",
+                "category_code": "4(II).A.1",
+                "soil_type": "Drained organic soils",
+                "area_kha": np.nan,
+                "em_co2_kt": 5.0,
+                "em_n2o_kt": np.nan,
+                "em_ch4_kt": 2.0,
+            },
+        ]
+    )
+    nghgi_cstock = pd.DataFrame(
+        [
+            {
+                "iso3": "AAA",
+                "year": 2001,
+                "land_use": "Forest",
+                "category_code": "4.A",
+                "area_organic_kha": 15.0,
+                "cstock_soil_organic_ktC": -3.0,
+            },
+            {
+                "iso3": "AAA",
+                "year": 2002,
+                "land_use": "Forest",
+                "category_code": "4.A",
+                "area_organic_kha": 20.0,
+                "cstock_soil_organic_ktC": np.nan,
+            },
+        ]
+    )
+
+    out = pub_nghgi.nghgi_by_iso_landuse_interval(
+        nghgi_t4ii,
+        nghgi_cstock,
+        [(2001, 2002)],
+    )
+
+    row = out.loc[(out["iso3"] == "AAA") & (out["land_use"] == "Forest")].iloc[0]
+    expected_co2_kt = ((3.0 * pub_nghgi.C_TO_CO2) + 5.0) / 2.0
+    assert np.isclose(row["nghgi_em_co2_Mg_yr"], expected_co2_kt * 1_000.0)
+    assert row["nghgi_em_co2_source"] == "mixed_T4II_T4land_cstock"
+    assert row["nghgi_area_drained_years_available"] == 1
+    assert row["nghgi_area_total_years_available"] == 2
+    assert row["nghgi_area_undrained_basis_years_available"] == 1
+    assert row["nghgi_area_undrained_years_available"] == 1
+    assert row["nghgi_em_co2_t4ii_years_available"] == 1
+    assert row["nghgi_em_co2_cstock_years_available"] == 1
+    assert row["nghgi_em_co2_years_available"] == 2
+    assert row["nghgi_em_n2o_years_available"] == 1
+    assert row["nghgi_em_ch4_years_available"] == 1
+    assert row["nghgi_area_undrained_organic_ha"] == 5_000.0
+
+
+def test_availability_matrix_has_year_metric_rows():
+    nghgi_t4ii = pd.DataFrame(
+        [
+            {
+                "iso3": "AAA",
+                "year": 2001,
+                "land_use": "Forest",
+                "category_code": "4(II).A.1",
+                "soil_type": "Drained organic soils",
+                "area_kha": 10.0,
+                "em_co2_kt": np.nan,
+                "em_n2o_kt": 1.0,
+                "em_ch4_kt": np.nan,
+            },
+            {
+                "iso3": "AAA",
+                "year": 2002,
+                "land_use": "Forest",
+                "category_code": "4(II).A.1",
+                "soil_type": "Drained organic soils",
+                "area_kha": np.nan,
+                "em_co2_kt": 5.0,
+                "em_n2o_kt": np.nan,
+                "em_ch4_kt": np.nan,
+            },
+        ]
+    )
+    nghgi_cstock = pd.DataFrame(
+        [
+            {
+                "iso3": "AAA",
+                "year": 2001,
+                "land_use": "Forest",
+                "category_code": "4.A",
+                "area_organic_kha": 15.0,
+                "cstock_soil_organic_ktC": -3.0,
+            },
+            {
+                "iso3": "AAA",
+                "year": 2002,
+                "land_use": "Forest",
+                "category_code": "4.A",
+                "area_organic_kha": 20.0,
+                "cstock_soil_organic_ktC": np.nan,
+            },
+        ]
+    )
+
+    annual = pub_nghgi.nghgi_annual_by_iso_landuse(nghgi_t4ii, nghgi_cstock)
+    matrix = pub_nghgi.build_nghgi_availability_matrix(annual, [(2001, 2002)])
+
+    n2o_2001 = matrix.loc[
+        (matrix["metric"] == "n2o_t4ii") & (matrix["year"] == 2001)
+    ].iloc[0]
+    n2o_2002 = matrix.loc[
+        (matrix["metric"] == "n2o_t4ii") & (matrix["year"] == 2002)
+    ].iloc[0]
+    total_2002 = matrix.loc[
+        (matrix["metric"] == "area_total_organic") & (matrix["year"] == 2002)
+    ].iloc[0]
+    undrained_2002 = matrix.loc[
+        (matrix["metric"] == "area_undrained_organic") & (matrix["year"] == 2002)
+    ].iloc[0]
+
+    assert bool(n2o_2001["has_value"])
+    assert not bool(n2o_2002["has_value"])
+    assert bool(total_2002["has_value"])
+    assert total_2002["source"] == "raw_CRT_extract"
+    assert not bool(undrained_2002["has_value"])
+
+
+def test_t3d_metric_specific_availability_counts_and_matrix():
+    jrc_t3d = pd.DataFrame(
+        [
+            {
+                "iso3": "AAA",
+                "year": 2001,
+                "area_ha": 10.0,
+                "n2o_kt": np.nan,
+                "source": "JRC_BTR1_2024",
+            },
+            {
+                "iso3": "AAA",
+                "year": 2002,
+                "area_ha": np.nan,
+                "n2o_kt": 2.0,
+                "source": "JRC_BTR1_2024",
+            },
+        ]
+    )
+
+    annual = pub_nghgi.nghgi_t3d_annual(jrc_t3d)
+    out = pub_nghgi.nghgi_t3d_by_iso_interval(
+        jrc_t3d,
+        [(2001, 2002)],
+        annual_df=annual,
+    )
+    row = out.loc[out["iso3"] == "AAA"].iloc[0]
+    assert row["nghgi_t3d_area_years_available"] == 1
+    assert row["nghgi_t3d_n2o_years_available"] == 1
+    assert row["nghgi_t3d_area_ha"] == 10.0
+    assert row["nghgi_t3d_n2o_kt"] == 2.0
+
+    matrix = pub_nghgi.build_nghgi_availability_matrix(
+        pd.DataFrame(),
+        [(2001, 2002)],
+        t3d_annual_df=annual,
+    )
+    n2o_2002 = matrix.loc[
+        (matrix["metric"] == "n2o_t3d") & (matrix["year"] == 2002)
+    ].iloc[0]
+    assert bool(n2o_2002["has_value"])
+    assert n2o_2002["land_use"] == "All"
+
+
 def test_join_preserves_nghgi_only_interval_metadata():
     model_df = pd.DataFrame(
         [
