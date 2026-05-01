@@ -736,12 +736,11 @@ def _plot_country_grouped_barh(
     ax.set_axisbelow(True)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=9)
 
-    pos_min = min(
-        df[value_nghgi][df[value_nghgi] > 0].min(),
-        df[value_model][df[value_model].fillna(0) > 0].min() if (df[value_model].fillna(0) > 0).any() else df[value_nghgi].min(),
-    )
-    ax.set_xscale("log")
-    ax.set_xlim(max(pos_min * 0.5, 1e-6), pos_max * 5)
+    # Linear x-axis so visual bar length faithfully encodes the model/NGHGI
+    # ratio. Cross-country range can span orders of magnitude (RUS, CAN
+    # outliers), but the annotation gives exact ratios and top-10 keeps
+    # the figure readable.
+    ax.set_xlim(0, pos_max * 1.18)
     fig.tight_layout()
     return fig
 
