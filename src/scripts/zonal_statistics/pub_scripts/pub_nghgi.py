@@ -112,6 +112,27 @@ T3D_N2O_MODEL_LANDUSE: Tuple[str, ...] = ("Cropland", "Grassland")
 # CO2e basis as the model's drained_n2o_Mg_CO2e flux.
 N2O_GWP = 273.0
 
+# Fixed country set used across every topn_compare_* figure so the same
+# 10 countries (in the same order) appear on every chart. The order is
+# computed at runtime from NGHGI total organic-soil area (largest at top
+# of plot, smallest at bottom) so the y-axis ranking matches the most
+# universal peat-extent metric available across all comparison axes.
+FOCUS_COUNTRIES_ISO3: Tuple[str, ...] = (
+    "CAN", "DEU", "FIN", "IDN", "IRL", "MYS", "NOR", "RUS", "SWE", "USA",
+)
+
+# Per-figure color scheme (NGHGI darker / Model lighter from the same family).
+# Distinct per-figure hues so a viewer can tell figures apart at a glance.
+FIGURE_COLORS: Dict[str, Tuple[str, str]] = {
+    "total_area":     ("#0072B2", "#9DCDE0"),  # blue
+    "drained_area":   ("#E69F00", "#F2D399"),  # orange
+    "undrained_area": ("#009E73", "#80CFB9"),  # green
+    "co2":            ("#D55E00", "#F0AE80"),  # vermillion
+    "n2o":            ("#CC79A7", "#E6BCD3"),  # magenta
+    "t3d_area":       ("#56B4E9", "#ABDAF4"),  # sky blue
+    "t3d_n2o":        ("#7B1FA2", "#C5A1D6"),  # purple
+}
+
 LANDUSE_COLORS = {
     "Forest":     "#117733",
     "Cropland":   "#E17C05",
@@ -671,23 +692,37 @@ def _plot_country_grouped_barh(
     subtitle: str = "",
     topn: int = 10,
     interval_label: Optional[str] = None,
+    country_order: Optional[Sequence[str]] = None,
+    nghgi_color: str = "#3B82B0",
+    model_color: str = "#6BA368",
 ) -> plt.Figure:
     """
-    Horizontal grouped bars: NGHGI (blue) on top, Model (green) on bottom, one
-    pair per country. Sorted ascending by NGHGI value, top-N retained. Per-row
-    text annotation reports model/NGHGI ratio. Log x-axis. Inputs in display
-    units (caller scales).
+    Horizontal grouped bars: NGHGI on top, Model on bottom, one pair per
+    country. Per-row annotation reports model/NGHGI ratio. Linear x-axis.
+
+    When ``country_order`` is given, plots exactly those iso3s in that order
+    (top-to-bottom). Missing or NaN values render as zero-length bars with a
+    "no data" annotation. When ``country_order`` is None, falls back to top-N
+    by NGHGI value.
     """
     df = per_country.copy()
-    df = df.dropna(subset=[value_nghgi])
-    df = df[(df[value_nghgi] > 0)]
-    if df.empty:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.text(0.5, 0.5, "No comparable rows", ha="center", va="center")
-        return fig
 
-    df = df.sort_values(value_nghgi, ascending=False).head(topn)
-    df = df.sort_values(value_nghgi, ascending=True).reset_index(drop=True)
+    if country_order is not None:
+        # Fixed order across figures. Reindex onto the requested iso3 list,
+        # preserving order; missing iso3s become NaN rows.
+        df = df.set_index("iso3").reindex(list(country_order)).reset_index()
+        # Plot order: country_order[0] at top of plot. With matplotlib y=0 at
+        # bottom, that means country_order[0] gets the largest y index.
+        df = df.iloc[::-1].reset_index(drop=True)
+    else:
+        df = df.dropna(subset=[value_nghgi])
+        df = df[(df[value_nghgi] > 0)]
+        if df.empty:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.text(0.5, 0.5, "No comparable rows", ha="center", va="center")
+            return fig
+        df = df.sort_values(value_nghgi, ascending=False).head(topn)
+        df = df.sort_values(value_nghgi, ascending=True).reset_index(drop=True)
 
     n = len(df)
     y = np.arange(n)
@@ -695,30 +730,38 @@ def _plot_country_grouped_barh(
 
     fig, ax = plt.subplots(figsize=(11, 0.55 * n + 2.0))
     ax.barh(
-        y + bar_h / 2, df[value_nghgi], height=bar_h,
-        color="#3B82B0", edgecolor="#333", linewidth=0.4, label="NGHGI reported",
+        y + bar_h / 2, df[value_nghgi].fillna(0.0), height=bar_h,
+        color=nghgi_color, edgecolor="#333", linewidth=0.4, label="NGHGI reported",
     )
     ax.barh(
         y - bar_h / 2, df[value_model].fillna(0.0), height=bar_h,
-        color="#6BA368", edgecolor="#333", linewidth=0.4, label="Model",
+        color=model_color, edgecolor="#333", linewidth=0.4, label="Model",
     )
 
     pos_max = max(
-        df[value_nghgi].max(),
+        df[value_nghgi].fillna(0).max() if df[value_nghgi].notna().any() else 0.0,
         df[value_model].fillna(0).max() if df[value_model].notna().any() else 0.0,
+        1e-9,
     )
     pad = 0.01 * pos_max
     for i, row in df.iterrows():
         nghgi_v = row[value_nghgi]
         model_v = row[value_model]
-        if pd.isna(model_v):
+        if pd.isna(nghgi_v) and pd.isna(model_v):
+            ann = "no data"
+        elif pd.isna(nghgi_v):
+            ann = "NGHGI: no data"
+        elif pd.isna(model_v):
             ann = "model: no data"
         elif nghgi_v > 0:
             ratio = model_v / nghgi_v
             ann = f"model/NGHGI = {ratio:.1f}x"
         else:
             ann = ""
-        x_label = max(nghgi_v, model_v if pd.notna(model_v) else 0.0) + pad
+        x_label = max(
+            nghgi_v if pd.notna(nghgi_v) else 0.0,
+            model_v if pd.notna(model_v) else 0.0,
+        ) + pad
         ax.text(x_label, i, ann, va="center", fontsize=8, color="#333")
 
     interval_suffix = f" ({interval_label})" if interval_label else ""
@@ -735,12 +778,7 @@ def _plot_country_grouped_barh(
     ax.grid(axis="x", linestyle=":", alpha=0.5)
     ax.set_axisbelow(True)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False, fontsize=9)
-
-    # Linear x-axis so visual bar length faithfully encodes the model/NGHGI
-    # ratio. Cross-country range can span orders of magnitude (RUS, CAN
-    # outliers), but the annotation gives exact ratios and top-10 keeps
-    # the figure readable.
-    ax.set_xlim(0, pos_max * 1.18)
+    ax.set_xlim(0, pos_max * 1.22)
     fig.tight_layout()
     return fig
 
@@ -1230,6 +1268,26 @@ def main(argv=None):
     # --- Figures ---
     print("\nBuilding figures")
 
+    # Pre-compute the fixed focus-country order so the same iso3 list and the
+    # same ordering apply to every topn_compare_* figure (both per-interval
+    # and t3d). Order is by NGHGI total organic-soil area in the latest
+    # interval, descending (largest at top of plot, smallest at bottom).
+    focus_order: List[str] = list(FOCUS_COUNTRIES_ISO3)
+    intervals_sorted = sorted(joined["interval"].dropna().unique())
+    if intervals_sorted:
+        latest = intervals_sorted[-1]
+        rank = (
+            joined[joined["interval"] == latest]
+            .groupby("iso3", as_index=False, observed=False, dropna=False)
+            .agg(rank_value=("nghgi_area_total_organic_ha", lambda s: s.sum(min_count=1)))
+        )
+        rank = rank[rank["iso3"].isin(FOCUS_COUNTRIES_ISO3)]
+        rank = rank.sort_values("rank_value", ascending=False, na_position="last")
+        focus_order = rank["iso3"].tolist()
+        for iso in FOCUS_COUNTRIES_ISO3:
+            if iso not in focus_order:
+                focus_order.append(iso)
+
     # One set of figures per interval (clearer comparison than pooling all years)
     for interval in sorted(joined["interval"].dropna().unique()):
         sub = joined[joined["interval"] == interval].copy()
@@ -1287,59 +1345,75 @@ def main(argv=None):
         per_ctry["nghgi_em_n2o_Mt_CO2e"] = per_ctry["nghgi_em_n2o_Mg_CO2e_yr"] / 1e6
 
         interval_label = interval.replace("_", "–")  # 2021_2024 -> 2021–2024
+        per_ctry_focus = per_ctry[per_ctry["iso3"].isin(focus_order)].copy()
 
         fig = _plot_country_grouped_barh(
-            per_ctry,
+            per_ctry_focus,
             value_model="model_total_area_Mha",
             value_nghgi="nghgi_area_total_organic_Mha",
             unit_label="Total organic-soil area (Mha)",
             title="Model vs NGHGI total organic-soil area",
             subtitle="Model = drained + undrained peat extent; NGHGI = total organic soils from Tables 4.A–4.F",
             interval_label=interval_label,
+            country_order=focus_order,
+            nghgi_color=FIGURE_COLORS["total_area"][0],
+            model_color=FIGURE_COLORS["total_area"][1],
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_total_area_{interval}.png"), dpi=200)
 
         fig = _plot_country_grouped_barh(
-            per_ctry,
+            per_ctry_focus,
             value_model="model_drained_area_Mha",
             value_nghgi="nghgi_area_drained_organic_Mha",
             unit_label="Drained organic-soil area (Mha)",
             title="Model vs NGHGI drained organic-soil area",
-            subtitle="NGHGI = Table 4(II) drained organic soils, summed across land-use categories (raw-extract countries only)",
+            subtitle="NGHGI = Table 4(II) drained organic soils, summed across land-use categories",
             interval_label=interval_label,
+            country_order=focus_order,
+            nghgi_color=FIGURE_COLORS["drained_area"][0],
+            model_color=FIGURE_COLORS["drained_area"][1],
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_drained_area_{interval}.png"), dpi=200)
 
         fig = _plot_country_grouped_barh(
-            per_ctry,
-            value_model="model_drained_co2_Mt",
-            value_nghgi="nghgi_em_co2_Mt",
-            unit_label="Drained organic-soil CO₂ (Mt CO₂/yr)",
-            title="Model vs NGHGI drained organic-soil CO₂",
-            subtitle="NGHGI = Table 4(II) numeric where reported, else cstock-derived from Tables 4.A–4.F",
-            interval_label=interval_label,
-        )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_co2_{interval}.png"), dpi=200)
-
-        fig = _plot_country_grouped_barh(
-            per_ctry,
+            per_ctry_focus,
             value_model="model_undrained_area_Mha",
             value_nghgi="nghgi_area_undrained_organic_Mha",
             unit_label="Undrained organic-soil area (Mha)",
             title="Model vs NGHGI undrained organic-soil area",
-            subtitle="NGHGI undrained = total organic (4.A–4.F) − drained (4(II)); raw-extract countries only",
+            subtitle="NGHGI undrained = total organic (4.A–4.F) − drained (4(II))",
             interval_label=interval_label,
+            country_order=focus_order,
+            nghgi_color=FIGURE_COLORS["undrained_area"][0],
+            model_color=FIGURE_COLORS["undrained_area"][1],
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_undrained_area_{interval}.png"), dpi=200)
 
         fig = _plot_country_grouped_barh(
-            per_ctry,
+            per_ctry_focus,
+            value_model="model_drained_co2_Mt",
+            value_nghgi="nghgi_em_co2_Mt",
+            unit_label="Drained organic-soil CO₂ (Mt CO₂e/yr)",
+            title="Model vs NGHGI drained organic-soil CO₂",
+            subtitle="NGHGI = Table 4(II) numeric where reported, else cstock-derived from Tables 4.A–4.F",
+            interval_label=interval_label,
+            country_order=focus_order,
+            nghgi_color=FIGURE_COLORS["co2"][0],
+            model_color=FIGURE_COLORS["co2"][1],
+        )
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_co2_{interval}.png"), dpi=200)
+
+        fig = _plot_country_grouped_barh(
+            per_ctry_focus,
             value_model="model_drained_n2o_Mt_CO2e",
             value_nghgi="nghgi_em_n2o_Mt_CO2e",
             unit_label="Drained organic-soil N₂O (Mt CO₂e/yr)",
             title="Model vs NGHGI drained organic-soil N₂O",
-            subtitle=f"NGHGI N₂O via Table 4(II) only (raw-extract countries); GWP={N2O_GWP:g}",
+            subtitle=f"NGHGI N₂O via Table 4(II); GWP={N2O_GWP:g}",
             interval_label=interval_label,
+            country_order=focus_order,
+            nghgi_color=FIGURE_COLORS["n2o"][0],
+            model_color=FIGURE_COLORS["n2o"][1],
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_n2o_{interval}.png"), dpi=200)
 
@@ -1352,27 +1426,34 @@ def main(argv=None):
             sub_t3d["nghgi_t3d_area_Mha"] = sub_t3d["nghgi_t3d_area_ha"] / 1e6
             sub_t3d["model_t3d_drained_n2o_Mt_CO2e"] = sub_t3d["model_t3d_drained_n2o_Mg_CO2e_yr"] / 1e6
             sub_t3d["nghgi_t3d_n2o_Mt_CO2e"] = sub_t3d["nghgi_t3d_n2o_Mg_CO2e_yr"] / 1e6
+            sub_t3d_focus = sub_t3d[sub_t3d["iso3"].isin(focus_order)].copy()
             interval_label = interval.replace("_", "–")
 
             fig = _plot_country_grouped_barh(
-                sub_t3d,
+                sub_t3d_focus,
                 value_model="model_t3d_drained_area_Mha",
                 value_nghgi="nghgi_t3d_area_Mha",
                 unit_label="Cultivated organic-soil area (Mha)",
                 title=f"Model vs NGHGI Table 3.D.1.f cultivation-of-organic-soils area",
                 subtitle=f"Model side: drained {landuse_label} on organic soils",
                 interval_label=interval_label,
+                country_order=focus_order,
+                nghgi_color=FIGURE_COLORS["t3d_area"][0],
+                model_color=FIGURE_COLORS["t3d_area"][1],
             )
             _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_area_{interval}.png"), dpi=200)
 
             fig = _plot_country_grouped_barh(
-                sub_t3d,
+                sub_t3d_focus,
                 value_model="model_t3d_drained_n2o_Mt_CO2e",
                 value_nghgi="nghgi_t3d_n2o_Mt_CO2e",
                 unit_label="Cultivation N₂O (Mt CO₂e/yr)",
                 title=f"Model vs NGHGI Table 3.D.1.f cultivation N₂O",
                 subtitle=f"Model side: drained {landuse_label} N₂O; NGHGI converted via GWP={N2O_GWP:g}",
                 interval_label=interval_label,
+                country_order=focus_order,
+                nghgi_color=FIGURE_COLORS["t3d_n2o"][0],
+                model_color=FIGURE_COLORS["t3d_n2o"][1],
             )
             _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_n2o_{interval}.png"), dpi=200)
 
