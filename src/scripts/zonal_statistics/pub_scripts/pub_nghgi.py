@@ -1315,21 +1315,44 @@ def main(argv=None):
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"scatter_co2_{interval}.png"), dpi=200)
 
-        # Per-country roll-up: sum across land uses for the grouped-barh figures
-        per_ctry = (
-            sub.groupby(["iso3"], as_index=False, observed=False, dropna=False)
-            .agg(
-                model_drained_area_ha=("model_drained_area_ha", "sum"),
-                model_undrained_area_ha=("undrained_area_ha", "sum"),
-                model_drained_co2_Mg_yr=("model_drained_co2_Mg_yr", "sum"),
-                model_drained_n2o_Mg_CO2e_yr=("model_drained_n2o_Mg_CO2e_yr", "sum"),
-                nghgi_area_drained_organic_ha=("nghgi_area_drained_organic_ha", lambda s: s.sum(min_count=1)),
-                nghgi_area_undrained_organic_ha=("nghgi_area_undrained_organic_ha", lambda s: s.sum(min_count=1)),
-                nghgi_area_total_organic_ha=("nghgi_area_total_organic_ha", lambda s: s.sum(min_count=1)),
-                nghgi_em_co2_Mg_yr=("nghgi_em_co2_Mg_yr", lambda s: s.sum(min_count=1)),
-                nghgi_em_n2o_Mg_CO2e_yr=("nghgi_em_n2o_Mg_CO2e_yr", lambda s: s.sum(min_count=1)),
-            )
+        # Per-country roll-up with matched-scope summation: for each
+        # (model, nghgi) pair, sum across only those (iso3, land_use) tuples
+        # where the country has reported numeric data on that NGHGI metric.
+        # Otherwise the model side inflates by including categories the
+        # country does not report (e.g., CAN reports drained area only for
+        # Forest + Wetland; the model produces drained area in all 6 LU).
+        # Treats 0 as "not reported" because the upstream nghgi_by_iso_landuse
+        # _interval aggregator silently maps NaN -> 0 in some columns.
+        sub_aug = sub.copy()
+        sub_aug["model_total_area_ha"] = (
+            sub_aug["model_drained_area_ha"].fillna(0)
+            + sub_aug["undrained_area_ha"].fillna(0)
         )
+
+        def _matched_sum(df, model_col, nghgi_col):
+            valid = df[df[nghgi_col].notna() & (df[nghgi_col] != 0)]
+            if valid.empty:
+                return pd.DataFrame(columns=["iso3", model_col, nghgi_col])
+            return (
+                valid.groupby("iso3", as_index=False, observed=False)
+                .agg(**{model_col: (model_col, "sum"), nghgi_col: (nghgi_col, "sum")})
+            )
+
+        pairs = [
+            ("model_total_area_ha", "nghgi_area_total_organic_ha"),
+            ("model_drained_area_ha", "nghgi_area_drained_organic_ha"),
+            ("undrained_area_ha", "nghgi_area_undrained_organic_ha"),
+            ("model_drained_co2_Mg_yr", "nghgi_em_co2_Mg_yr"),
+            ("model_drained_n2o_Mg_CO2e_yr", "nghgi_em_n2o_Mg_CO2e_yr"),
+        ]
+        per_ctry = pd.DataFrame({"iso3": pd.Series(dtype=str)})
+        for mc, nc in pairs:
+            per_ctry = per_ctry.merge(
+                _matched_sum(sub_aug, mc, nc), on="iso3", how="outer"
+            )
+        # Restore the alias used by the rest of the figure block
+        per_ctry["model_undrained_area_ha"] = per_ctry["undrained_area_ha"]
+
         # Carry country names from the model side (NaN for JRC-only iso3s)
         country_lookup = (
             sub.dropna(subset=["country"]).drop_duplicates("iso3").set_index("iso3")["country"]
