@@ -1437,7 +1437,7 @@ def main(argv=None):
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
                         help="Fraction of one pixel for nearest reindex tolerance (default 0.49).")
     parser.add_argument("--leak_warn_threshold", type=float, default=0.002,
-                        help="Warn if fraction of flux where adm0==0 exceeds this (default 0.002 = 0.2%).")
+                        help="Warn if fraction of flux where adm0==0 exceeds this (default 0.002 = 0.2%%).")
     # New: diagnostics & alignment behavior
     parser.add_argument("--diagnostics", choices=["off", "basic", "full"], default="off",
                         help="Flux-over-ocean QA: 'off' (fast, default), 'basic' (sampled), 'full' (slow).")

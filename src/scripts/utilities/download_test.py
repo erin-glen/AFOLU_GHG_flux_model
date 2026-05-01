@@ -1,4 +1,9 @@
-# test_download_dict.py
+"""Manual S3 download checker for organic-soils input paths.
+
+This module is a command-line utility, not a pytest suite.
+"""
+
+__test__ = False
 
 import boto3
 from botocore.exceptions import ClientError
@@ -7,11 +12,7 @@ import sys
 import os
 import tempfile
 
-# Add the path to the directory containing constants_and_names.py
-# Adjust the path as necessary if it's in a different directory
-sys.path.append(os.path.abspath('path_to_your_project_directory'))  # Update this path
-
-import constants_and_names as cn
+from src.scripts.utilities import constants_and_names as cn
 
 
 def check_s3_file_exists(s3_client, bucket, key):

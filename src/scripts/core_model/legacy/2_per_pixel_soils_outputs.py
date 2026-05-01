@@ -311,14 +311,14 @@ if __name__ == "__main__":
     )
 
     """
-python -m src.scripts.core_model.2_per_pixel_soils_outputs \
+python -m src.scripts.core_model.legacy.2_per_pixel_soils_outputs \
   --cluster_name per_pixel \
   --bounding_box 110 -10 120 0 \
   --chunk_size 1 \
   --run_name ogh_sensitivity_1km \
   --log_note "Testing per-pixel outputs"
 
-python -m src.scripts.core_model.2_per_pixel_soils_outputs \
+python -m src.scripts.core_model.legacy.2_per_pixel_soils_outputs \
   --cluster_name drainage_cluster \
   --chunk_size 1 \
   --run_name ogh_sensitivity_500m_10\
