@@ -151,10 +151,10 @@ LANDUSE_COLORS = {
     "Otherland":  "#6E6E6E",
 }
 
-# Path helpers borrowed from pub_assets
-_join = pa._join
-_save_png = pa._save_png
-_write_csv_df = pa._write_csv_df
+# Path helpers sourced from pub_common
+_join = pc._join
+_save_png = pc._save_png
+_write_csv_df = pc._write_csv_df
 
 
 RunSpec = pc.RunSpec
@@ -1315,11 +1315,7 @@ def main(argv=None):
         help="Optional CSV with gadm_adm0 -> iso3/country overrides.",
     )
     p.add_argument("--data-only", action="store_true")
-    p.add_argument(
-        "--out-dir-root",
-        default=OUT_DIR_ROOT,
-        help=f"Output root (default: {OUT_DIR_ROOT}).",
-    )
+    pc.add_publication_root_arg(p, "nghgi", "AFOLU_PUB_NGHGI_DIR")
     args = p.parse_args(argv)
 
     OUT_DIR_ROOT = args.out_dir_root

@@ -152,15 +152,15 @@ from src.scripts.zonal_statistics.run_zonal_stats import build_interval_pairs
 def _default_comparison_root() -> str:
     legacy_assets_root = os.environ.get("AFOLU_PUB_ASSETS_DIR")
     if legacy_assets_root:
-        return pa._join(legacy_assets_root, "comparisons")
+        return pc._join(legacy_assets_root, "comparisons")
     return lop.publication_root("comparisons")
 
 
 OUT_DIR_ROOT = os.environ.get("AFOLU_PUB_COMPARE_DIR", _default_comparison_root())
 
-_join = pa._join
-_save_png = pa._save_png
-_write_csv_df = pa._write_csv_df
+_join = pc._join
+_save_png = pc._save_png
+_write_csv_df = pc._write_csv_df
 _register_components = pa._register_components
 _register_state_context_views = pa._register_state_context_views
 _ensure_adm0_lookup = pa._ensure_adm0_lookup

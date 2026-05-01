@@ -107,10 +107,10 @@ FAO_LANDUSE_COLORS = {
 # 3) Palette used for *sources* (OGH, GFW, GPD, FAOSTAT) in the area chart
 FAO_SOURCE_PALETTE = "okabe_ito"
 
-# Path helpers borrowed from pub_assets
-_join = pa._join
-_save_png = pa._save_png
-_write_csv_df = pa._write_csv_df
+# Path helpers sourced from pub_common
+_join = pc._join
+_save_png = pc._save_png
+_write_csv_df = pc._write_csv_df
 
 
 RunSpec = pc.RunSpec
@@ -657,11 +657,7 @@ def main(argv=None):
         ),
     )
     p.add_argument("--data-only", action="store_true")
-    p.add_argument(
-        "--out-dir-root",
-        default=OUT_DIR_ROOT,
-        help=f"Output root (default: {OUT_DIR_ROOT}).",
-    )
+    pc.add_publication_root_arg(p, "fao", "AFOLU_PUB_FAO_DIR")
     args = p.parse_args(argv)
 
     years = sorted({int(y) for y in args.years})

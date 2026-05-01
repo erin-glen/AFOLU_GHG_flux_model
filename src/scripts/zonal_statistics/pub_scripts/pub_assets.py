@@ -83,22 +83,12 @@ BURNED_GAS_LAYERS: Dict[str, str] = {
 }
 
 # ----------------------------- path helpers -----------------------------
-
-def _is_s3(path: str) -> bool:
-    return str(path).startswith("s3://")
-
-def _join(base: str, *parts: str) -> str:
-    if _is_s3(base):
-        return posixpath.join(base, *parts)
-    return os.path.join(base, *parts).replace("\\", "/")
-
-def _ensure_parent_dir_local(path: str):
-    if _is_s3(path):
-        return
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-
-def _to_duckdb_path(path: str) -> str:
-    return path if _is_s3(path) else Path(path).as_posix()
+# Canonical implementations live in pub_common; aliased here so existing
+# call sites in this module keep working unchanged.
+_is_s3 = pc._is_s3
+_join = pc._join
+_ensure_parent_dir_local = pc._ensure_parent_dir_local
+_to_duckdb_path = pc._to_duckdb_path
 
 
 def _glob_paths(con: duckdb.DuckDBPyConnection, pattern: str) -> list[str]:
@@ -615,16 +605,7 @@ def _copy_sql(con: duckdb.DuckDBPyConnection, sql: str, out_path: str):
     out_path_escaped = _to_duckdb_path(out_path).replace("'", "''")
     con.execute(f"COPY ({sql}) TO '{out_path_escaped}' (FORMAT CSV, HEADER TRUE)")
 
-def _write_csv_df(con: duckdb.DuckDBPyConnection, df: pd.DataFrame, path: str):
-    _ensure_parent_dir_local(path)
-    tmp_name = f"df_{id(df)}"
-    con.register(tmp_name, df)
-    out = _to_duckdb_path(path).replace("'", "''")
-    con.execute(f"COPY {tmp_name} TO '{out}' (FORMAT CSV, HEADER TRUE)")
-    try:
-        con.unregister(tmp_name)
-    except Exception:
-        pass
+_write_csv_df = pc._write_csv_df
 
 
 class FigureTableCollector:
@@ -660,11 +641,7 @@ def _write_figure_table(con: duckdb.DuckDBPyConnection, df: pd.DataFrame, path: 
     if collector:
         collector.add(title, df)
 
-def _save_png(fig: plt.Figure, path: str, dpi: int = 300, width: float | None = None, height: float | None = None):
-    if width and height:
-        fig.set_size_inches(width, height)
-    _ensure_parent_dir_local(path)
-    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+_save_png = pc._save_png
 
 # ----------------------------- Plot metadata & helpers -----------------------------
 
@@ -850,11 +827,7 @@ def main(argv=None):
     p.add_argument("--do-tables", type=int, default=1)
     p.add_argument("--do-figures", type=int, default=1)
     p.add_argument("--data-only", action="store_true")
-    p.add_argument(
-        "--out-dir-root",
-        default=OUT_DIR_ROOT,
-        help=f"Output root (default: {OUT_DIR_ROOT}).",
-    )
+    pc.add_publication_root_arg(p, "assets", "AFOLU_PUB_ASSETS_DIR")
     args = p.parse_args(argv)
 
     OUT_DIR_ROOT = args.out_dir_root

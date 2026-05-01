@@ -19,15 +19,21 @@ New SQL helpers added in this revision:
 
 from __future__ import annotations
 
+import argparse
+import os
+import posixpath
 import re
 import hashlib
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Sequence, List, Dict, Mapping, Tuple
 
+import duckdb
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from src.scripts.utilities import local_output_paths as lop
 from src.scripts.zonal_statistics import zonal_constants as zc
 
 # Attempt to import pycountry lazily for ISO lookups. The dependency is optional and
@@ -57,6 +63,73 @@ N2O_GWP: float = 273.0
 # because a negative cstock change (carbon loss) corresponds to a positive
 # CO2 emission.
 C_TO_CO2: float = 44.0 / 12.0
+
+
+# ----------------------------- IO helpers ---------------------------------
+
+def _is_s3(path: str) -> bool:
+    return str(path).startswith("s3://")
+
+
+def _join(base: str, *parts: str) -> str:
+    if _is_s3(base):
+        return posixpath.join(base, *parts)
+    return os.path.join(base, *parts).replace("\\", "/")
+
+
+def _ensure_parent_dir_local(path: str) -> None:
+    if _is_s3(path):
+        return
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+
+def _to_duckdb_path(path: str) -> str:
+    return path if _is_s3(path) else Path(path).as_posix()
+
+
+def _save_png(
+    fig: plt.Figure,
+    path: str,
+    dpi: int = 300,
+    width: Optional[float] = None,
+    height: Optional[float] = None,
+) -> None:
+    if width and height:
+        fig.set_size_inches(width, height)
+    _ensure_parent_dir_local(path)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+
+
+def _write_csv_df(con: duckdb.DuckDBPyConnection, df: pd.DataFrame, path: str) -> None:
+    _ensure_parent_dir_local(path)
+    tmp_name = f"df_{id(df)}"
+    con.register(tmp_name, df)
+    out = _to_duckdb_path(path).replace("'", "''")
+    con.execute(f"COPY {tmp_name} TO '{out}' (FORMAT CSV, HEADER TRUE)")
+    try:
+        con.unregister(tmp_name)
+    except Exception:
+        pass
+
+
+# ----------------------------- CLI helpers --------------------------------
+
+def add_publication_root_arg(
+    parser: argparse.ArgumentParser, kind: str, env_var: str
+) -> str:
+    """
+    Add the standard ``--out-dir-root`` flag with the publication-root
+    default (``$<env_var>`` if set, else ``lop.publication_root(kind)``).
+    Returns the resolved default for callers that want to mirror it into
+    a module-level variable.
+    """
+    default = os.environ.get(env_var) or lop.publication_root(kind)
+    parser.add_argument(
+        "--out-dir-root",
+        default=default,
+        help=f"Output root (default: {default}).",
+    )
+    return default
 
 
 # ----------------------------- Plot constants -----------------------------
