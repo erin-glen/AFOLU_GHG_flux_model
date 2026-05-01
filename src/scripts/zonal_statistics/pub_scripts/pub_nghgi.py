@@ -669,7 +669,7 @@ def _plot_country_grouped_barh(
     unit_label: str,
     title: str,
     subtitle: str = "",
-    topn: int = 20,
+    topn: int = 10,
     interval_label: Optional[str] = None,
 ) -> plt.Figure:
     """
@@ -745,95 +745,6 @@ def _plot_country_grouped_barh(
     fig.tight_layout()
     return fig
 
-
-def _plot_country_stacked_grouped_barh(
-    per_country: pd.DataFrame,
-    *,
-    nghgi_a_col: str,
-    nghgi_b_col: str,
-    model_a_col: str,
-    model_b_col: str,
-    label_a: str,
-    label_b: str,
-    unit_label: str,
-    title: str,
-    subtitle: str = "",
-    topn: int = 20,
-    interval_label: Optional[str] = None,
-    nghgi_color_a: str = "#2E5E8C",
-    nghgi_color_b: str = "#A3BED3",
-    model_color_a: str = "#3D6B43",
-    model_color_b: str = "#A8D5A8",
-) -> plt.Figure:
-    """
-    Per-country horizontal grouped bars (NGHGI top / Model bottom). Each bar
-    is a 2-segment stack of components A and B. Sorted descending by NGHGI
-    total, top-N retained. Linear x-axis (segment widths must be readable).
-    """
-    df = per_country.copy()
-    df["_nghgi_total"] = df[nghgi_a_col].fillna(0) + df[nghgi_b_col].fillna(0)
-    df["_model_total"] = df[model_a_col].fillna(0) + df[model_b_col].fillna(0)
-    df = df[df["_nghgi_total"] > 0].copy()
-    if df.empty:
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.text(0.5, 0.5, "No comparable rows", ha="center", va="center")
-        return fig
-
-    df = df.sort_values("_nghgi_total", ascending=False).head(topn)
-    df = df.sort_values("_nghgi_total", ascending=True).reset_index(drop=True)
-
-    n = len(df)
-    y = np.arange(n)
-    bar_h = 0.36
-
-    fig, ax = plt.subplots(figsize=(11, 0.55 * n + 2.0))
-
-    nghgi_a = df[nghgi_a_col].fillna(0).to_numpy()
-    nghgi_b = df[nghgi_b_col].fillna(0).to_numpy()
-    model_a = df[model_a_col].fillna(0).to_numpy()
-    model_b = df[model_b_col].fillna(0).to_numpy()
-
-    ax.barh(y + bar_h / 2, nghgi_a, height=bar_h,
-            color=nghgi_color_a, edgecolor="#333", linewidth=0.4,
-            label=f"NGHGI {label_a}")
-    ax.barh(y + bar_h / 2, nghgi_b, left=nghgi_a, height=bar_h,
-            color=nghgi_color_b, edgecolor="#333", linewidth=0.4,
-            label=f"NGHGI {label_b}")
-    ax.barh(y - bar_h / 2, model_a, height=bar_h,
-            color=model_color_a, edgecolor="#333", linewidth=0.4,
-            label=f"Model {label_a}")
-    ax.barh(y - bar_h / 2, model_b, left=model_a, height=bar_h,
-            color=model_color_b, edgecolor="#333", linewidth=0.4,
-            label=f"Model {label_b}")
-
-    pos_max = max(df["_nghgi_total"].max(), df["_model_total"].max())
-    pad = 0.01 * pos_max
-    for i, row in df.iterrows():
-        ratio = row["_model_total"] / row["_nghgi_total"] if row["_nghgi_total"] > 0 else float("nan")
-        ann = f"model/NGHGI = {ratio:.1f}x" if not pd.isna(ratio) else ""
-        x_label = max(row["_nghgi_total"], row["_model_total"]) + pad
-        ax.text(x_label, i, ann, va="center", fontsize=8, color="#333")
-
-    interval_suffix = f" ({interval_label})" if interval_label else ""
-    ax.set_yticks(y)
-    ax.set_yticklabels([
-        _country_label(r["iso3"], r.get("country")) + interval_suffix
-        for _, r in df.iterrows()
-    ])
-    ax.set_xlabel(unit_label)
-    full_title = title + (f"\n{subtitle}" if subtitle else "")
-    ax.set_title(full_title, fontsize=12, pad=10)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.grid(axis="x", linestyle=":", alpha=0.5)
-    ax.set_axisbelow(True)
-    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5),
-              frameon=False, fontsize=9, ncol=2)
-    # Linear x-axis so segment widths honestly represent component magnitudes.
-    # On log scale a 90/10 stacked split looks roughly even, which is misleading.
-    ax.set_xlim(0, pos_max * 1.18)
-    fig.tight_layout()
-    return fig
 
 
 # ----------------------------- Table 3.D.1.f N2O -----------------------------
@@ -1411,37 +1322,27 @@ def main(argv=None):
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_co2_{interval}.png"), dpi=200)
 
-        fig = _plot_country_stacked_grouped_barh(
+        fig = _plot_country_grouped_barh(
             per_ctry,
-            nghgi_a_col="nghgi_area_drained_organic_Mha",
-            nghgi_b_col="nghgi_area_undrained_organic_Mha",
-            model_a_col="model_drained_area_Mha",
-            model_b_col="model_undrained_area_Mha",
-            label_a="drained",
-            label_b="undrained",
-            unit_label="Organic-soil area (Mha)",
-            title="Model vs NGHGI organic-soil area, drained + undrained",
-            subtitle="NGHGI undrained = total organic (4.A–4.F) − drained (4(II)); blank when 4(II) drained not reported",
+            value_model="model_undrained_area_Mha",
+            value_nghgi="nghgi_area_undrained_organic_Mha",
+            unit_label="Undrained organic-soil area (Mha)",
+            title="Model vs NGHGI undrained organic-soil area",
+            subtitle="NGHGI undrained = total organic (4.A–4.F) − drained (4(II)); raw-extract countries only",
             interval_label=interval_label,
-            topn=10,
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_area_stacked_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_undrained_area_{interval}.png"), dpi=200)
 
-        fig = _plot_country_stacked_grouped_barh(
+        fig = _plot_country_grouped_barh(
             per_ctry,
-            nghgi_a_col="nghgi_em_co2_Mt",
-            nghgi_b_col="nghgi_em_n2o_Mt_CO2e",
-            model_a_col="model_drained_co2_Mt",
-            model_b_col="model_drained_n2o_Mt_CO2e",
-            label_a="CO₂",
-            label_b="N₂O",
-            unit_label="Drained organic-soil emissions (Mt CO₂e/yr)",
-            title="Model vs NGHGI drained organic-soil emissions, CO₂ + N₂O",
+            value_model="model_drained_n2o_Mt_CO2e",
+            value_nghgi="nghgi_em_n2o_Mt_CO2e",
+            unit_label="Drained organic-soil N₂O (Mt CO₂e/yr)",
+            title="Model vs NGHGI drained organic-soil N₂O",
             subtitle=f"NGHGI N₂O via Table 4(II) only (raw-extract countries); GWP={N2O_GWP:g}",
             interval_label=interval_label,
-            topn=10,
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_gas_stacked_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_n2o_{interval}.png"), dpi=200)
 
     # --- Table 3.D.1.f figures (per interval) ---
     if not joined_t3d.empty:
