@@ -99,12 +99,15 @@ MODEL_LANDUSE_FOLD: Dict[str, str] = {
 LANDUSE_ORDER = ["Forest", "Cropland", "Grassland", "Wetland", "Settlement", "Otherland"]
 
 # Land uses on the model side that map to NGHGI Table 3.D.1.f "Cultivation of
-# organic soils (i.e. histosols)". IPCC 2006 Vol. 4 Ch. 11 covers cultivated
-# cropland + managed grassland on organic soils under this category, with
-# different EFs by land-use. Country practice varies (some put grassland in
-# Table 4(II).C instead) -- to switch this comparison to cropland-only,
-# override to ("Cropland",).
-T3D_N2O_MODEL_LANDUSE: Tuple[str, ...] = ("Cropland", "Grassland")
+# organic soils (i.e. histosols)". Defaulted to cropland only: the model
+# classifies most countries' cultivated histosols as Grassland (95-99% for
+# BLR/DEU/GBR/NLD/POL), but most of that "drained Grassland on organic soils"
+# is non-cultivated peatland that countries do not report under 3.D.1.f.
+# Including it inflates the model side wildly relative to NGHGI 3.D.1.f
+# scope. Override to ("Cropland", "Grassland") via --t3d_landuse if you need
+# the broader IPCC-2006-Ch.11 scope (cropland + managed grassland histosols)
+# for sensitivity analysis.
+T3D_N2O_MODEL_LANDUSE: Tuple[str, ...] = ("Cropland",)
 
 # Global Warming Potential to convert NGHGI kt N2O (mass) to kt CO2e.
 # Used for both Table 3.D.1.f and Table 4(II) N2O comparisons. Matches
@@ -1126,11 +1129,11 @@ def main(argv=None):
         nargs="+",
         default=None,
         help=(
-            "Model land-use values to sum for the Table 3.D.1.f cultivation-of-"
-            "organic-soils N2O comparison. Defaults to "
-            f"{list(T3D_N2O_MODEL_LANDUSE)} (matches IPCC 2006 Vol. 4 Ch. 11 "
-            "scope and FAOSTAT GV); pass --t3d_landuse Cropland to drop "
-            "grassland."
+            "Model land-use values to sum for the Table 3.D.1.f cultivation-"
+            "of-organic-soils comparison. Defaults to "
+            f"{list(T3D_N2O_MODEL_LANDUSE)} (cropland only). Pass "
+            "'--t3d_landuse Cropland Grassland' to include managed grassland "
+            "histosols (IPCC 2006 Vol. 4 Ch. 11 scope) for sensitivity tests."
         ),
     )
     p.add_argument("--aws_region", default=None)
