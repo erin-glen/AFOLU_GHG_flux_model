@@ -69,10 +69,9 @@ DEFAULT_JRC_DIR = jrc_loader.DEFAULT_JRC_DIR
 NGHGI_TABLE_4II_NAME = "organic_soil_compiled.csv"
 NGHGI_CSTOCK_NAME = "organic_soil_cstock_compiled.csv"
 
-# Prefer File 1 (Table 4(II)) em_co2_kt when numeric; fall back to converting
-# cstock_soil_organic_ktC from File 2. kt C -> kt CO2 uses 44/12; sign flips
-# because a negative carbon stock change equals a positive CO2 emission.
-C_TO_CO2 = 44.0 / 12.0
+# Re-export shared constants so existing references keep working.
+C_TO_CO2 = pc.C_TO_CO2
+N2O_GWP = pc.N2O_GWP
 
 # NGHGI category-code prefix -> model LandUse label (from
 # pub_common._reclass_emissions_state). Peat extraction in the NGHGI
@@ -109,12 +108,6 @@ LANDUSE_ORDER = ["Forest", "Cropland", "Grassland", "Wetland", "Settlement", "Ot
 # the broader IPCC-2006-Ch.11 scope (cropland + managed grassland histosols)
 # for sensitivity analysis.
 T3D_N2O_MODEL_LANDUSE: Tuple[str, ...] = ("Cropland",)
-
-# Global Warming Potential to convert NGHGI kt N2O (mass) to kt CO2e.
-# Used for both Table 3.D.1.f and Table 4(II) N2O comparisons. Matches
-# pub_fao convention so model and NGHGI N2O are compared on the same
-# CO2e basis as the model's drained_n2o_Mg_CO2e flux.
-N2O_GWP = 273.0
 
 # Fixed country set used across every topn_compare_* figure so the same
 # 10 countries (in the same order) appear on every chart. The order is
@@ -158,7 +151,7 @@ RunSpec = pc.RunSpec
 # ----------------------------- helpers -----------------------------
 
 def build_output_dir(model_version: str, run_name: str, run_date: str) -> str:
-    return _join(OUT_DIR_ROOT, f"version_{model_version}", run_name, run_date)
+    return lop.publication_run_dir_at(OUT_DIR_ROOT, model_version, run_name, run_date)
 
 
 def _parse_run_specs(entries: Sequence[str]) -> list[RunSpec]:
@@ -1048,7 +1041,6 @@ def run_jrc_validation(
         _save_png(
             fig,
             _join(out_dir, "figures", "validation", f"scatter_{fig_label}_raw_vs_jrc.png"),
-            dpi=200,
         )
 
     print("\n[validation] Wrote:")
@@ -1145,7 +1137,7 @@ def main(argv=None):
     )
     p.add_argument("--data-only", action="store_true")
     p.add_argument(
-        "--out_dir_root",
+        "--out-dir-root",
         default=OUT_DIR_ROOT,
         help=f"Output root (default: {OUT_DIR_ROOT}).",
     )
@@ -1304,7 +1296,7 @@ def main(argv=None):
             unit_label="drained organic-soil area (ha)",
             title=f"Model vs NGHGI drained organic-soil area ({interval})",
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"scatter_area_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"scatter_area_{interval}.png"))
 
         # Scatter: CO2
         fig = _plot_scatter_model_vs_nghgi(
@@ -1314,7 +1306,7 @@ def main(argv=None):
             unit_label="drained organic-soil CO2 (Mg CO2/yr)",
             title=f"Model vs NGHGI drained organic-soil CO2 ({interval})",
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"scatter_co2_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"scatter_co2_{interval}.png"))
 
         # Per-country roll-up with matched-scope summation: for each
         # (model, nghgi) pair, sum across only those (iso3, land_use) tuples
@@ -1386,7 +1378,7 @@ def main(argv=None):
             nghgi_color=FIGURE_COLORS["total_area"][0],
             model_color=FIGURE_COLORS["total_area"][1],
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_total_area_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_total_area_{interval}.png"))
 
         fig = _plot_country_grouped_barh(
             per_ctry_focus,
@@ -1400,7 +1392,7 @@ def main(argv=None):
             nghgi_color=FIGURE_COLORS["drained_area"][0],
             model_color=FIGURE_COLORS["drained_area"][1],
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_drained_area_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_drained_area_{interval}.png"))
 
         fig = _plot_country_grouped_barh(
             per_ctry_focus,
@@ -1414,7 +1406,7 @@ def main(argv=None):
             nghgi_color=FIGURE_COLORS["undrained_area"][0],
             model_color=FIGURE_COLORS["undrained_area"][1],
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_undrained_area_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_undrained_area_{interval}.png"))
 
         fig = _plot_country_grouped_barh(
             per_ctry_focus,
@@ -1428,7 +1420,7 @@ def main(argv=None):
             nghgi_color=FIGURE_COLORS["co2"][0],
             model_color=FIGURE_COLORS["co2"][1],
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_co2_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_co2_{interval}.png"))
 
         fig = _plot_country_grouped_barh(
             per_ctry_focus,
@@ -1442,7 +1434,7 @@ def main(argv=None):
             nghgi_color=FIGURE_COLORS["n2o"][0],
             model_color=FIGURE_COLORS["n2o"][1],
         )
-        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_n2o_{interval}.png"), dpi=200)
+        _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_n2o_{interval}.png"))
 
     # --- Table 3.D.1.f figures (per interval) ---
     if not joined_t3d.empty:
@@ -1468,7 +1460,7 @@ def main(argv=None):
                 nghgi_color=FIGURE_COLORS["t3d_area"][0],
                 model_color=FIGURE_COLORS["t3d_area"][1],
             )
-            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_area_{interval}.png"), dpi=200)
+            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_area_{interval}.png"))
 
             fig = _plot_country_grouped_barh(
                 sub_t3d_focus,
@@ -1482,7 +1474,7 @@ def main(argv=None):
                 nghgi_color=FIGURE_COLORS["t3d_n2o"][0],
                 model_color=FIGURE_COLORS["t3d_n2o"][1],
             )
-            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_n2o_{interval}.png"), dpi=200)
+            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_n2o_{interval}.png"))
 
     print("Done.")
     return 0

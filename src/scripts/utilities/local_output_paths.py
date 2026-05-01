@@ -79,6 +79,17 @@ def publication_root(kind: str, env_var: Optional[str] = None) -> str:
     return local_output_path("publications", kind)
 
 
+def publication_run_dir_at(
+    root: str,
+    model_version: str,
+    run_name: str,
+    run_date: str,
+) -> str:
+    """Return ``<root>/version_<model>/<run>/<date>``."""
+
+    return posixpath.join(root, f"version_{model_version}", run_name, run_date)
+
+
 def publication_run_dir(
     kind: str,
     model_version: str,
@@ -88,9 +99,9 @@ def publication_run_dir(
 ) -> str:
     """Return ``publications/<kind>/version_<model>/<run>/<date>``."""
 
-    return posixpath.join(
+    return publication_run_dir_at(
         publication_root(kind, env_var=env_var),
-        f"version_{model_version}",
+        model_version,
         run_name,
         run_date,
     )

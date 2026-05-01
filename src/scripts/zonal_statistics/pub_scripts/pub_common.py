@@ -44,6 +44,21 @@ try:  # pragma: no cover
 except Exception:  # pragma: no cover
     cycler = None  # type: ignore
 
+# ----------------------------- Shared constants ---------------------------
+
+# AR6 100-year GWP for N2O. Used by every pub_* script that converts NGHGI
+# kt N2O (mass) to CO2e for like-for-like comparison with the model's
+# drained_n2o_Mg_CO2e flux. Update once here when the inventory cycle
+# moves to AR7 GWPs.
+N2O_GWP: float = 273.0
+
+# Stoichiometric ratio for converting organic-soil C-stock change (kt C in
+# CRT Tables 4.A-F) to CO2 emissions. Sign is flipped at the call site
+# because a negative cstock change (carbon loss) corresponds to a positive
+# CO2 emission.
+C_TO_CO2: float = 44.0 / 12.0
+
+
 # ----------------------------- Plot constants -----------------------------
 
 CLIMATE_ORDER = ["Boreal", "Temperate", "Tropical"]

@@ -291,7 +291,7 @@ def _layer_totals_by_period(
 def build_output_dir(model_version: str, run_name: str, run_date: str) -> str:
     """Return the publication output directory for a run."""
 
-    return _join(OUT_DIR_ROOT, f"version_{model_version}", run_name, run_date)
+    return lop.publication_run_dir_at(OUT_DIR_ROOT, model_version, run_name, run_date)
 
 # ----------------------------- DuckDB setup -----------------------------
 
@@ -742,7 +742,7 @@ def _build_component_climate_plot(
         width=7.5,
         height=4.5,
     )
-    _save_png(fig, _join(OUT_DIR, "figures", f"{meta.file_stub}_column.png"), dpi=300)
+    _save_png(fig, _join(OUT_DIR, "figures", f"{meta.file_stub}_column.png"))
 
 
 def _build_gas_stack_figure(
@@ -809,7 +809,7 @@ def _build_gas_stack_figure(
         width=7.5,
         height=4.5,
     )
-    _save_png(fig, _join(OUT_DIR, "figures", f"{file_stub}_column.png"), dpi=300)
+    _save_png(fig, _join(OUT_DIR, "figures", f"{file_stub}_column.png"))
 
 # ----------------------------- Parquet path builders -----------------------------
 
@@ -963,7 +963,7 @@ def main(argv=None):
                 pc.CLIMATE_ORDER, pc.CLIMATE_COLORS,
                 xlabel="Inventory Period", ylabel="Annual Emissions (Gt CO₂e/year)"
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "global_total_by_climate_column.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "global_total_by_climate_column.png"))
 
         # 2) Drained: Land Use × Climate (avg annual across selected periods)
         d_lu_raw = con.execute(pc.sql_drained_landuse_climate_avgs(n_periods)).df()
@@ -984,7 +984,7 @@ def main(argv=None):
         if not args.data_only:
             fig = pc.stacked_hbar(d_lu, "drained_avg_GtCO2e_per_yr",
                                   xlabel="Average Annual Emissions (Gt CO₂e/year)")
-            _save_png(fig, _join(OUT_DIR, "figures", "drained_landuse_climate_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "drained_landuse_climate_bar.png"))
 
         # 3) Burned: Land Use × Climate (avg annual across selected periods)
         b_lu_raw = con.execute(pc.sql_burned_landuse_climate_avgs(n_periods)).df()
@@ -1005,7 +1005,7 @@ def main(argv=None):
         if not args.data_only:
             fig = pc.stacked_hbar(b_lu, "burned_avg_GtCO2e_per_yr",
                                   xlabel="Average Annual Emissions (Gt CO₂e/year)")
-            _save_png(fig, _join(OUT_DIR, "figures", "burned_landuse_climate_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "burned_landuse_climate_bar.png"))
 
         # D) Component split within each climate (avg over selected periods)
         df_cs = con.execute(pc.sql_component_split_by_climate_avg(n_periods)).df()
@@ -1031,7 +1031,7 @@ def main(argv=None):
                 xlabel="Climate",
                 ylabel="Average Annual Emissions (Gt CO₂e/year)"
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "component_split_by_climate_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "component_split_by_climate_bar.png"))
 
         # 4) Top-N by country: PEAT AREA split (latest interval only)
         latest_year = max(years)
@@ -1054,7 +1054,7 @@ def main(argv=None):
                 legends=("Drained organic soils area", "Undrained organic soils area"),
                 colors=("#3E3753","#9ca3af"),
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_peat_area_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_peat_area_bar.png"))
 
         # 5) Top-N by country: AVERAGE annual TOTAL EMISSIONS split (drained + burned)
         df_emsplit = con.execute(pc.sql_topn_total_emissions_split_avg(args.topn, have_lookup, n_periods)).df()
@@ -1076,7 +1076,7 @@ def main(argv=None):
                 legends=("Average burned emissions", "Average drained emissions"),
                 colors=("#FB6A29", "#3E3753"),
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_total_emissions_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_total_emissions_bar.png"))
 
         # 6) Global totals over time (stacked drained+burned)
         df_gt = con.execute(pc.sql_global_totals_by_period_long()).df()
@@ -1101,7 +1101,7 @@ def main(argv=None):
                 pc.PROCESS_ORDER, pc.PROCESS_COLORS,
                 xlabel="Inventory Period", ylabel="Annual Emissions (Gt CO₂e/year)"
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "global_total_emissions_column.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "global_total_emissions_column.png"))
 
         # 6b) Global gas splits (chunk_stats)
         if chunk_stats_df is not None:
@@ -1147,7 +1147,7 @@ def main(argv=None):
                 xlabel="Average Annual Emissions (Gt CO₂e/year)",
                 color=pc.PROCESS_COLORS["Drained"],
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_drained_avg_emissions_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_drained_avg_emissions_bar.png"))
 
         df_topb = con.execute(pc.sql_topn_avg_component_emissions("burned", args.topn, have_lookup, n_periods)).df()
         df_topb["label"] = pc.country_label(df_topb)
@@ -1165,7 +1165,7 @@ def main(argv=None):
                 xlabel="Average Annual Emissions (Gt CO₂e/year)",
                 color=pc.PROCESS_COLORS["Burned"],
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_burned_avg_emissions_bar.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_burned_avg_emissions_bar.png"))
 
         # F) Emissions intensity by climate (avg over periods / latest areas), split by component
         df_ic = con.execute(pc.sql_component_intensity_by_climate_avg(n_periods)).df()
@@ -1207,7 +1207,7 @@ def main(argv=None):
                 segment_edgecolor="white",
                 segment_linewidth=0.6,
             )
-            _save_png(fig, _join(OUT_DIR, "figures", "intensity_by_climate_component_column.png"), dpi=300)
+            _save_png(fig, _join(OUT_DIR, "figures", "intensity_by_climate_component_column.png"))
 
         # 9) Country scatter and land-use share figures removed per workflow update
 

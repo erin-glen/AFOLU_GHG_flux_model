@@ -1795,7 +1795,7 @@ def main(argv: Sequence[str] | None = None):
                     colors = [records[rn].color for rn in comp.run_names]
                     fig = _plot_metric(metric_df, metric, comp, colors)
                     fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_{metric.key}.png")
-                    _save_png(fig, fig_path, dpi=300)
+                    _save_png(fig, fig_path)
                     plt.close(fig)
 
             if comp.key == "inventory_source":
@@ -1833,7 +1833,7 @@ def main(argv: Sequence[str] | None = None):
                         "comparisons",
                         f"{comp.key}_total_emissions_stack.png",
                     )
-                    _save_png(total_stack_fig, total_stack_fig_path, dpi=300)
+                    _save_png(total_stack_fig, total_stack_fig_path)
                     plt.close(total_stack_fig)
 
                     area_stack_fig = _plot_horizontal_stack(
@@ -1849,7 +1849,7 @@ def main(argv: Sequence[str] | None = None):
                         "comparisons",
                         f"{comp.key}_peat_area_stack.png",
                     )
-                    _save_png(area_stack_fig, area_stack_fig_path, dpi=300)
+                    _save_png(area_stack_fig, area_stack_fig_path)
                     plt.close(area_stack_fig)
 
                     for component in ("Drained", "Burned"):
@@ -1872,7 +1872,7 @@ def main(argv: Sequence[str] | None = None):
                             "comparisons",
                             f"{comp.key}_{component.lower()}_emissions_by_climate_stack.png",
                         )
-                        _save_png(climate_stack_fig, climate_stack_fig_path, dpi=300)
+                        _save_png(climate_stack_fig, climate_stack_fig_path)
                         plt.close(climate_stack_fig)
 
                 for component in ("Drained", "Burned"):
@@ -1903,7 +1903,7 @@ def main(argv: Sequence[str] | None = None):
                             "comparisons",
                             f"{comp.key}_{component.lower()}_by_climate.png",
                         )
-                        _save_png(fig, fig_path, dpi=300)
+                        _save_png(fig, fig_path)
                         plt.close(fig)
 
                 for component in ("Drained", "Burned", "Total"):
@@ -1951,7 +1951,7 @@ def main(argv: Sequence[str] | None = None):
                             "comparisons",
                             f"{comp.key}_{component.lower()}_by_period_climate__{run_name}.png",
                         )
-                        _save_png(fig, fig_path, dpi=300)
+                        _save_png(fig, fig_path)
                         plt.close(fig)
 
             if args.data_only:
@@ -1972,7 +1972,7 @@ def main(argv: Sequence[str] | None = None):
 
                 stack_fig = _plot_stacked_total(stack_df, comp, xlabel=xlabel)
                 stack_fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_total_stack.png")
-                _save_png(stack_fig, stack_fig_path, dpi=300)
+                _save_png(stack_fig, stack_fig_path)
                 plt.close(stack_fig)
 
         breakout_specs = (

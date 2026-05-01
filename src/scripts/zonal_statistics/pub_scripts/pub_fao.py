@@ -80,10 +80,8 @@ DEFAULT_FAO_CSV = (
     "fao_stat/FAOSTAT_data_en_11-22-2025.csv"
 )
 
-# Global Warming Potential used to convert FAOSTAT N2O (kt N2O) to CO2e.
-# Set this to the same GWP you use in the AFOLU model:
-#   AR4: 265, AR5: 298, AR6: 273
-FAO_N2O_GWP = 273.0
+# Re-export the shared N2O GWP so legacy references keep working.
+FAO_N2O_GWP = pc.N2O_GWP
 
 # ----------------------------- color config -----------------------------
 # All figure colors live here so they're easy to tweak without touching
@@ -132,7 +130,7 @@ class ModelMetrics:
 # ----------------------------- helpers -----------------------------
 
 def build_output_dir(model_version: str, run_name: str, run_date: str) -> str:
-    return _join(OUT_DIR_ROOT, f"version_{model_version}", run_name, run_date)
+    return lop.publication_run_dir_at(OUT_DIR_ROOT, model_version, run_name, run_date)
 
 
 def _interval_pair_for_latest(years: Sequence[int]) -> Tuple[int, int]:
@@ -860,16 +858,16 @@ def main(argv=None):
 
     # --- Figures ---
     fig = _plot_emissions(emissions)
-    _save_png(fig, _join(OUT_DIR, "figures", "emissions_by_gas.png"), dpi=300)
+    _save_png(fig, _join(OUT_DIR, "figures", "emissions_by_gas.png"))
     print("  - figures/emissions_by_gas.png")
 
     fig = _plot_area(area)
-    _save_png(fig, _join(OUT_DIR, "figures", "peat_area.png"), dpi=300)
+    _save_png(fig, _join(OUT_DIR, "figures", "peat_area.png"))
     print("  - figures/peat_area.png")
 
     if not landuse_split.empty:
         fig = _plot_landuse_split(landuse_split)
-        _save_png(fig, _join(OUT_DIR, "figures", "landuse_area_split.png"), dpi=300)
+        _save_png(fig, _join(OUT_DIR, "figures", "landuse_area_split.png"))
         print("  - figures/landuse_area_split.png")
     else:
         print("  - [skipped] landuse_area_split.png (no Cropland/Grassland rows)")
