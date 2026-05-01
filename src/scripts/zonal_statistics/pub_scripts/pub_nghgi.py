@@ -69,9 +69,20 @@ DEFAULT_JRC_DIR = jrc_loader.DEFAULT_JRC_DIR
 NGHGI_TABLE_4II_NAME = "organic_soil_compiled.csv"
 NGHGI_CSTOCK_NAME = "organic_soil_cstock_compiled.csv"
 
-# Re-export shared constants so existing references keep working.
+# Re-export the shared C conversion so existing references keep working.
 C_TO_CO2 = pc.C_TO_CO2
-N2O_GWP = pc.N2O_GWP
+
+# The core model currently stores drained N2O as CO2e using the project-wide
+# AR6 GWP100 value (273). For NGHGI comparison outputs, normalize both model
+# and inventory N2O to the convention used in current UNFCCC inventory
+# reporting: AR5 GWP100, N2O = 265.
+MODEL_N2O_GWP = pc.N2O_GWP
+INVENTORY_N2O_GWP = 265.0
+N2O_GWP = INVENTORY_N2O_GWP
+N2O_MODEL_TO_INVENTORY_SCALE = (
+    INVENTORY_N2O_GWP / MODEL_N2O_GWP if MODEL_N2O_GWP else np.nan
+)
+UNDRAINED_NEGATIVE_TOL_HA = 1.0
 
 # NGHGI category-code prefix -> model LandUse label (from
 # pub_common._reclass_emissions_state). Peat extraction in the NGHGI
@@ -108,6 +119,7 @@ LANDUSE_ORDER = ["Forest", "Cropland", "Grassland", "Wetland", "Settlement", "Ot
 # the broader IPCC-2006-Ch.11 scope (cropland + managed grassland histosols)
 # for sensitivity analysis.
 T3D_N2O_MODEL_LANDUSE: Tuple[str, ...] = ("Cropland",)
+T3D_N2O_SENSITIVITY_LANDUSE: Tuple[str, ...] = ("Cropland", "Grassland")
 
 # Fixed country set used across every topn_compare_* figure so the same
 # 10 countries (in the same order) appear on every chart. The order is
@@ -245,6 +257,12 @@ def _model_country_landuse_for_interval(
         .sum()
         .rename(columns={"land_use_folded": "land_use"})
     )
+    agg["drained_n2o_Mg_CO2e_yr_model_gwp"] = agg["drained_n2o_Mg_CO2e_yr"]
+    agg["drained_n2o_Mg_CO2e_yr"] = (
+        agg["drained_n2o_Mg_CO2e_yr"] * N2O_MODEL_TO_INVENTORY_SCALE
+    )
+    agg["model_n2o_gwp_original"] = MODEL_N2O_GWP
+    agg["comparison_n2o_gwp"] = INVENTORY_N2O_GWP
     return agg
 
 
@@ -442,11 +460,36 @@ def nghgi_by_iso_landuse_interval(
     # Only the top-level land-use rows ('4.A', '4.B', ...) carry the total
     # organic area / C-stock change per land use; deeper sub-categories would
     # double-count when summed.
-    cstock_top = nghgi_cstock[nghgi_cstock["category_code"].str.count(r"\.") == 1].copy()
+    cstock_top_raw = nghgi_cstock[
+        nghgi_cstock["category_code"].str.count(r"\.") == 1
+    ].copy()
+    cstock_top_raw["nghgi_t4land_source"] = "raw_CRT_extract"
+
+    def _source_mode(series: pd.Series) -> Optional[str]:
+        vals = series.dropna()
+        if vals.empty:
+            return None
+        mode = vals.mode()
+        return str(mode.iloc[0] if not mode.empty else vals.iloc[0])
+
+    raw_area_per_year = (
+        cstock_top_raw.groupby(["iso3", "year", "land_use"], as_index=False, observed=False)
+        .agg(
+            nghgi_area_organic_t4land_raw_kha=(
+                "area_organic_kha",
+                lambda s: s.sum(min_count=1),
+            ),
+        )
+    )
+
+    cstock_top = cstock_top_raw.copy()
 
     # JRC override: for countries present in the JRC AnnexI 2026 drop, replace
     # raw 2025-cycle cstock + area_organic with JRC 2026-cycle values. Raw-only
-    # countries (those not in JRC) keep their raw values unchanged.
+    # countries (those not in JRC) keep their raw values unchanged. Keep a
+    # separate raw area series for the undrained proxy, because Table 4(II)
+    # drained area is still from the raw extract and should not be subtracted
+    # from a newer JRC total.
     if jrc_lu is not None and not jrc_lu.empty:
         jrc_iso3s = set(jrc_lu["iso3"].dropna().unique())
         cstock_top = cstock_top[~cstock_top["iso3"].isin(jrc_iso3s)].copy()
@@ -456,6 +499,7 @@ def nghgi_by_iso_landuse_interval(
         jrc_for_merge["category_code"] = jrc_for_merge["land_use"].map(
             {v: k for k, v in jrc_loader.JRC_CATEGORY_TO_LANDUSE.items()}
         )
+        jrc_for_merge["nghgi_t4land_source"] = "JRC_AnnexI_2026"
         cstock_top = pd.concat([cstock_top, jrc_for_merge], ignore_index=True)
 
     cstock_per_year = (
@@ -463,6 +507,7 @@ def nghgi_by_iso_landuse_interval(
         .agg(
             cstock_soil_organic_ktC=("cstock_soil_organic_ktC", lambda s: s.sum(min_count=1)),
             nghgi_area_organic_t4land_kha=("area_organic_kha", lambda s: s.sum(min_count=1)),
+            nghgi_t4land_source=("nghgi_t4land_source", _source_mode),
         )
     )
     # -kt C * 44/12 => kt CO2. Flip sign so a net C loss reads as a positive emission.
@@ -478,6 +523,7 @@ def nghgi_by_iso_landuse_interval(
         .merge(n2o_per_year, on=["iso3", "year", "land_use"], how="outer")
         .merge(ch4_per_year, on=["iso3", "year", "land_use"], how="outer")
         .merge(cstock_per_year, on=["iso3", "year", "land_use"], how="outer")
+        .merge(raw_area_per_year, on=["iso3", "year", "land_use"], how="outer")
     )
 
     # --------- Window-average over each interval pair ---------
@@ -495,6 +541,11 @@ def nghgi_by_iso_landuse_interval(
                 nghgi_em_n2o_kt=("nghgi_em_n2o_kt", "mean"),
                 nghgi_em_ch4_kt=("nghgi_em_ch4_kt", "mean"),
                 nghgi_em_co2_from_cstock_kt=("nghgi_em_co2_from_cstock_kt", "mean"),
+                nghgi_area_organic_t4land_raw_kha=(
+                    "nghgi_area_organic_t4land_raw_kha",
+                    "mean",
+                ),
+                nghgi_t4land_source=("nghgi_t4land_source", _source_mode),
                 nghgi_years_available=("year", "nunique"),
             )
         )
@@ -526,15 +577,31 @@ def nghgi_by_iso_landuse_interval(
     out["nghgi_area_drained_organic_ha"] = t4ii_area * 1_000.0
     # Total organic area (drained + undrained + rewetted) from T4.A-F
     out["nghgi_area_total_organic_ha"] = t4land_area * 1_000.0
-    # Undrained proxy = total - drained, clipped at 0. NaN when either side missing.
-    out["nghgi_area_undrained_organic_ha"] = (
-        (t4land_area - t4ii_area).clip(lower=0) * 1_000.0
+    out["nghgi_area_total_organic_source"] = out["nghgi_t4land_source"]
+
+    # Undrained proxy = raw total organic area - raw drained area. Do not use
+    # JRC-overridden totals here because Table 4(II) drained areas still come
+    # from the raw CRT extract; mixing cycles can create artificial negatives.
+    undrained_basis = out["nghgi_area_organic_t4land_raw_kha"]
+    undrained_unclipped = (undrained_basis - t4ii_area) * 1_000.0
+    out["nghgi_area_undrained_organic_unclipped_ha"] = undrained_unclipped
+    out["nghgi_area_undrained_negative_flag"] = (
+        undrained_unclipped < -UNDRAINED_NEGATIVE_TOL_HA
+    )
+    out["nghgi_area_undrained_organic_ha"] = undrained_unclipped.where(
+        ~out["nghgi_area_undrained_negative_flag"]
+    ).clip(lower=0)
+    out["nghgi_area_undrained_organic_source"] = np.where(
+        out["nghgi_area_undrained_organic_ha"].notna(),
+        "raw_T4land_minus_raw_T4II",
+        None,
     )
 
     # kt CO2 -> Mg CO2 so units line up with the model
     out["nghgi_em_co2_Mg_yr"] = out["nghgi_em_co2_kt_preferred"] * 1_000.0
     # kt N2O (mass) * GWP -> kt CO2e -> Mg CO2e/yr
     out["nghgi_em_n2o_Mg_CO2e_yr"] = out["nghgi_em_n2o_kt"] * N2O_GWP * 1_000.0
+    out["nghgi_n2o_gwp"] = N2O_GWP
 
     return out
 
@@ -553,48 +620,102 @@ def join_model_nghgi(
         return pd.DataFrame()
     if model_df.empty:
         return nghgi_df.assign(
+            run_label=np.nan,
+            run_name=np.nan,
+            model_version=np.nan,
+            run_date=np.nan,
+            gadm_adm0=np.nan,
+            country=np.nan,
             model_drained_area_ha=np.nan,
             model_drained_co2_Mg_yr=np.nan,
+            model_drained_n2o_Mg_CO2e_yr=np.nan,
+            model_drained_n2o_Mg_CO2e_yr_model_gwp=np.nan,
         )
     if nghgi_df.empty:
         m = model_df.copy()
         m["nghgi_area_drained_organic_ha"] = np.nan
+        m["nghgi_area_undrained_organic_ha"] = np.nan
+        m["nghgi_area_total_organic_ha"] = np.nan
         m["nghgi_em_co2_Mg_yr"] = np.nan
+        m["nghgi_em_n2o_Mg_CO2e_yr"] = np.nan
         m["nghgi_em_co2_source"] = None
         m["nghgi_years_available"] = np.nan
         return m
 
-    model_join = (
-        model_df
-        .rename(columns={
+    model_join = model_df.rename(
+        columns={
             "drained_area_ha": "model_drained_area_ha",
             "drained_on_site_co2_Mg_CO2_yr": "model_drained_co2_Mg_yr",
             "drained_n2o_Mg_CO2e_yr": "model_drained_n2o_Mg_CO2e_yr",
-        })
-        .loc[:, [
-            "run_label", "run_name", "model_version", "run_date",
-            "interval", "interval_start", "interval_end",
-            "gadm_adm0", "iso3", "country", "land_use",
-            "model_drained_area_ha", "undrained_area_ha",
-            "model_drained_co2_Mg_yr", "model_drained_n2o_Mg_CO2e_yr",
-        ]]
+            "drained_n2o_Mg_CO2e_yr_model_gwp": (
+                "model_drained_n2o_Mg_CO2e_yr_model_gwp"
+            ),
+        }
     )
+    model_cols = [
+        "run_label", "run_name", "model_version", "run_date",
+        "interval", "interval_start", "interval_end",
+        "gadm_adm0", "iso3", "country", "land_use",
+        "model_drained_area_ha", "undrained_area_ha",
+        "model_drained_co2_Mg_yr", "model_drained_n2o_Mg_CO2e_yr",
+    ]
+    optional_model_cols = [
+        "model_drained_n2o_Mg_CO2e_yr_model_gwp",
+        "model_n2o_gwp_original",
+        "comparison_n2o_gwp",
+    ]
+    for col in optional_model_cols:
+        if col not in model_join.columns:
+            model_join[col] = np.nan
+    model_join = model_join.loc[:, model_cols + optional_model_cols]
+
+    nghgi_cols = [
+        "iso3", "land_use", "interval", "interval_start", "interval_end",
+        "nghgi_area_drained_organic_ha",
+        "nghgi_area_undrained_organic_ha",
+        "nghgi_area_undrained_organic_unclipped_ha",
+        "nghgi_area_undrained_negative_flag",
+        "nghgi_area_undrained_organic_source",
+        "nghgi_area_total_organic_ha",
+        "nghgi_area_total_organic_source",
+        "nghgi_em_co2_Mg_yr",
+        "nghgi_em_n2o_Mg_CO2e_yr",
+        "nghgi_em_co2_kt", "nghgi_em_n2o_kt", "nghgi_em_ch4_kt",
+        "nghgi_em_co2_from_cstock_kt", "nghgi_em_co2_source",
+        "nghgi_n2o_gwp",
+        "nghgi_years_available",
+    ]
+    nghgi_cols = [c for c in nghgi_cols if c in nghgi_df.columns]
+    nghgi_join = nghgi_df.loc[:, nghgi_cols]
 
     joined = model_join.merge(
-        nghgi_df[[
-            "iso3", "land_use", "interval_end",
-            "nghgi_area_drained_organic_ha",
-            "nghgi_area_undrained_organic_ha",
-            "nghgi_area_total_organic_ha",
-            "nghgi_em_co2_Mg_yr",
-            "nghgi_em_n2o_Mg_CO2e_yr",
-            "nghgi_em_co2_kt", "nghgi_em_n2o_kt", "nghgi_em_ch4_kt",
-            "nghgi_em_co2_from_cstock_kt", "nghgi_em_co2_source",
-            "nghgi_years_available",
-        ]],
+        nghgi_join,
         on=["iso3", "land_use", "interval_end"],
         how="outer",
+        suffixes=("", "_nghgi"),
     )
+
+    for col in ("interval", "interval_start"):
+        rhs = f"{col}_nghgi"
+        if rhs in joined.columns:
+            joined[col] = joined[col].where(joined[col].notna(), joined[rhs])
+            joined = joined.drop(columns=[rhs])
+
+    metadata_cols = ["run_label", "run_name", "model_version", "run_date"]
+    for col in metadata_cols:
+        lookup = (
+            model_join.dropna(subset=[col])
+            .drop_duplicates("interval_end")
+            .set_index("interval_end")[col]
+        )
+        if not lookup.empty:
+            joined[col] = joined[col].where(
+                joined[col].notna(),
+                joined["interval_end"].map(lookup),
+            )
+        unique_vals = model_join[col].dropna().unique()
+        if len(unique_vals) == 1:
+            joined[col] = joined[col].fillna(unique_vals[0])
 
     # Derived: difference, ratio
     joined["area_diff_ha"] = joined["model_drained_area_ha"] - joined["nghgi_area_drained_organic_ha"]
@@ -610,6 +731,22 @@ def join_model_nghgi(
 
 
 # ----------------------------- plotting -----------------------------
+
+def _matched_sum(df: pd.DataFrame, model_col: str, nghgi_col: str) -> pd.DataFrame:
+    """
+    Sum a model/NGHGI metric pair across rows with reported NGHGI values.
+
+    Numeric zeros are retained: a reported zero is still information, and it
+    should reveal model false positives in the paired country bars.
+    """
+    valid = df[df[nghgi_col].notna()]
+    if valid.empty:
+        return pd.DataFrame(columns=["iso3", model_col, nghgi_col])
+    return (
+        valid.groupby("iso3", as_index=False, observed=False)
+        .agg(**{model_col: (model_col, "sum"), nghgi_col: (nghgi_col, "sum")})
+    )
+
 
 def _plot_scatter_model_vs_nghgi(
     df: pd.DataFrame,
@@ -792,7 +929,7 @@ def nghgi_t3d_by_iso_interval(
     inventory interval. Returns one row per (iso3, interval_end) with:
         nghgi_t3d_area_ha
         nghgi_t3d_n2o_kt
-        nghgi_t3d_n2o_Mg_CO2e_yr   (kt N2O * GWP * 1000)
+        nghgi_t3d_n2o_Mg_CO2e_yr   (kt N2O * inventory GWP * 1000)
         nghgi_t3d_source           ('JRC_AnnexI_2026' | 'JRC_BTR1_2024')
     """
     if jrc_t3d is None or jrc_t3d.empty:
@@ -827,6 +964,7 @@ def nghgi_t3d_by_iso_interval(
         return pd.DataFrame()
     out = pd.concat(rows, ignore_index=True)
     out["nghgi_t3d_n2o_Mg_CO2e_yr"] = out["nghgi_t3d_n2o_kt"] * N2O_GWP * 1_000.0
+    out["nghgi_t3d_n2o_gwp"] = N2O_GWP
     return out
 
 
@@ -837,14 +975,17 @@ def join_model_nghgi_t3d(
 ) -> pd.DataFrame:
     """
     Build the per-country Table 3.D.1.f comparison frame. Sums model drained
-    area and drained N2O across the configured cultivation land uses (default
-    Cropland + Grassland), then outer-joins to the per-country NGHGI 3.D row.
+    area and drained N2O across the configured cultivation land uses, then
+    outer-joins to the per-country NGHGI 3.D row.
     """
     if model_df.empty and t3d_df.empty:
         return pd.DataFrame()
 
     if not model_df.empty:
         m = model_df[model_df["land_use"].isin(model_landuse)].copy()
+        value_cols = ["drained_area_ha", "drained_n2o_Mg_CO2e_yr"]
+        if "drained_n2o_Mg_CO2e_yr_model_gwp" in m.columns:
+            value_cols.append("drained_n2o_Mg_CO2e_yr_model_gwp")
         model_t3d = (
             m.groupby(
                 ["run_label", "run_name", "model_version", "run_date",
@@ -853,24 +994,34 @@ def join_model_nghgi_t3d(
                 as_index=False,
                 observed=False,
                 dropna=False,
-            )[[
-                "drained_area_ha",
-                "drained_n2o_Mg_CO2e_yr",
-            ]]
+            )[value_cols]
             .sum()
             .rename(columns={
                 "drained_area_ha": "model_t3d_drained_area_ha",
                 "drained_n2o_Mg_CO2e_yr": "model_t3d_drained_n2o_Mg_CO2e_yr",
+                "drained_n2o_Mg_CO2e_yr_model_gwp": (
+                    "model_t3d_drained_n2o_Mg_CO2e_yr_model_gwp"
+                ),
             })
         )
         model_t3d["model_t3d_landuse_set"] = ",".join(model_landuse)
+        if "model_n2o_gwp_original" in m.columns:
+            model_t3d["model_n2o_gwp_original"] = MODEL_N2O_GWP
+            model_t3d["comparison_n2o_gwp"] = INVENTORY_N2O_GWP
     else:
         model_t3d = pd.DataFrame()
 
     if model_t3d.empty:
         return t3d_df.assign(
+            run_label=np.nan,
+            run_name=np.nan,
+            model_version=np.nan,
+            run_date=np.nan,
+            gadm_adm0=np.nan,
+            country=np.nan,
             model_t3d_drained_area_ha=np.nan,
             model_t3d_drained_n2o_Mg_CO2e_yr=np.nan,
+            model_t3d_drained_n2o_Mg_CO2e_yr_model_gwp=np.nan,
             model_t3d_landuse_set=",".join(model_landuse),
         )
     if t3d_df.empty:
@@ -878,22 +1029,49 @@ def join_model_nghgi_t3d(
             nghgi_t3d_area_ha=np.nan,
             nghgi_t3d_n2o_kt=np.nan,
             nghgi_t3d_n2o_Mg_CO2e_yr=np.nan,
+            nghgi_t3d_n2o_gwp=np.nan,
             nghgi_t3d_source=None,
             nghgi_t3d_years_available=np.nan,
         )
 
-    return model_t3d.merge(
-        t3d_df[[
-            "iso3", "interval_end",
-            "nghgi_t3d_area_ha",
-            "nghgi_t3d_n2o_kt",
-            "nghgi_t3d_n2o_Mg_CO2e_yr",
-            "nghgi_t3d_source",
-            "nghgi_t3d_years_available",
-        ]],
+    t3d_cols = [
+        "iso3", "interval", "interval_start", "interval_end",
+        "nghgi_t3d_area_ha",
+        "nghgi_t3d_n2o_kt",
+        "nghgi_t3d_n2o_Mg_CO2e_yr",
+        "nghgi_t3d_n2o_gwp",
+        "nghgi_t3d_source",
+        "nghgi_t3d_years_available",
+    ]
+    t3d_cols = [c for c in t3d_cols if c in t3d_df.columns]
+    joined = model_t3d.merge(
+        t3d_df.loc[:, t3d_cols],
         on=["iso3", "interval_end"],
         how="outer",
+        suffixes=("", "_nghgi"),
     )
+    for col in ("interval", "interval_start"):
+        rhs = f"{col}_nghgi"
+        if rhs in joined.columns:
+            joined[col] = joined[col].where(joined[col].notna(), joined[rhs])
+            joined = joined.drop(columns=[rhs])
+
+    for col in ["run_label", "run_name", "model_version", "run_date"]:
+        lookup = (
+            model_t3d.dropna(subset=[col])
+            .drop_duplicates("interval_end")
+            .set_index("interval_end")[col]
+        )
+        if not lookup.empty:
+            joined[col] = joined[col].where(
+                joined[col].notna(),
+                joined["interval_end"].map(lookup),
+            )
+        unique_vals = model_t3d[col].dropna().unique()
+        if len(unique_vals) == 1:
+            joined[col] = joined[col].fillna(unique_vals[0])
+
+    return joined
 
 
 # ----------------------------- validation -----------------------------
@@ -1124,9 +1302,10 @@ def main(argv=None):
         help=(
             "Model land-use values to sum for the Table 3.D.1.f cultivation-"
             "of-organic-soils comparison. Defaults to "
-            f"{list(T3D_N2O_MODEL_LANDUSE)} (cropland only). Pass "
-            "'--t3d_landuse Cropland Grassland' to include managed grassland "
-            "histosols (IPCC 2006 Vol. 4 Ch. 11 scope) for sensitivity tests."
+            f"{list(T3D_N2O_MODEL_LANDUSE)} (cropland-only primary). When "
+            "omitted, the pipeline also writes a Cropland+Grassland "
+            "sensitivity. Pass '--t3d_landuse Cropland Grassland' to make the "
+            "broader scope the explicit primary output."
         ),
     )
     p.add_argument("--aws_region", default=None)
@@ -1232,11 +1411,35 @@ def main(argv=None):
         if not nghgi_t3d_df.empty
         else pd.DataFrame()
     )
+    t3d_comparisons: list[tuple[str, Tuple[str, ...], pd.DataFrame, str]] = []
     if not joined_t3d.empty:
+        t3d_comparisons.append(("primary", tuple(t3d_landuse), joined_t3d, ""))
         print(
             f"  Table 3.D joined rows: {len(joined_t3d):,}  "
             f"(model land-uses summed: {','.join(t3d_landuse)})"
         )
+        if (
+            args.t3d_landuse is None
+            and tuple(t3d_landuse) != T3D_N2O_SENSITIVITY_LANDUSE
+        ):
+            joined_t3d_sensitivity = join_model_nghgi_t3d(
+                model_df,
+                nghgi_t3d_df,
+                T3D_N2O_SENSITIVITY_LANDUSE,
+            )
+            if not joined_t3d_sensitivity.empty:
+                t3d_comparisons.append(
+                    (
+                        "cropland_grassland_sensitivity",
+                        T3D_N2O_SENSITIVITY_LANDUSE,
+                        joined_t3d_sensitivity,
+                        "_cropland_grassland",
+                    )
+                )
+                print(
+                    f"  Table 3.D sensitivity rows: {len(joined_t3d_sensitivity):,}  "
+                    f"(model land-uses summed: {','.join(T3D_N2O_SENSITIVITY_LANDUSE)})"
+                )
 
     # --- Write tables ---
     out_data = _join(OUT_DIR, "figures", "data")
@@ -1251,7 +1454,11 @@ def main(argv=None):
         print("    - model_vs_nghgi.csv")
         if not joined_t3d.empty:
             _write_csv_df(writer_con, nghgi_t3d_df, _join(out_data, "nghgi_t3d_country.csv"))
-            _write_csv_df(writer_con, joined_t3d,   _join(out_data, "model_vs_nghgi_t3d.csv"))
+            for t3d_label, _landuses, t3d_df, file_suffix in t3d_comparisons:
+                out_name = f"model_vs_nghgi_t3d{file_suffix}.csv"
+                _write_csv_df(writer_con, t3d_df, _join(out_data, out_name))
+                if t3d_label != "primary":
+                    print(f"    - {out_name}")
             print("    - nghgi_t3d_country.csv")
             print("    - model_vs_nghgi_t3d.csv")
     finally:
@@ -1310,26 +1517,13 @@ def main(argv=None):
 
         # Per-country roll-up with matched-scope summation: for each
         # (model, nghgi) pair, sum across only those (iso3, land_use) tuples
-        # where the country has reported numeric data on that NGHGI metric.
-        # Otherwise the model side inflates by including categories the
-        # country does not report (e.g., CAN reports drained area only for
-        # Forest + Wetland; the model produces drained area in all 6 LU).
-        # Treats 0 as "not reported" because the upstream nghgi_by_iso_landuse
-        # _interval aggregator silently maps NaN -> 0 in some columns.
+        # where the country has a numeric NGHGI metric. Reported zeroes are
+        # retained so model false positives remain visible.
         sub_aug = sub.copy()
         sub_aug["model_total_area_ha"] = (
             sub_aug["model_drained_area_ha"].fillna(0)
             + sub_aug["undrained_area_ha"].fillna(0)
         )
-
-        def _matched_sum(df, model_col, nghgi_col):
-            valid = df[df[nghgi_col].notna() & (df[nghgi_col] != 0)]
-            if valid.empty:
-                return pd.DataFrame(columns=["iso3", model_col, nghgi_col])
-            return (
-                valid.groupby("iso3", as_index=False, observed=False)
-                .agg(**{model_col: (model_col, "sum"), nghgi_col: (nghgi_col, "sum")})
-            )
 
         pairs = [
             ("model_total_area_ha", "nghgi_area_total_organic_ha"),
@@ -1428,7 +1622,7 @@ def main(argv=None):
             value_nghgi="nghgi_em_n2o_Mt_CO2e",
             unit_label="Drained organic-soil N₂O (Mt CO₂e/yr)",
             title="Model vs NGHGI drained organic-soil N₂O",
-            subtitle=f"NGHGI N₂O via Table 4(II); GWP={N2O_GWP:g}",
+            subtitle=f"N₂O on both sides normalized to inventory GWP={N2O_GWP:g}",
             interval_label=interval_label,
             country_order=focus_order,
             nghgi_color=FIGURE_COLORS["n2o"][0],
@@ -1437,10 +1631,13 @@ def main(argv=None):
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_n2o_{interval}.png"))
 
     # --- Table 3.D.1.f figures (per interval) ---
-    if not joined_t3d.empty:
-        landuse_label = "+".join(t3d_landuse)
-        for interval in sorted(joined_t3d["interval"].dropna().unique()):
-            sub_t3d = joined_t3d[joined_t3d["interval"] == interval].copy()
+    for t3d_label, t3d_landuses, t3d_df, file_suffix in t3d_comparisons:
+        if t3d_df.empty:
+            continue
+        landuse_label = "+".join(t3d_landuses)
+        scope_label = "Sensitivity" if t3d_label != "primary" else "Primary"
+        for interval in sorted(t3d_df["interval"].dropna().unique()):
+            sub_t3d = t3d_df[t3d_df["interval"] == interval].copy()
             sub_t3d["model_t3d_drained_area_Mha"] = sub_t3d["model_t3d_drained_area_ha"] / 1e6
             sub_t3d["nghgi_t3d_area_Mha"] = sub_t3d["nghgi_t3d_area_ha"] / 1e6
             sub_t3d["model_t3d_drained_n2o_Mt_CO2e"] = sub_t3d["model_t3d_drained_n2o_Mg_CO2e_yr"] / 1e6
@@ -1453,28 +1650,37 @@ def main(argv=None):
                 value_model="model_t3d_drained_area_Mha",
                 value_nghgi="nghgi_t3d_area_Mha",
                 unit_label="Cultivated organic-soil area (Mha)",
-                title=f"Model vs NGHGI Table 3.D.1.f cultivation-of-organic-soils area",
-                subtitle=f"Model side: drained {landuse_label} on organic soils",
+                title="Model vs NGHGI Table 3.D.1.f cultivation-of-organic-soils area",
+                subtitle=f"{scope_label}: model side = drained {landuse_label} on organic soils",
                 interval_label=interval_label,
                 country_order=focus_order,
                 nghgi_color=FIGURE_COLORS["t3d_area"][0],
                 model_color=FIGURE_COLORS["t3d_area"][1],
             )
-            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_area_{interval}.png"))
+            _save_png(
+                fig,
+                _join(OUT_DIR, "figures", f"topn_compare_t3d_area{file_suffix}_{interval}.png"),
+            )
 
             fig = _plot_country_grouped_barh(
                 sub_t3d_focus,
                 value_model="model_t3d_drained_n2o_Mt_CO2e",
                 value_nghgi="nghgi_t3d_n2o_Mt_CO2e",
                 unit_label="Cultivation N₂O (Mt CO₂e/yr)",
-                title=f"Model vs NGHGI Table 3.D.1.f cultivation N₂O",
-                subtitle=f"Model side: drained {landuse_label} N₂O; NGHGI converted via GWP={N2O_GWP:g}",
+                title="Model vs NGHGI Table 3.D.1.f cultivation N₂O",
+                subtitle=(
+                    f"{scope_label}: model side = drained {landuse_label}; "
+                    f"both sides normalized to inventory GWP={N2O_GWP:g}"
+                ),
                 interval_label=interval_label,
                 country_order=focus_order,
                 nghgi_color=FIGURE_COLORS["t3d_n2o"][0],
                 model_color=FIGURE_COLORS["t3d_n2o"][1],
             )
-            _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_t3d_n2o_{interval}.png"))
+            _save_png(
+                fig,
+                _join(OUT_DIR, "figures", f"topn_compare_t3d_n2o{file_suffix}_{interval}.png"),
+            )
 
     print("Done.")
     return 0
