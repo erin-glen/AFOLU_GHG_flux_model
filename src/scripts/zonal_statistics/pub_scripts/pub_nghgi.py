@@ -829,14 +829,9 @@ def _plot_country_stacked_grouped_barh(
     ax.set_axisbelow(True)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5),
               frameon=False, fontsize=9, ncol=2)
-    # Log x-axis: cross-country range typically spans 3-4 orders of magnitude,
-    # so linear lets RUS/CAN-scale bars dominate. Caveat: stacked-segment widths
-    # on log scale are positions, not proportions -- the size ratio between
-    # drained/undrained (or CO2/N2O) is not visually faithful. Numeric ratio is
-    # in the right-side annotation.
-    ax.set_xscale("log")
-    pos_min_total = float(min(df["_nghgi_total"].min(), df["_model_total"][df["_model_total"] > 0].min())) if (df["_model_total"] > 0).any() else float(df["_nghgi_total"].min())
-    ax.set_xlim(max(pos_min_total * 0.5, 1e-4), pos_max * 5)
+    # Linear x-axis so segment widths honestly represent component magnitudes.
+    # On log scale a 90/10 stacked split looks roughly even, which is misleading.
+    ax.set_xlim(0, pos_max * 1.18)
     fig.tight_layout()
     return fig
 
@@ -1426,8 +1421,9 @@ def main(argv=None):
             label_b="undrained",
             unit_label="Organic-soil area (Mha)",
             title="Model vs NGHGI organic-soil area, drained + undrained",
-            subtitle="NGHGI undrained = total organic (4.A–4.F) − drained (4(II)); blank when 4(II) drained not reported. Log scale: segment widths are positions, not proportions",
+            subtitle="NGHGI undrained = total organic (4.A–4.F) − drained (4(II)); blank when 4(II) drained not reported",
             interval_label=interval_label,
+            topn=10,
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_area_stacked_{interval}.png"), dpi=200)
 
@@ -1441,8 +1437,9 @@ def main(argv=None):
             label_b="N₂O",
             unit_label="Drained organic-soil emissions (Mt CO₂e/yr)",
             title="Model vs NGHGI drained organic-soil emissions, CO₂ + N₂O",
-            subtitle=f"NGHGI N₂O via Table 4(II) only (raw-extract countries); GWP={N2O_GWP:g}. Log scale: segment widths are positions, not proportions",
+            subtitle=f"NGHGI N₂O via Table 4(II) only (raw-extract countries); GWP={N2O_GWP:g}",
             interval_label=interval_label,
+            topn=10,
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"topn_compare_gas_stacked_{interval}.png"), dpi=200)
 
