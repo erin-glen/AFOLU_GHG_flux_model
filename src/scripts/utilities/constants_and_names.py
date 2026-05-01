@@ -295,6 +295,8 @@ tree_threshold = 5
 t_to_Mt = 1e-3
 combined_log = "combined_log"
 
+# Do not apply this to organic-soil fire factors. Those factor tables store
+# IPCC Table 2.6 fuel consumption values that already represent MB * Cf.
 combustion_factor = np.float32(0.75)
 
 # Global warming potentials (GWP) and emission conversions

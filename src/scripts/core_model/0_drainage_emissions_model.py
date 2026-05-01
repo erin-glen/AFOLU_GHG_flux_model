@@ -40,7 +40,6 @@ c_to_co2 = np.float32(cn.c_to_co2)
 n2o_n_to_n2o = np.float32(cn.n2o_n_to_n2o)
 gwp_ch4 = np.float32(cn.gwp_ch4)
 gwp_n2o = np.float32(cn.gwp_n2o)
-combustion_factor = np.float32(cn.combustion_factor)
 
 # Determine the width of finalized (padded) state codes robustly, then derive a
 # divisor that extracts the two-digit "root" (peat/non-peat and peat class)
@@ -526,7 +525,6 @@ def calculate_drainage_and_emissions(
                         burn_total_co2e,
                     ) = nu.calculate_burned_area_emissions(
                         np.float32(mass_burnt) * np.float32(multiplier),
-                        combustion_factor,
                         np.float32(gef_co2),
                         np.float32(gef_co),
                         np.float32(gef_ch4),

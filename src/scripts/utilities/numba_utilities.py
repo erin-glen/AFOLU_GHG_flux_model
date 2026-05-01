@@ -174,8 +174,7 @@ def calculate_drainage_emissions_co2e(
 
 @jit(nopython=True)
 def calculate_burned_area_emissions(
-        mass_burnt,
-        combustion_factor,
+        fuel_consumed,
         gef_co2,
         gef_co,
         gef_ch4,
@@ -183,10 +182,12 @@ def calculate_burned_area_emissions(
 ):
     """
     Return burned emissions per hectare.
+
+    fuel_consumed is the IPCC MB*Cf product in t dry matter ha-1.
     """
-    burn_co2 = mass_burnt * combustion_factor * gef_co2 * 1e-3
-    burn_co = mass_burnt * combustion_factor * gef_co * 1e-3
-    burn_ch4 = mass_burnt * combustion_factor * gef_ch4 * 1e-3 * gwp_ch4
+    burn_co2 = fuel_consumed * gef_co2 * 1e-3
+    burn_co = fuel_consumed * gef_co * 1e-3
+    burn_ch4 = fuel_consumed * gef_ch4 * 1e-3 * gwp_ch4
 
     total_burned_emissions_co2e = burn_co2 + burn_ch4
     return burn_co2, burn_co, burn_ch4, total_burned_emissions_co2e
