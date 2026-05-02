@@ -62,6 +62,7 @@ def _run_one_pixel(
         defac.DEFAULT_TABLE,
         baf.DEFAULT_TABLE,
         False,
+        drainage_model.DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
     )
     return (
         int(out_u32["drained_soil"][0, 0]),

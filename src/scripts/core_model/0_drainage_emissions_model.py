@@ -59,6 +59,28 @@ VALID_BURNED_STATE_CODES = np.array(
 # Default peat probability threshold for the OGH dataset. This matches the
 # preprocessing threshold previously applied during tiling.
 DEFAULT_OGH_THRESHOLD = 10.0
+DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M = 500.0
+
+
+def validate_drainage_distance_threshold_m(value: float) -> float:
+    """Validate the distance threshold for OSM/GRIP drainage rasters."""
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "--drainage_distance_threshold_m must be a numeric distance in meters."
+        ) from exc
+    if not np.isfinite(threshold):
+        raise ValueError("--drainage_distance_threshold_m must be finite.")
+    if threshold <= 0:
+        raise ValueError("--drainage_distance_threshold_m must be positive.")
+    if threshold >= 1000:
+        raise ValueError(
+            "--drainage_distance_threshold_m must be less than 1000 m because "
+            "the current distance rasters are clipped at 1000 m. Update the "
+            "distance-raster preprocessing before using a larger threshold."
+        )
+    return threshold
 
 forest_code = cn.ipcc_codes["forest"]
 cropland_code = cn.ipcc_codes["cropland"]
@@ -101,13 +123,14 @@ def lookup_befs(key, table):
 # full decision‑tree function (unchanged logic, ASCII comments only)
 # ----------------------------------------------------------------------
 @jit(nopython=True)
-def calculate_drainage_and_emissions(
+def _calculate_drainage_and_emissions_numba(
     in_dict_uint8,
     in_dict_int16,
     in_dict_float32,
     drainage_table,
     burned_table,
     count_burned_years,
+    drainage_distance_threshold_m,
 ):
     """
     1) Drainage classification & state
@@ -224,13 +247,15 @@ def calculate_drainage_and_emissions(
             # A) Drainage classification ----------------------------------
             if peat > 0:
                 node = nu.accrete_node(node, 1)
-                if (dadap > 0) or (osm_canals > 0 and osm_canals < 500):
+                if (dadap > 0) or (
+                    osm_canals > 0 and osm_canals <= drainage_distance_threshold_m
+                ):
                     node = nu.accrete_node(node, 1)
                     drained = True
                 elif (
                     (engert > 0)
-                    or (grip > 0 and grip < 500)
-                    or (osm_roads > 0 and osm_roads < 500)
+                    or (grip > 0 and grip <= drainage_distance_threshold_m)
+                    or (osm_roads > 0 and osm_roads <= drainage_distance_threshold_m)
                 ):
                     node = nu.accrete_node(node, 2)
                     drained = True
@@ -563,6 +588,29 @@ def calculate_drainage_and_emissions(
     return out_dict_uint32, out_dict_float32
 
 
+def calculate_drainage_and_emissions(
+    in_dict_uint8,
+    in_dict_int16,
+    in_dict_float32,
+    drainage_table,
+    burned_table,
+    count_burned_years,
+    drainage_distance_threshold_m,
+):
+    drainage_distance_threshold_m = validate_drainage_distance_threshold_m(
+        drainage_distance_threshold_m
+    )
+    return _calculate_drainage_and_emissions_numba(
+        in_dict_uint8,
+        in_dict_int16,
+        in_dict_float32,
+        drainage_table,
+        burned_table,
+        count_burned_years,
+        drainage_distance_threshold_m,
+    )
+
+
 # ----------------------------------------------------------------------
 # helper: combine burned layers across interval
 # ----------------------------------------------------------------------
@@ -620,6 +668,7 @@ def calculate_and_upload_drainage(
     outputs_to_zarr: Optional[list[str]] = None,
     interval_end_years: Optional[list[int]] = None,
     run_date: Optional[str] = None,
+    drainage_distance_threshold_m: float = DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
 ):
     """Process a single chunk for a given interval.
 
@@ -663,8 +712,15 @@ def calculate_and_upload_drainage(
     run_date : str, optional
         Date string (YYYYMMDD) used in raster output paths. When ``None``,
         falls back to ``cn.today_date``.
+    drainage_distance_threshold_m : float, optional
+        Distance threshold, in meters, for OSM canals, OSM roads, and GRIP
+        roads. Must be positive and less than 1000 m for the current
+        distance-raster preprocessing.
     """
 
+    drainage_distance_threshold_m = validate_drainage_distance_threshold_m(
+        drainage_distance_threshold_m
+    )
     logger = lu.setup_logging_worker()
     bstr = uu.boundstr(bounds)
     tid = uu.xy_to_tile_id(bounds[0], bounds[3])
@@ -804,6 +860,7 @@ def calculate_and_upload_drainage(
         drainage_table,
         burned_table,
         count_burned_years,
+        drainage_distance_threshold_m,
     )
     outputs = {**out_u32, **out_f32}
 
@@ -1184,8 +1241,12 @@ def run_drainage_model(
     include_legacy_state_rasters: bool = False,
     create_zarr: bool = False,
     run_date: Optional[str] = None,
+    drainage_distance_threshold_m: float = DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
 ):
 
+    drainage_distance_threshold_m = validate_drainage_distance_threshold_m(
+        drainage_distance_threshold_m
+    )
     stage = "drainage_model"
     start_ts = uu.timestr()
     cluster, client, run_local = uu.connect_to_cluster(
@@ -1256,6 +1317,10 @@ def run_drainage_model(
         "Peat dataset set to %s with threshold %s",
         peat_dataset,
         threshold_msg,
+    )
+    main_logger.info(
+        "Drainage distance threshold for OSM canals, OSM roads, and GRIP roads: %s m",
+        drainage_distance_threshold_m,
     )
 
     if chunk_shapefile_uri:
@@ -1402,6 +1467,7 @@ def run_drainage_model(
             outputs_to_zarr=outputs_to_zarr,
             interval_end_years=zarr_year_index,
             run_date=run_date,
+            drainage_distance_threshold_m=drainage_distance_threshold_m,
         )
 
     results = bag.map(_wrap).compute()
@@ -1464,6 +1530,7 @@ def main(argv=None):
             peat_threshold=DEFAULT_OGH_THRESHOLD,
             count_burned_years=True,
             emission_factor_variant="default",
+            drainage_distance_threshold_m=DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
         )
         return
 
@@ -1533,6 +1600,15 @@ def main(argv=None):
             "greater than or equal to the threshold are treated as peat. Pass 'none' "
             "to disable thresholding. When --peat_threshold_by_biome is "
             "also set, this value is used as the fallback for unknown ecozones."
+        ),
+    )
+    p.add_argument(
+        "--drainage_distance_threshold_m",
+        type=float,
+        default=DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
+        help=(
+            "Distance threshold, in meters, for OSM canals, OSM roads, and "
+            "GRIP roads."
         ),
     )
     p.add_argument(
@@ -1632,6 +1708,7 @@ def main(argv=None):
         create_zarr=args.create_zarr,
         include_legacy_state_rasters=args.include_legacy_state_rasters,
         run_date=args.run_date,
+        drainage_distance_threshold_m=args.drainage_distance_threshold_m,
     )
 
 
@@ -1704,6 +1781,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --count_burned_years \
   --run_name test
 
+# OGH drainage-distance sensitivity runs:
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --full_model \
@@ -1712,18 +1790,30 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --end_year 2024 \
   --interval_type five_year \
   --count_burned_years \
-  --run_name ogh_sensitivity_500m_10
-  
+  --drainage_distance_threshold_m 250 \
+  --run_name ogh_sensitivity_250m
+
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \
   --full_model \
   --chunk_size 1 \
-  --start_year 2001 \
+  --start_year 2021 \
   --end_year 2024 \
   --interval_type five_year \
-  --all_five_year_periods \
   --count_burned_years \
-  --run_name ogh_sensitivity_500m_10
+  --drainage_distance_threshold_m 500 \
+  --run_name ogh_sensitivity_500m
+
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2021 \
+  --end_year 2024 \
+  --interval_type five_year \
+  --count_burned_years \
+  --drainage_distance_threshold_m 750 \
+  --run_name ogh_sensitivity_750m
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster \

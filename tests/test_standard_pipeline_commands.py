@@ -18,6 +18,7 @@ def test_standard_pipeline_uses_matching_run_date_and_current_modules():
     zonal_cmd = _command_by_label(commands, "02_run_zonal_stats[gfw]")
 
     assert drainage_cmd[drainage_cmd.index("--run_date") + 1] == "20260417"
+    assert drainage_cmd[drainage_cmd.index("--drainage_distance_threshold_m") + 1] == "500"
     assert aggregate_cmd[aggregate_cmd.index("--output_date") + 1] == "20260417"
     assert aggregate_cmd[2] == "src.scripts.core_model.02_aggregate_soils_outputs"
     assert aggregate_cmd[aggregate_cmd.index("--interval_end_years") + 1] == "2024"

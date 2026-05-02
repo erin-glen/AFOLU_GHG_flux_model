@@ -77,6 +77,8 @@ def build_commands(
         "--end_year",
         "2024",
         "--count_burned_years",
+        "--drainage_distance_threshold_m",
+        "500",
         "--interval_type",
         "five_year",
         "--create_zarr",
