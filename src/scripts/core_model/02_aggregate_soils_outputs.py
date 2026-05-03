@@ -21,6 +21,7 @@ from src.scripts.utilities import drainage_zarr_utilities as dzu
 from src.scripts.utilities import universal_utilities as uu
 from src.scripts.utilities import log_utilities as lu
 
+
 def default_data_types(include_legacy_state_rasters: bool = False) -> list[str]:
     data_types = list(cn.drainage_outputs_to_zarr)
     if include_legacy_state_rasters:
@@ -34,6 +35,21 @@ def default_data_types(include_legacy_state_rasters: bool = False) -> list[str]:
 version = cn.model_version_underscore
 BASE_URL = f"s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_{version}"
 DEFAULT_OUTPUT_DATE = "20251007"
+
+
+def _split_cli_items(values: list[str] | None) -> list[str] | None:
+    """Normalize repeated, comma-delimited, or space-delimited CLI values."""
+    if not values:
+        return None
+
+    items: list[str] = []
+    for value in values:
+        items.extend(
+            item.strip()
+            for item in str(value).replace(",", " ").split()
+            if item.strip()
+        )
+    return list(dict.fromkeys(items)) or None
 
 
 def get_inventory_periods(interval_type: str) -> list[str]:
@@ -265,6 +281,9 @@ def main(
     interval_type: str = cn.intervals_five_year,
     interval_end_years: list[int] | None = None,
     include_legacy_state_rasters: bool = False,
+    tile_ids: list[str] | None = None,
+    data_types: list[str] | None = None,
+    final_output_naming: bool = False,
 ):
     logger = lu.setup_logging_main()
 
@@ -297,10 +316,36 @@ def main(
     fs = fsspec.filesystem("s3", anon=False)
     zarr.open_group(fs.get_mapper(zarr_path), mode="r")
 
-    tile_ids = cn.tile_id_list
-    is_final = len(tile_ids) > 20
-    data_types = default_data_types(include_legacy_state_rasters=include_legacy_state_rasters)
-    logger.info("Aggregation dataset defaults (%d): %s", len(data_types), data_types)
+    if tile_ids:
+        unknown_tile_ids = [tile_id for tile_id in tile_ids if tile_id not in cn.tile_id_list]
+        if unknown_tile_ids:
+            raise ValueError(f"Unknown tile_ids requested: {unknown_tile_ids}")
+        tile_ids = list(dict.fromkeys(tile_ids))
+    else:
+        tile_ids = list(cn.tile_id_list)
+
+    is_final = bool(final_output_naming) or len(tile_ids) > 20
+
+    available_data_types = default_data_types(
+        include_legacy_state_rasters=include_legacy_state_rasters
+    )
+    if data_types:
+        unknown_data_types = [
+            data_type for data_type in data_types if data_type not in available_data_types
+        ]
+        if unknown_data_types:
+            raise ValueError(
+                "Unknown data_types requested: "
+                f"{unknown_data_types}. Available: {available_data_types}"
+            )
+        data_types = list(dict.fromkeys(data_types))
+    else:
+        data_types = available_data_types
+
+    logger.info("Aggregation tile selection (%d): %s", len(tile_ids), tile_ids)
+    logger.info("Aggregation dataset selection (%d): %s", len(data_types), data_types)
+    if final_output_naming and len(tile_ids) <= 20:
+        logger.info("Using production output filenames for subset aggregation.")
 
     tasks = []
     for dataset in data_types:
@@ -427,20 +472,40 @@ if __name__ == "__main__":
         action="store_true",
         help="Also aggregate drained_state and burned_state (default: omit from standard runs).",
     )
+    parser.add_argument(
+        "--tile_ids",
+        nargs="+",
+        default=None,
+        help="Optional subset of 10x10 tile IDs. Supports spaces or commas.",
+    )
+    parser.add_argument(
+        "--data_types",
+        nargs="+",
+        default=None,
+        help="Optional subset of mega-zarr datasets to aggregate.",
+    )
+    parser.add_argument(
+        "--final_output_naming",
+        action="store_true",
+        help="Use production GeoTIFF names without timestamp suffix for subset runs.",
+    )
 
     args = parser.parse_args()
 
     main(
-        args.cluster_name,
-        args.run_local,
-        args.no_upload,
-        args.no_log,
-        args.pixel_resolution,
-        args.run_name,
-        args.output_date,
-        args.interval_type,
-        args.interval_end_years,
-        args.include_legacy_state_rasters,
+        cluster_name=args.cluster_name,
+        run_local=args.run_local,
+        no_upload=args.no_upload,
+        no_log=args.no_log,
+        pixel_resolution=args.pixel_resolution,
+        run_name=args.run_name,
+        output_date=args.output_date,
+        interval_type=args.interval_type,
+        interval_end_years=args.interval_end_years,
+        include_legacy_state_rasters=args.include_legacy_state_rasters,
+        tile_ids=_split_cli_items(args.tile_ids),
+        data_types=_split_cli_items(args.data_types),
+        final_output_naming=args.final_output_naming,
     )
 
 """

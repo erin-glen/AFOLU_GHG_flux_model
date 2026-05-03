@@ -71,6 +71,21 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
 # Constants / helpers
 # --------------------------------------------------------------------
 
+def _split_cli_items(values: Optional[List[str]]) -> Optional[List[str]]:
+    """Normalize repeated, comma-delimited, or space-delimited CLI values."""
+    if not values:
+        return None
+
+    items: List[str] = []
+    for value in values:
+        items.extend(
+            item.strip()
+            for item in str(value).replace(",", " ").split()
+            if item.strip()
+        )
+    return list(dict.fromkeys(items)) or None
+
+
 def _reaggregate_sum(arr: np.ndarray, native_deg: float, target_deg: float) -> np.ndarray:
     """
     Downsample by summing factor×factor blocks (preserves NaNs).
@@ -503,6 +518,9 @@ def aggregate_main(
     outputs_root: str = OUTPUT_ROOT,
     base_url: Optional[str] = None,
     outputs_base: Optional[str] = None,
+    data_types: Optional[List[str]] = None,
+    inventory_periods: Optional[List[str]] = None,
+    tile_ids: Optional[List[str]] = None,
 ) -> None:
     assert_grid_divides_world(target_deg)
 
@@ -526,14 +544,24 @@ def aggregate_main(
         base_url=resolved_base_url,
         output_date=output_date,
         outputs_base=resolved_outputs_base,
+        data_types=data_types,
+        inventory_periods=inventory_periods,
     )
+
+    if tile_ids:
+        unknown_tile_ids = [tile_id for tile_id in tile_ids if tile_id not in cn.tile_id_list]
+        if unknown_tile_ids:
+            raise ValueError(f"Unknown tile_ids requested: {unknown_tile_ids}")
+        selected_tile_ids = list(dict.fromkeys(tile_ids))
+    else:
+        selected_tile_ids = list(cn.tile_id_list)
 
     res_label = deg_to_label(target_deg)
 
     for key, items in download_upload_dictionary.items():
         bounds_list: List[Tuple[float, float, float, float]] = []
         delayed_results: List = []
-        tile_ids: List[str] = []
+        tile_ids_for_key: List[str] = []
 
         dataset_name = items["dataset"]
         is_combined = (dataset_name == "combined_state")
@@ -541,12 +569,12 @@ def aggregate_main(
         stage = f"aggregate tiles to {res_label} for {key}"
         lu.print_and_log(f"Stage {stage} started at: {uu.timestr()}", is_final, logger)
 
-        for tile_id in cn.tile_id_list:
+        for tile_id in selected_tile_ids:
             tile_path = _per_pixel_tile_path(items, tile_id)
             bounds = uu.get_10x10_tile_bounds(tile_id)
             bounds_list.append(bounds)
             chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
-            tile_ids.append(tile_id)
+            tile_ids_for_key.append(tile_id)
 
             delayed_results.append(
                 dask.delayed(agg_tile_to_target)(
@@ -566,7 +594,7 @@ def aggregate_main(
             client=None if run_local else client,
             logger=logger,
             stage_desc=stage_desc,
-            tile_ids=tile_ids,
+            tile_ids=tile_ids_for_key,
         )
 
         stage = f"build {res_label} global mosaic for {key}"
@@ -645,6 +673,24 @@ def main() -> None:
         default=None,
         help="Optional override for the destination of aggregated rasters.",
     )
+    parser.add_argument(
+        "--data_types",
+        nargs="+",
+        default=None,
+        help="Optional subset of per-pixel/state datasets to aggregate.",
+    )
+    parser.add_argument(
+        "--inventory_periods",
+        nargs="+",
+        default=None,
+        help="Optional subset of inventory periods, e.g. 2021_2024.",
+    )
+    parser.add_argument(
+        "--tile_ids",
+        nargs="+",
+        default=None,
+        help="Optional subset of 10x10 tile IDs. Supports spaces or commas.",
+    )
 
     args = parser.parse_args()
 
@@ -660,6 +706,9 @@ def main() -> None:
         outputs_root=args.outputs_root,
         base_url=args.base_url,
         outputs_base=args.outputs_base,
+        data_types=_split_cli_items(args.data_types),
+        inventory_periods=_split_cli_items(args.inventory_periods),
+        tile_ids=_split_cli_items(args.tile_ids),
     )
 
 
