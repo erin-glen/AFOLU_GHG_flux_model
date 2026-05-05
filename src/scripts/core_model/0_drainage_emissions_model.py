@@ -648,6 +648,13 @@ def combine_burned_area(
         layers[f"burned_area_combined_{iv_start}_{iv_end}"] = combined
 
 
+def binarize_extraction_layer(layers: dict):
+    """Ensure extraction is consumed as a uint8 0/1 presence layer."""
+
+    if "extraction" in layers:
+        layers["extraction"] = (layers["extraction"] > 0).astype(np.uint8)
+
+
 # ----------------------------------------------------------------------
 # per‑chunk wrapper
 # ----------------------------------------------------------------------
@@ -818,6 +825,8 @@ def calculate_and_upload_drainage(
                 layers["peat"] = binary_peat
             else:
                 layers["peat"] = (peat_layer >= peat_threshold).astype(np.uint8)
+
+    binarize_extraction_layer(layers)
 
     # stats for inputs
     for k, arr in layers.items():

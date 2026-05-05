@@ -26,8 +26,8 @@ ROTATION_CLASS_CODES = {
 
 def classify(row):
     """Hierarchical classification logic based on plantation type."""
-    simple_name = str(row['simpleName']).lower()
-    sci_name = str(row['sciName']).lower()
+    simple_name = str(row.get('simpleName', '')).lower()
+    sci_name = str(row.get('sciName', '')).lower()
 
     # Oil Palm classification (highest priority)
     if any(keyword in simple_name for keyword in OIL_PALM_INDICATORS):

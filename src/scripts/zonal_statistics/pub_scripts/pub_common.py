@@ -947,6 +947,10 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
     """
     Country × climate × component table by inventory period.
 
+    Area columns are component areas, not full-country state-background areas:
+    drainage/extraction keeps only peat-drained states, and fire keeps only
+    nonzero burned-state classes.
+
     Output columns:
       - interval_end
       - gadm_adm0[, country, iso3]
@@ -969,9 +973,10 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
           TRY_CAST(z.gadm_adm0 AS INTEGER),
           TRY_CAST(regexp_extract(CAST(z.gadm_adm0 AS VARCHAR), '(\\d+)', 1) AS INTEGER)
         ) AS gadm_adm0,
-        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        COALESCE(NULLIF(ctx.climate_domain, ''), 'Unspecified') AS climate_domain,
         CASE
-          WHEN regexp_matches(lower(COALESCE(ctx.emissions_state, '')),
+          WHEN lower(COALESCE(ctx.drained_state, z.drained_state_meaning, '')) LIKE 'peat_drained_extraction%'
+            OR regexp_matches(lower(COALESCE(ctx.emissions_state, '')),
                               '^(extraction|peat[_\\- ]?extraction|cutover).*$')
           THEN 'Extraction'
           ELSE 'Drainage'
@@ -982,6 +987,7 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
         OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
+      WHERE lower(COALESCE(ctx.drained_state, z.drained_state_meaning, '')) LIKE 'peat_drained%'
       GROUP BY 1,2,3,4
     ),
     burned_base AS (
@@ -991,7 +997,7 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
           TRY_CAST(z.gadm_adm0 AS INTEGER),
           TRY_CAST(regexp_extract(CAST(z.gadm_adm0 AS VARCHAR), '(\\d+)', 1) AS INTEGER)
         ) AS gadm_adm0,
-        COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
+        COALESCE(NULLIF(ctx.climate_domain, ''), 'Unspecified') AS climate_domain,
         'Fire' AS component,
         SUM(CASE WHEN z.flux_type = 'burned_total_Mg_CO2e' THEN z.value ELSE 0 END) AS flux_Mg_CO2e_yr,
         SUM(CASE WHEN z.flux_type = 'area__ha' THEN z.value ELSE 0 END) AS area_ha
@@ -999,6 +1005,11 @@ def table_stats_for_lulucf_paper_sql(with_lookup: bool) -> str:
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
         OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
+      WHERE lower(COALESCE(
+              NULLIF(ctx.burned_state, ''),
+              NULLIF(CAST(z.burned_state_meaning AS VARCHAR), ''),
+              ''
+            )) NOT IN ('', 'unburned')
       GROUP BY 1,2,3,4
     ),
     base AS (

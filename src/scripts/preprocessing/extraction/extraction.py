@@ -1,8 +1,12 @@
 # extraction.py
 
 import os
+import posixpath
+import re
+import json
 import logging
 import boto3
+import botocore
 import geopandas as gpd
 import pandas as pd  # For merging multiple GeoDataFrames
 import rasterio
@@ -11,6 +15,7 @@ import rasterio.warp
 import rasterio.mask
 from rasterio.vrt import WarpedVRT
 import numpy as np
+from contextlib import ExitStack
 from shapely.geometry import box
 import shapely.speedups
 import gc
@@ -23,6 +28,8 @@ import argparse
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+EXTRACTION_RASTER_PATTERN = re.compile(r"([0-9]{2}[A-Z]_[0-9]{3}[A-Z])_extraction\.tif$")
 
 # -------------------- Filtering Functions --------------------
 
@@ -39,16 +46,13 @@ def filter_gdf_dataset(gdf_dataset, dataset):
     """
     try:
         if dataset == 'finland':
-            # Example filter for Finland dataset
-            # Replace 'attribute_name' and 'desired_value' with actual values
             gdf_dataset = gdf_dataset[gdf_dataset['luokka'] == 'turvetuotanto']
-            logging.info("Applying attribute filtering for Finland dataset.")
-            # Add your filtering logic here
+            logging.info("Filtering Finland features to luokka == 'turvetuotanto'.")
         elif dataset == 'russia':
-            # Example filter for Russia dataset
-            # gdf_dataset = gdf_dataset[gdf_dataset['attribute_name'] == 'desired_value']
-            logging.info("Applying attribute filtering for Russia dataset.")
-            # Add your filtering logic here
+            logging.info(
+                "No Russia attribute filter applied; retaining all features from "
+                "allocated_mineral_reserve and peat_extraction_dates."
+            )
         else:
             logging.info(f"No specific attribute filtering applied for dataset '{dataset}'.")
         return gdf_dataset
@@ -69,9 +73,9 @@ def filter_raster_data(data, dataset):
     """
     try:
         if dataset == 'ireland':
-            # Keep only values 1 and 2, set others to zero
-            logging.info("Applying raster value filtering for Ireland dataset.")
-            data = np.where((data == 1) | (data == 2), data, 0)
+            # Values 1 and 2 are Cutaway and Cutover in the raster attribute table.
+            logging.info("Filtering Ireland raster values 1 and 2 to binary extraction presence.")
+            data = np.where((data == 1) | (data == 2), 1, 0)
         else:
             logging.info(f"No specific raster value filtering applied for dataset '{dataset}'.")
         return data
@@ -141,6 +145,250 @@ def rasterize_shapefile_with_ref(gdf, output_raster_path, transform, width, heig
     except Exception as e:
         logging.error(f"Error rasterizing shapefile for tile {tile_id}: {e}")
         raise  # Re-raise the exception to be caught in the calling function
+
+
+def extraction_filename(tile_id):
+    return f"{tile_id}_extraction.tif"
+
+
+def extraction_s3_key(prefix, tile_id):
+    return posixpath.join(prefix.rstrip("/"), extraction_filename(tile_id))
+
+
+def source_s3_key(dataset, tile_id):
+    return extraction_s3_key(cn.datasets['extraction'][dataset]['s3_processed'], tile_id)
+
+
+def final_s3_key(tile_id):
+    return extraction_s3_key(cn.extraction_final_s3_processed, tile_id)
+
+
+def source_local_path(dataset, tile_id):
+    return os.path.join(cn.datasets['extraction'][dataset]['local_processed'], extraction_filename(tile_id))
+
+
+def final_local_path(tile_id):
+    return os.path.join(cn.extraction_final_local_processed, extraction_filename(tile_id))
+
+
+def tile_id_from_extraction_key(key):
+    match = EXTRACTION_RASTER_PATTERN.search(posixpath.basename(key))
+    return match.group(1) if match else None
+
+
+def get_reference_profile(tile_id):
+    s3_input_raster_path = f"/vsis3/{cn.s3_bucket_name}/{cn.peat_tiles_prefix}{tile_id}_peat_mask_processed.tif"
+    with rasterio.Env(AWS_SESSION=boto3.Session()):
+        with rasterio.open(s3_input_raster_path) as src:
+            return {
+                "crs": src.crs,
+                "transform": src.transform,
+                "width": src.width,
+                "height": src.height,
+                "bounds": src.bounds,
+            }
+
+
+def raster_aligns_to_reference(src, reference):
+    return (
+        src.crs == reference["crs"]
+        and src.transform == reference["transform"]
+        and src.width == reference["width"]
+        and src.height == reference["height"]
+    )
+
+
+def qa_extraction_tile(raster_path, tile_id, source_countries, reference=None):
+    unique_values = set()
+    nonzero_count = 0
+
+    with rasterio.open(raster_path) as src:
+        for _, window in src.block_windows(1):
+            data = src.read(1, window=window)
+            unique_values.update(int(v) for v in np.unique(data))
+            nonzero_count += int(np.count_nonzero(data))
+
+        aligns_to_reference = (
+            raster_aligns_to_reference(src, reference) if reference is not None else None
+        )
+        qa_report = {
+            "tile_id": tile_id,
+            "source_countries": sorted(source_countries),
+            "nonzero_pixel_count": nonzero_count,
+            "unique_values": sorted(unique_values),
+            "crs": str(src.crs),
+            "transform": tuple(src.transform.to_gdal()),
+            "width": src.width,
+            "height": src.height,
+            "aligns_to_reference_grid": aligns_to_reference,
+        }
+
+    logging.info("Extraction QA: %s", json.dumps(qa_report, default=str))
+    return qa_report
+
+
+def get_source_raster_path(dataset, tile_id, run_mode='default'):
+    local_path = source_local_path(dataset, tile_id)
+    if os.path.exists(local_path):
+        return local_path
+
+    if run_mode == 'test':
+        return None
+
+    s3_key = source_s3_key(dataset, tile_id)
+    if uutil.s3_file_exists(cn.s3_bucket_name, s3_key):
+        return f"/vsis3/{cn.s3_bucket_name}/{s3_key}"
+
+    return None
+
+
+def find_source_tiles(tile_id=None, run_mode='default'):
+    source_tiles = {}
+
+    if tile_id:
+        for dataset in cn.extraction_source_datasets:
+            if get_source_raster_path(dataset, tile_id, run_mode) is not None:
+                source_tiles.setdefault(tile_id, []).append(dataset)
+        return source_tiles
+
+    for dataset in cn.extraction_source_datasets:
+        if run_mode == 'test':
+            local_dir = cn.datasets['extraction'][dataset]['local_processed']
+            keys = []
+            if os.path.isdir(local_dir):
+                keys = [os.path.join(local_dir, name) for name in os.listdir(local_dir)]
+        else:
+            try:
+                keys = uutil.list_s3_files(
+                    cn.s3_bucket_name,
+                    cn.datasets['extraction'][dataset]['s3_processed'],
+                )
+            except Exception as e:
+                logging.error(f"Unable to list source extraction outputs for {dataset}: {e}")
+                keys = []
+
+        for key in keys:
+            tid = tile_id_from_extraction_key(key)
+            if tid:
+                source_tiles.setdefault(tid, []).append(dataset)
+
+    return source_tiles
+
+
+def consolidate_final_tile(tile_id, source_countries, run_mode='default'):
+    source_paths = []
+    for country in source_countries:
+        path = get_source_raster_path(country, tile_id, run_mode)
+        if path is not None:
+            source_paths.append((country, path))
+
+    if not source_paths:
+        logging.info(f"No source extraction rasters found for tile {tile_id}. Skipping consolidation.")
+        return None
+
+    reference = get_reference_profile(tile_id)
+    local_output_path = final_local_path(tile_id)
+    os.makedirs(os.path.dirname(local_output_path), exist_ok=True)
+
+    out_meta = {
+        "driver": "GTiff",
+        "height": reference["height"],
+        "width": reference["width"],
+        "count": 1,
+        "dtype": "uint8",
+        "crs": reference["crs"],
+        "transform": reference["transform"],
+        "nodata": 0,
+        "compress": "DEFLATE",
+        "tiled": True,
+        "blockxsize": 512,
+        "blockysize": 512,
+    }
+
+    contributor_pixel_counts = {country: 0 for country, _ in source_paths}
+    with rasterio.Env(AWS_SESSION=boto3.Session()):
+        with ExitStack() as stack:
+            readers = []
+            for country, path in source_paths:
+                src = stack.enter_context(rasterio.open(path))
+                if raster_aligns_to_reference(src, reference):
+                    reader = src
+                else:
+                    logging.warning(
+                        f"{country} source tile {tile_id} is not aligned to the reference grid; "
+                        "reading through a nearest-neighbor WarpedVRT."
+                    )
+                    reader = stack.enter_context(WarpedVRT(
+                        src,
+                        crs=reference["crs"],
+                        transform=reference["transform"],
+                        width=reference["width"],
+                        height=reference["height"],
+                        resampling=rasterio.warp.Resampling.nearest,
+                        nodata=0,
+                        dtype="uint8",
+                    ))
+                readers.append((country, reader))
+
+            with rasterio.open(local_output_path, "w", **out_meta) as dest:
+                for _, window in dest.block_windows(1):
+                    union_block = np.zeros(
+                        (int(window.height), int(window.width)),
+                        dtype=np.uint8,
+                    )
+                    for country, reader in readers:
+                        data = reader.read(1, window=window, boundless=True, fill_value=0)
+                        present = data > 0
+                        if present.any():
+                            contributor_pixel_counts[country] += int(np.count_nonzero(present))
+                            union_block = np.maximum(union_block, present.astype(np.uint8))
+                    dest.write(union_block, 1, window=window)
+
+    source_countries_with_pixels = [
+        country for country, count in contributor_pixel_counts.items() if count > 0
+    ]
+
+    if not source_countries_with_pixels:
+        logging.warning(f"Consolidated extraction raster for tile {tile_id} contains no data. Skipping upload.")
+        uu.delete_file_if_exists(local_output_path)
+        return None
+
+    qa_report = qa_extraction_tile(
+        local_output_path,
+        tile_id,
+        source_countries_with_pixels,
+        reference=reference,
+    )
+
+    if qa_report["unique_values"] not in ([0], [0, 1], [1]):
+        logging.warning(
+            f"Final extraction raster for tile {tile_id} is not binary: "
+            f"{qa_report['unique_values']}"
+        )
+
+    if run_mode != 'test':
+        s3_output_path = final_s3_key(tile_id)
+        uutil.upload_file_to_s3(local_output_path, cn.s3_bucket_name, s3_output_path)
+        logging.info(f"Uploaded final binary union to s3://{cn.s3_bucket_name}/{s3_output_path}")
+        uu.delete_file_if_exists(local_output_path)
+
+    return qa_report
+
+
+def consolidate_extraction_outputs(tile_id=None, run_mode='default'):
+    source_tiles = find_source_tiles(tile_id=tile_id, run_mode=run_mode)
+    if not source_tiles:
+        logging.info("No source extraction outputs found for consolidation.")
+        return []
+
+    qa_reports = []
+    for tid in sorted(source_tiles):
+        qa_report = consolidate_final_tile(tid, sorted(set(source_tiles[tid])), run_mode=run_mode)
+        if qa_report is not None:
+            qa_reports.append(qa_report)
+
+    logging.info(f"Consolidated {len(qa_reports)} final extraction tiles.")
+    return qa_reports
 
 def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
     """
@@ -256,9 +504,8 @@ def process_vector_tile(dataset, tile_id, gdf_dataset, run_mode='default'):
     output_dir = cn.datasets['extraction'][dataset]['local_processed']
     os.makedirs(output_dir, exist_ok=True)
 
-    s3_output_dir = cn.datasets['extraction'][dataset]['s3_processed']
-    local_output_path = os.path.join(output_dir, f"{tile_id}_extraction.tif")
-    s3_output_path = os.path.join(s3_output_dir, f"{tile_id}_extraction.tif").replace("\\", "/")
+    local_output_path = source_local_path(dataset, tile_id)
+    s3_output_path = source_s3_key(dataset, tile_id)
 
     try:
         if run_mode != 'test':
@@ -405,8 +652,8 @@ def process_raster_dataset(dataset, tile_id=None, run_mode='default'):
             # Check and set CRS if missing
             if raster_crs is None:
                 logging.warning(f"No CRS found for {dataset} raster dataset. Setting CRS manually.")
-                # Set the CRS here (replace with the correct CRS)
-                raster_crs = raster_dataset.crs = 'EPSG:29902'  # Replace with the correct CRS
+                # Source raster is distributed in the old Irish Grid when CRS metadata is absent.
+                raster_crs = raster_dataset.crs = 'EPSG:29902'
 
             logging.info(f"{dataset.capitalize()} raster CRS: {raster_crs}")
             logging.info(f"Raster dataset bounds: {raster_dataset.bounds}")
@@ -474,9 +721,8 @@ def process_raster_tile(dataset, tile_id, local_raster_path, run_mode='default')
         # Prepare output paths
         output_dir = cn.datasets['extraction'][dataset]['local_processed']
         os.makedirs(output_dir, exist_ok=True)
-        local_output_path = os.path.join(output_dir, f"{tile_id}_extraction.tif")
-        s3_output_dir = cn.datasets['extraction'][dataset]['s3_processed']
-        s3_output_path = os.path.join(s3_output_dir, f"{tile_id}_extraction.tif").replace("\\", "/")
+        local_output_path = source_local_path(dataset, tile_id)
+        s3_output_path = source_s3_key(dataset, tile_id)
 
         # Check if the output already exists
         if run_mode != 'test':
@@ -557,7 +803,7 @@ def process_raster_tile(dataset, tile_id, local_raster_path, run_mode='default')
     except Exception as e:
         logging.error(f"Error processing tile {tile_id} for dataset {dataset}: {e}")
 
-def main(dataset='finland', tile_id=None, run_mode='default'):
+def main(dataset='finland', tile_id=None, run_mode='default', consolidate=False):
     """
     Main function to orchestrate the processing based on provided arguments.
 
@@ -565,6 +811,7 @@ def main(dataset='finland', tile_id=None, run_mode='default'):
         dataset (str): The dataset to process ('finland', 'ireland', 'russia').
         tile_id (str, optional): Tile ID to process a specific tile. Defaults to None.
         run_mode (str, optional): The mode to run the script ('default' or 'test'). Defaults to 'default'.
+        consolidate (bool, optional): If True, rebuild the final binary union after processing.
 
     Returns:
         None
@@ -578,6 +825,10 @@ def main(dataset='finland', tile_id=None, run_mode='default'):
             process_raster_dataset(dataset, tile_id, run_mode)
         else:
             logging.error(f"Dataset '{dataset}' is not recognized. Please choose 'finland', 'ireland', or 'russia'.")
+            return
+
+        if consolidate:
+            consolidate_extraction_outputs(tile_id=tile_id, run_mode=run_mode)
 
     except Exception as e:
         logging.error(f"Error in main processing routine: {e}")
@@ -588,14 +839,28 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
     parser = argparse.ArgumentParser(description="Process peat extraction datasets")
-    parser.add_argument("--dataset", required=True, choices=["finland", "ireland", "russia"],
+    parser.add_argument("--dataset", choices=list(cn.extraction_source_datasets),
                         help="Dataset to process")
     parser.add_argument("--tile_id", default=None, help="Optional tile ID to process")
     parser.add_argument("--run_mode", default="default", choices=["default", "test"],
                         help="Run mode")
+    parser.add_argument("--consolidate", action="store_true",
+                        help="After processing the selected source, rebuild the final binary union")
+    parser.add_argument("--consolidate_only", action="store_true",
+                        help="Only rebuild the final binary union from source-country outputs")
     args = parser.parse_args()
 
-    main(dataset=args.dataset, tile_id=args.tile_id, run_mode=args.run_mode)
+    if args.consolidate_only:
+        consolidate_extraction_outputs(tile_id=args.tile_id, run_mode=args.run_mode)
+    else:
+        if args.dataset is None:
+            parser.error("--dataset is required unless --consolidate_only is used")
+        main(
+            dataset=args.dataset,
+            tile_id=args.tile_id,
+            run_mode=args.run_mode,
+            consolidate=args.consolidate,
+        )
 
 """
     # Example usage
@@ -605,4 +870,5 @@ if __name__ == "__main__":
     main(dataset='ireland', tile_id=None, run_mode='default')
     # Process Russia dataset
     main(dataset='russia', tile_id=None, run_mode='default')
+    consolidate_extraction_outputs(tile_id=None, run_mode='default')
 """

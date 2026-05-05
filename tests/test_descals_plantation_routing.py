@@ -120,3 +120,13 @@ def test_tropical_burned_descals_pixel_routes_to_crop_or_plantation():
 def test_extraction_precedence_overrides_plantation_in_tropical_drainage():
     _, drained_label, _ = _run_one_pixel(descals_type=2, extraction=1)
     assert drained_label == "peat_drained_extraction__tropical_extraction"
+
+
+def test_extraction_layer_is_binarized_before_model_consumption():
+    layers = {"extraction": np.array([[0, 1, 2, 7]], dtype=np.uint8)}
+    drainage_model.binarize_extraction_layer(layers)
+    assert layers["extraction"].dtype == np.uint8
+    np.testing.assert_array_equal(
+        layers["extraction"],
+        np.array([[0, 1, 1, 1]], dtype=np.uint8),
+    )

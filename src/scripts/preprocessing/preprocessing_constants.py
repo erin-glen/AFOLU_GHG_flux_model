@@ -22,6 +22,7 @@ from src.scripts.utilities.constants_and_names import (
     tile_index_shapefile_name,
     tile_id_list as master_tile_id_list,
     peat_mask_dirs,
+    dirs as model_input_dirs,
 )
 
 
@@ -39,6 +40,12 @@ union_30m_prefix = _relative_peat_path(peat_mask_dirs["union_mask"])
 peat_tiles_prefix = _relative_peat_path(peat_mask_dirs["gpd"])
 peat_tiles_prefix_1km = union_30m_prefix.replace("/30m/", "/1km/")
 peat_tiles_prefix_1km_3395 = union_30m_prefix.replace("/30m/", "/1km_3395/")
+
+# Peat/organic-soil extraction source datasets and final model-facing union.
+extraction_source_datasets = ("finland", "ireland", "russia")
+extraction_final_s3_processed = _relative_peat_path(model_input_dirs["extraction"]).rstrip("/")
+extraction_final_version = pp.basename(extraction_final_s3_processed)
+extraction_final_local_processed = pp.join(local_temp_dir, 'extraction', 'final', extraction_final_version)
 
 # Global tile index (no extension)
 index_shapefile_prefix = tile_index_shapefile_prefix
@@ -125,16 +132,16 @@ datasets = {
     },
     'extraction': {
         'finland': {
-            's3_raw': f'{raw_dir}/extracion/Finland/Finland_turvetuotantoalueet/'
+            's3_raw': f'{raw_dir}/extraction/Finland/Finland_turvetuotantoalueet/'
                       f'turvetuotantoalueet_jalkikaytto',
             's3_processed_base': f'{processed_dir}/extraction/',
-            's3_processed': f'{processed_dir}/extraction/{today_date}/',
+            's3_processed': f'{processed_dir}/extraction/source/finland/{today_date}/',
             'local_processed': f'{local_temp_dir}/extraction/finland/{today_date}/'
         },
         'ireland': {
             's3_raw': f'{raw_dir}/extraction/Ireland/Ireland_Habibetal/RF_S2_LU_5_11_23.tif',
             's3_processed_base': f'{processed_dir}/extraction/',
-            's3_processed': f'{processed_dir}/extraction/{today_date}/',
+            's3_processed': f'{processed_dir}/extraction/source/ireland/{today_date}/',
             'local_processed': f'{local_temp_dir}/extraction/ireland/{today_date}/'
         },
         'russia': {
@@ -145,7 +152,7 @@ datasets = {
                 f'peat_extraction_dates'
             ],
             's3_processed_base': f'{processed_dir}/extraction/',
-            's3_processed': f'{processed_dir}/extraction/{today_date}/',
+            's3_processed': f'{processed_dir}/extraction/source/russia/{today_date}/',
             'local_processed': f'{local_temp_dir}/extraction/russia/{today_date}/'
         }
     },

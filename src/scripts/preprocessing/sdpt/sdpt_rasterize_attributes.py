@@ -94,7 +94,7 @@ def _assert_bbox_on_grid(bbox, res=RASTER_RES, ox=SNAP_ORIGIN_X, oy=SNAP_ORIGIN_
         raise ValueError(f"BBox {bbox} not aligned to {res} grid from origin ({ox},{oy}).")
 
 # Columns we *prefer* to request; we will gracefully fall back if missing
-_READ_COLUMNS = ["geometry", "simpleType", "simpleName", "vernacName"]
+_READ_COLUMNS = ["geometry", "simpleType", "simpleName", "vernacName", "sciName"]
 
 # ────────────────────────────────────────────────────────────────
 # Helper utilities (mirroring the simplified/testing variant)
@@ -253,7 +253,7 @@ def assign_rotation_codes(gdf, species_map):
         return gdf
 
     # Ensure columns exist
-    for col in ["simpleType", "simpleName", "vernacName"]:
+    for col in ["simpleType", "simpleName", "vernacName", "sciName"]:
         if col not in gdf.columns:
             gdf[col] = None
 
