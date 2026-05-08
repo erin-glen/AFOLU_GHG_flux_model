@@ -161,7 +161,7 @@ PIXEL_AREA_GTIF_FOLDER = (
 )
 
 ORGANIC_PROBABILITY_DATASET = "ogh_unthresholded_probability"
-ORGANIC_PROBABILITY_DATE = "20251105"
+ORGANIC_PROBABILITY_DATE = "20260508"
 ORGANIC_PROBABILITY_VAR_NAME = "organic_probability"
 ORGANIC_PROBABILITY_FILENAME_TEMPLATE = "global_ogh_unthresholded_probability_{date}.zarr"
 ORGANIC_PROBABILITY_GTIF_FOLDER_TEMPLATE = (
@@ -591,7 +591,13 @@ def run(args: argparse.Namespace) -> None:
 
     # 2) Ensure adm0 contextual grid exists and matches ref
     ensure_adm0_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
-    ensure_organic_probability_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
+    ensure_organic_probability_contextual_zarr(
+        ref=pixel_area_full,
+        tol=tol,
+        chunk_size=args.chunk_size,
+        logger=logger,
+        date=args.organic_probability_date,
+    )
     ensure_climate_domain_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
 
     logger.info("flm: Model version: %s", args.model_version)
@@ -747,6 +753,16 @@ def main(argv=None):
     parser.add_argument("--interval_end_years", nargs="+", type=int,
                         help="Legacy mode only: interval end years (required with --include_legacy_model_output_caches).")
     parser.add_argument("--chunk_size", type=int, default=8000)
+    parser.add_argument(
+        "--organic_probability_date",
+        "--probability_date",
+        dest="organic_probability_date",
+        default=ORGANIC_PROBABILITY_DATE,
+        help=(
+            "Date tag for OGH unthresholded probability GeoTIFF tiles and "
+            "the contextual Zarr output. Default: %(default)s"
+        ),
+    )
     parser.add_argument("--tile_pixels", type=int, default=40000,
                         help="Input tile size in pixels in the source folder path (4000 or 40000).")
     parser.add_argument("--run_name", default="ogh_standard_model")

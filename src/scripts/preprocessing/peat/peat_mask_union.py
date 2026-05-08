@@ -23,6 +23,7 @@ import os
 import argparse
 import logging
 import tempfile
+import re
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,7 @@ log = logging.getLogger("peat-union")
 
 BUCKET = cn.s3_bucket_name
 TODAY = cn.today_date
+DATE_TOKEN_RE = re.compile(r"^\d{8}$")
 
 # Specific input dates for peat datasets. ``None`` indicates the dataset keeps
 # its historical undated layout (e.g., GFW tiles live directly in the processed
@@ -73,32 +75,63 @@ def _s3_key_from_uri(uri):
     return uri.replace(f"s3://{BUCKET}/", "", 1)
 
 
-def get_dataset_tile_path(ds_key, tile_id, dated=True, dataset_config=None):
+def strip_date_suffix(path):
+    clean = str(path).replace("\\", "/").rstrip("/")
+    if DATE_TOKEN_RE.fullmatch(pp.basename(clean)):
+        return pp.dirname(clean)
+    return clean
+
+
+def parse_dataset_date_overrides(items):
+    dataset_dates = dict(DATASET_DATES)
+    for item in items or []:
+        if "=" not in item:
+            raise ValueError(
+                f"Expected --dataset_date entries as DATASET=YYYYMMDD, got {item!r}"
+            )
+        ds_key, date_value = item.split("=", 1)
+        ds_key = ds_key.strip()
+        date_value = date_value.strip()
+        dataset_dates[ds_key] = None if date_value.lower() in {"none", "null", "undated"} else date_value
+    return dataset_dates
+
+
+def get_dataset_tile_path(ds_key, tile_id, dated=True, dataset_config=None, dataset_dates=None):
     ds = dataset_config or cn.datasets["peat"].get(ds_key)
     if ds is None:
         return None
     tile_name = f"{tile_id}_{ds_key}_mask.tif"
-    dataset_date = DATASET_DATES.get(ds_key)
+    dataset_dates = DATASET_DATES if dataset_dates is None else dataset_dates
+    dataset_date = dataset_dates.get(ds_key)
+    s3_processed = strip_date_suffix(ds["s3_processed"])
     if dated and dataset_date:
-        return _build_s3_path(ds["s3_processed"], dataset_date, tile_name)
-    return _build_s3_path(ds["s3_processed"], tile_name)
+        return _build_s3_path(s3_processed, dataset_date, tile_name)
+    return _build_s3_path(s3_processed, tile_name)
 
 
-def get_union_output_path(tile_id, resolution="30m", dated=True):
+def get_union_output_path(tile_id, resolution="30m", dated=True, output_date=None):
+    output_date = output_date or TODAY
     if resolution == "1km":
-        union_dir = cn.datasets["peat"]["union_mask"]["1km"]
+        union_dir = strip_date_suffix(cn.datasets["peat"]["union_mask"]["1km"])
         out_name = f"{tile_id}_union_mask_1km.tif"
     else:
-        union_dir = cn.datasets["peat"]["union_mask"]["30m"]
+        union_dir = strip_date_suffix(cn.datasets["peat"]["union_mask"]["30m"])
         out_name = f"{tile_id}_union_mask.tif"
 
     if dated:
-        return _build_s3_path(union_dir, TODAY, out_name)
+        return _build_s3_path(union_dir, output_date, out_name)
     return _build_s3_path(union_dir, out_name)
 
 
 @dask.delayed
-def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
+def union_tile(
+    tile_id,
+    ds_list,
+    run_mode="default",
+    do_resample=False,
+    output_date=None,
+    dataset_dates=None,
+):
     """
     1) Check if 30 m union already exists on S3. If so, skip union step.
     2) If union not found, read each dataset tile and create union (0/1).
@@ -106,7 +139,7 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
        by downloading the existing 30 m union from S3 if it was found.
     """
     log.info(f"[union|{tile_id}] Checking 30m union presence, do_resample={do_resample}")
-    out_30m_path = get_union_output_path(tile_id, "30m", dated=True)
+    out_30m_path = get_union_output_path(tile_id, "30m", dated=True, output_date=output_date)
     s3_30m_key = _s3_key_from_uri(out_30m_path)
     legacy_30m_path = get_union_output_path(tile_id, "30m", dated=False)
     legacy_30m_key = _s3_key_from_uri(legacy_30m_path)
@@ -151,10 +184,18 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
                         path
                         for path in (
                             get_dataset_tile_path(
-                                ds_key, tile_id, dated=True, dataset_config=dataset_cfg
+                                ds_key,
+                                tile_id,
+                                dated=True,
+                                dataset_config=dataset_cfg,
+                                dataset_dates=dataset_dates,
                             ),
                             get_dataset_tile_path(
-                                ds_key, tile_id, dated=False, dataset_config=dataset_cfg
+                                ds_key,
+                                tile_id,
+                                dated=False,
+                                dataset_config=dataset_cfg,
+                                dataset_dates=dataset_dates,
                             ),
                         )
                         if path is not None
@@ -229,7 +270,7 @@ def union_tile(tile_id, ds_list, run_mode="default", do_resample=False):
             output_path=str(local_1km)
         )
 
-        out_1km_path = get_union_output_path(tile_id, "1km", dated=True)
+        out_1km_path = get_union_output_path(tile_id, "1km", dated=True, output_date=output_date)
         s3_1km_key = _s3_key_from_uri(out_1km_path)
 
         if run_mode != "test":
@@ -296,13 +337,37 @@ def resample_union_to_1km(input_path, sample_1km_tile, output_path):
         dst.write(data_1km, 1)
 
 
-def build_tasks(tile_ids, ds_list, run_mode="default", do_resample=False):
+def build_tasks(
+    tile_ids,
+    ds_list,
+    run_mode="default",
+    do_resample=False,
+    output_date=None,
+    dataset_dates=None,
+):
     tasks = []
     for tid in tile_ids:
-        tasks.append(union_tile(tid, ds_list, run_mode, do_resample))
+        tasks.append(
+            union_tile(
+                tid,
+                ds_list,
+                run_mode,
+                do_resample,
+                output_date,
+                dataset_dates,
+            )
+        )
     return tasks
 
-def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", resample=None):
+def main(
+    tile_id=None,
+    dataset_list=None,
+    client="coiled",
+    run_mode="default",
+    resample=None,
+    output_date=None,
+    dataset_dates=None,
+):
     """
     If 30m union exists, skip re-union. If --resample=1km, do 1km step from
     existing or newly created 30m. 'none' => no resample.
@@ -343,9 +408,22 @@ def main(tile_id=None, dataset_list=None, client="coiled", run_mode="default", r
 
     tile_ids = [tile_id] if tile_id else cn.tile_id_list
     do_resample_1km = (resample == "1km")
+    output_date = output_date or TODAY
+    dataset_dates = DATASET_DATES if dataset_dates is None else dataset_dates
 
-    log.info(f"[union] Datasets: {ds_list}, Tiles: {len(tile_ids)}, do_resample_1km={do_resample_1km}")
-    tasks = build_tasks(tile_ids, ds_list, run_mode, do_resample_1km)
+    log.info(
+        f"[union] Datasets: {ds_list}, Tiles: {len(tile_ids)}, "
+        f"output_date={output_date}, do_resample_1km={do_resample_1km}, "
+        f"dataset_dates={dataset_dates}"
+    )
+    tasks = build_tasks(
+        tile_ids,
+        ds_list,
+        run_mode,
+        do_resample_1km,
+        output_date,
+        dataset_dates,
+    )
     dask.compute(*tasks)
 
     if client_obj is not None:
@@ -376,12 +454,30 @@ if __name__ == "__main__":
         "--resample", choices=["none", "1km"], default="none",
         help="If '1km', also resample the union mask to 1km. If 30m union exists, skip union logic."
     )
+    parser.add_argument(
+        "--output_date",
+        default=TODAY,
+        help="Output date tag for union products (YYYYMMDD). Default: today's UTC date.",
+    )
+    parser.add_argument(
+        "--dataset_date",
+        action="append",
+        default=[],
+        metavar="DATASET=YYYYMMDD",
+        help=(
+            "Override an input peat dataset date, for example --dataset_date ogh=20260508. "
+            "Use DATASET=none for undated layouts. May be supplied multiple times."
+        ),
+    )
     args = parser.parse_args()
+    dataset_dates = parse_dataset_date_overrides(args.dataset_date)
 
     main(
         tile_id=args.tile_id,
         dataset_list=args.dataset_list,
         client=args.client,
         run_mode=args.run_mode,
-        resample=args.resample
+        resample=args.resample,
+        output_date=args.output_date,
+        dataset_dates=dataset_dates,
     )

@@ -1108,21 +1108,9 @@ def main() -> None:
 
     bounds_summary: pd.DataFrame | None = None
     matches_df: pd.DataFrame | None = None
-
-    if args.mapped_area is not None:
-        operational_metrics = evaluate_single_threshold(y_true, scores, operational_threshold)
-        bounds_summary = compute_extent_bounds(
-            mapped_area=float(args.mapped_area),
-            area_unit=args.mapped_area_unit,
-            operational_threshold=operational_threshold,
-            operational_metrics=operational_metrics,
-        )
-        bounds_path = output_dir / "extent_bounds_summary.csv"
-        bounds_summary.to_csv(bounds_path, index=False)
+    area_df: pd.DataFrame | None = None
 
     if args.area_curve_table is not None:
-        if bounds_summary is None:
-            raise ValueError("--area-curve-table requires --mapped-area so the target bounds can be computed.")
         area_df = read_area_curve_table(
             area_curve_path=args.area_curve_table.resolve(),
             threshold_column=args.area_curve_threshold_column,
@@ -1130,6 +1118,37 @@ def main() -> None:
             area_curve_unit=args.area_curve_area_unit,
             mapped_area_unit=args.mapped_area_unit,
         )
+
+    mapped_area_for_bounds = args.mapped_area
+    mapped_area_source = "user-supplied --mapped-area"
+    if mapped_area_for_bounds is None and area_df is not None:
+        mapped_area_for_bounds, snapped_threshold = lookup_mapped_area(
+            area_df,
+            operational_threshold,
+        )
+        mapped_area_source = (
+            f"--area-curve-table at threshold {snapped_threshold:.2f} "
+            f"(requested {operational_threshold:.2f})"
+        )
+
+    if mapped_area_for_bounds is not None:
+        operational_metrics = evaluate_single_threshold(y_true, scores, operational_threshold)
+        bounds_summary = compute_extent_bounds(
+            mapped_area=float(mapped_area_for_bounds),
+            area_unit=args.mapped_area_unit,
+            operational_threshold=operational_threshold,
+            operational_metrics=operational_metrics,
+        )
+        bounds_summary.insert(3, "mapped_area_source", mapped_area_source)
+        bounds_path = output_dir / "extent_bounds_summary.csv"
+        bounds_summary.to_csv(bounds_path, index=False)
+
+    if area_df is not None:
+        if bounds_summary is None:
+            raise ValueError(
+                "--area-curve-table requires a mapped area. Provide --mapped-area "
+                "or ensure the area-curve table can supply one at the operational threshold."
+            )
         matches_df = match_area_bounds_to_thresholds(area_df=area_df, bounds_summary=bounds_summary)
         matches_path = output_dir / "area_bound_threshold_matches.csv"
         matches_df.to_csv(matches_path, index=False)
@@ -1212,6 +1231,7 @@ def main() -> None:
                 "operational_threshold",
                 "mapped_area",
                 "area_unit",
+                "mapped_area_source",
                 "ua_precision",
                 "pa_recall",
                 "commission_error",

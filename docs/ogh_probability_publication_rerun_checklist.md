@@ -53,12 +53,12 @@ Use placeholders consistently:
    - Update `peat_mask_dirs["ogh_unthresholded"]` and, if creating a binary OGH
      tile for roads extent, `peat_mask_dirs["ogh"]` in
      `src/scripts/utilities/constants_and_names.py`.
-   - Update `ORGANIC_PROBABILITY_DATE` in
-     `src/scripts/zonal_statistics/01_build_zarr_caches.py`, or add a CLI date
-     argument before production.
-   - If rerunning the peat union, update `DATASET_DATES` in
-     `src/scripts/preprocessing/peat/peat_mask_union.py` so it points to the
-     refreshed OGH tile date and does not silently use the 20251110 inputs.
+   - Pass explicit date tags with `--date`, `--raw_date`, and
+     `--organic_probability_date` so multi-day reruns do not drift with
+     `today_date`.
+   - If rerunning the peat union, pass `--dataset_date ogh={OGH_BINARY_DATE}`
+     and any other refreshed input dates so it does not silently use the
+     default historical inputs.
    - Check that `peat_masks.py` and `peat_mask_union.py` are not writing an
      unintended nested date prefix. Both combine configured S3 prefixes with a
      runtime date in some paths.
@@ -89,6 +89,8 @@ Command:
 ```bash
 python -m src.scripts.preprocessing.peat.peat_masks \
   --dataset ogh_unthresholded \
+  --date {OGH_PROB_DATE} \
+  --raw_date {OGH_PROB_DATE} \
   --client coiled
 ```
 
@@ -103,6 +105,8 @@ Optional, only if roads/canals need a refreshed broad organic-soil mask:
 ```bash
 python -m src.scripts.preprocessing.peat.peat_masks \
   --dataset ogh \
+  --date {OGH_BINARY_DATE} \
+  --raw_date {OGH_PROB_DATE} \
   --client coiled
 ```
 
@@ -121,6 +125,7 @@ Command:
 ```bash
 python -m src.scripts.zonal_statistics.01_build_zarr_caches \
   --cluster_name zarr_build \
+  --organic_probability_date {OGH_PROB_DATE} \
   --chunk_size 8000
 ```
 
@@ -202,6 +207,10 @@ python -m src.scripts.uncertainty.fscore_threshold_curves_bounds \
   --mapped-area-unit Mha
 ```
 
+When `--area-curve-table` is supplied without `--mapped-area`, the diagnostic
+script infers mapped area from the area curve at the operational/report
+threshold.
+
 Outputs to retain:
 
 - `threshold_metrics.csv`
@@ -245,6 +254,8 @@ If rerunning, use these scripts in order:
 ```bash
 python -m src.scripts.preprocessing.peat.peat_mask_union \
   --dataset_list gfw gpd peatmap peatml ogh \
+  --output_date {PEAT_UNION_DATE} \
+  --dataset_date ogh={OGH_BINARY_DATE} \
   --client coiled
 ```
 

@@ -6,6 +6,8 @@ import os
 import argparse
 import logging
 import tempfile
+import posixpath as pp
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -34,6 +36,7 @@ log = logging.getLogger("peat-tiler")
 BUCKET = cn.s3_bucket_name
 RESOLUTION = cn.resolution
 PEAT_CACHE = Path(tempfile.gettempdir()) / "peatmap_cache"
+DATE_TOKEN_RE = re.compile(r"^\d{8}$")
 
 ################################################################################
 # Helper Functions
@@ -42,16 +45,53 @@ PEAT_CACHE = Path(tempfile.gettempdir()) / "peatmap_cache"
 def bounds_for_tile(tid):
     return uutil.get_10x10_tile_bounds(tid)
 
-def output_paths(ds_key, tid):
+def strip_date_suffix(path):
+    clean = str(path).replace("\\", "/").rstrip("/")
+    if DATE_TOKEN_RE.fullmatch(pp.basename(clean)):
+        return pp.dirname(clean)
+    return clean
+
+
+def dated_raw_path(path, raw_date):
+    if not raw_date:
+        return path
+
+    parts = str(path).replace("\\", "/").rstrip("/").split("/")
+    if not parts:
+        return path
+
+    basename = parts[-1]
+    if "." in basename:
+        if len(parts) >= 2 and DATE_TOKEN_RE.fullmatch(parts[-2]):
+            parts[-2] = raw_date
+        else:
+            parts.insert(-1, raw_date)
+    elif DATE_TOKEN_RE.fullmatch(basename):
+        parts[-1] = raw_date
+    else:
+        parts.append(raw_date)
+    return "/".join(parts)
+
+
+def resolve_raw_path(ds, raw_date=None, raw_path=None):
+    raw = raw_path or ds["s3_raw"]
+    raw = dated_raw_path(raw, raw_date)
+    if not raw.startswith("s3://"):
+        raw = f"s3://{BUCKET}/{raw.lstrip('/')}"
+    return raw
+
+
+def output_paths(ds_key, tid, date_str=None):
     ds = cn.datasets["peat"][ds_key]
-    date_str = cn.today_date
+    date_str = date_str or cn.today_date
     fname = f"{tid}_{ds_key}_mask.tif"
 
-    local_dir = Path(ds["local_processed"]) / date_str
+    local_dir = Path(strip_date_suffix(ds["local_processed"])) / date_str
     local_dir.mkdir(parents=True, exist_ok=True)
     local = local_dir / fname
 
-    s3_key = f"{ds['s3_processed'].rstrip('/')}/{date_str}/{fname}"
+    s3_base = strip_date_suffix(ds["s3_processed"])
+    s3_key = f"{s3_base.rstrip('/')}/{date_str}/{fname}"
     return local, s3_key
 
 def cache_shapefile(prefix, dest_dir):
@@ -69,13 +109,13 @@ def cache_shapefile(prefix, dest_dir):
 ################################################################################
 # Vector Processor (PEATMAP)
 ################################################################################
-def vector_job(tid, mode="default"):
+def vector_job(tid, mode="default", date_str=None):
     """
     Processes the 'peatmap' dataset (vector) for a given tile. Clips to tile
     bounds, then rasterizes at the final resolution (EPSG:4326, 0.00025).
     """
     ds_key = "peatmap"
-    local_out, s3_out = output_paths(ds_key, tid)
+    local_out, s3_out = output_paths(ds_key, tid, date_str=date_str)
 
     if mode != "test" and uutil.s3_file_exists(BUCKET, s3_out):
         log.info(f"[{ds_key}|{tid}] already on S3. Skipping.")
@@ -154,22 +194,26 @@ def vector_job(tid, mode="default"):
 ################################################################################
 # Raster Processor for PeatML / GPD
 ################################################################################
-def mosaic_and_warp_raster(ds_key, tid, mode="default"):
+def mosaic_and_warp_raster(
+    ds_key,
+    tid,
+    mode="default",
+    date_str=None,
+    raw_date=None,
+    raw_path=None,
+):
     """
     If ds['s3_raw'] is a single .tif, skip listing and warp that file directly.
     Otherwise, it's a folder containing multiple .tif => build a VRT if needed.
     """
     ds = cn.datasets["peat"][ds_key]
-    local_out, s3_out = output_paths(ds_key, tid)
+    local_out, s3_out = output_paths(ds_key, tid, date_str=date_str)
 
     if mode != "test" and uutil.s3_file_exists(BUCKET, s3_out):
         log.info(f"[{ds_key}|{tid}] already on S3. Skipping.")
         return
 
-    raw_path = ds['s3_raw']
-    # If it doesn't start with s3://, add s3://bucket/ prefix
-    if not raw_path.startswith("s3://"):
-        raw_path = f"s3://{BUCKET}/{raw_path.lstrip('/')}"
+    raw_path = resolve_raw_path(ds, raw_date=raw_date, raw_path=raw_path)
 
     # Single .tif approach
     if raw_path.lower().endswith('.tif'):
@@ -245,22 +289,40 @@ def mosaic_and_warp_raster(ds_key, tid, mode="default"):
 ################################################################################
 # Build and submit tasks
 ################################################################################
-def build_tasks(tids, ds_keys, mode):
+def build_tasks(tids, ds_keys, mode, date_str=None, raw_date=None, raw_path=None):
     tasks = []
     for tid in tids:
         for k in ds_keys:
             if k == "peatmap":
-                tasks.append(delayed(vector_job)(tid, mode))
+                tasks.append(delayed(vector_job)(tid, mode, date_str))
             else:
-                tasks.append(delayed(mosaic_and_warp_raster)(k, tid, mode))
+                tasks.append(
+                    delayed(mosaic_and_warp_raster)(
+                        k,
+                        tid,
+                        mode,
+                        date_str,
+                        raw_date,
+                        raw_path,
+                    )
+                )
     return tasks
 
 ################################################################################
 # Main orchestrator
 ################################################################################
-def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
+def main(
+    tile_id=None,
+    dataset=None,
+    client="coiled",
+    run_mode="default",
+    date=None,
+    raw_date=None,
+    raw_path=None,
+):
     cluster = None
     client_obj = None
+    date_str = date or cn.today_date
 
     if client == "local":
         cluster = LocalCluster(processes=False, dashboard_address=None)
@@ -281,10 +343,12 @@ def main(tile_id=None, dataset=None, client="coiled", run_mode="default"):
             log.info(f"Running on Coiled: {cluster.name}")
 
     ds_keys = [dataset] if dataset else ["peatml", "gpd", "peatmap", "ogh", "ogh_unthresholded"]
+    if raw_path and len(ds_keys) != 1:
+        raise ValueError("--raw_path requires --dataset so it is applied to exactly one source")
     tids = [tile_id] if tile_id else cn.tile_id_list
 
-    log.info(f"Datasets: {ds_keys}, Tiles: {len(tids)}")
-    tasks = build_tasks(tids, ds_keys, run_mode)
+    log.info(f"Datasets: {ds_keys}, Tiles: {len(tids)}, output_date={date_str}, raw_date={raw_date}")
+    tasks = build_tasks(tids, ds_keys, run_mode, date_str, raw_date, raw_path)
 
     dask.compute(*tasks)
 
@@ -304,5 +368,27 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", choices=["peatml", "gpd", "peatmap", "ogh", "ogh_unthresholded"], help="Dataset (optional)")
     parser.add_argument("--client", default="coiled", choices=["local", "coiled"], help="Run mode (default: coiled)")
     parser.add_argument("--run_mode", default="default", choices=["default", "test"], help="Run mode")
+    parser.add_argument("--date", default=None, help="Output date tag (YYYYMMDD). Defaults to today's UTC date.")
+    parser.add_argument(
+        "--raw_date",
+        default=None,
+        help=(
+            "Date folder for dated raw raster inputs. For OGH single-file inputs, "
+            "this replaces or inserts the YYYYMMDD folder before the GeoTIFF name."
+        ),
+    )
+    parser.add_argument(
+        "--raw_path",
+        default=None,
+        help="Fully specified raw raster path/key for the selected dataset. Requires --dataset.",
+    )
     args = parser.parse_args()
-    main(args.tile_id, args.dataset, args.client, args.run_mode)
+    main(
+        args.tile_id,
+        args.dataset,
+        args.client,
+        args.run_mode,
+        args.date,
+        args.raw_date,
+        args.raw_path,
+    )

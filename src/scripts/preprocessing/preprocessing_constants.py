@@ -230,16 +230,16 @@ datasets = {
         },
         'ogh': {
             'input_type': 'raster',
-            's3_raw': pp.join(raw_dir, 'soils', 'OGH', '20251103', 'organic_soils_extent.tif'),
+            's3_raw': pp.join(raw_dir, 'soils', 'OGH', '20260508', 'organic_soils_extent.tif'),
             's3_processed': pp.join(processed_dir, 'peat_mask', 'OGH', 'tiles') + '/',
             'local_processed': pp.join(local_temp_dir, 'peat', 'ogh', 'tiles') + '/',
             'threshold': 10
         },
         'ogh_unthresholded': {
             'input_type': 'raster',
-            's3_raw': pp.join(raw_dir, 'soils', 'OGH', 'organic_soils_extent.tif'),
+            's3_raw': pp.join(raw_dir, 'soils', 'OGH', '20260508', 'organic_soils_extent.tif'),
             's3_processed': _relative_peat_path(peat_mask_dirs['ogh_unthresholded']),
-            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh_unthresholded', 'tiles', '20251110') + '/'
+            'local_processed': pp.join(local_temp_dir, 'peat', 'ogh_unthresholded', 'tiles', '20260508') + '/'
         },
         'union_mask': {
             '30m': union_30m_prefix,

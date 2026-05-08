@@ -239,7 +239,7 @@ peat_mask_dirs = {
     'ogh_unthresholded': posixpath.join(
         full_bucket_prefix,
         processed_dir,
-        'peat_mask/OGH/tiles_unthresholded/20251110',
+        'peat_mask/OGH/tiles_unthresholded/20260508',
     ),
     'union_mask': posixpath.join(
         full_bucket_prefix,

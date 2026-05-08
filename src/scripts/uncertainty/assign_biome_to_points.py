@@ -19,12 +19,14 @@ python -m src.scripts.uncertainty.assign_biome_to_points \
 from __future__ import annotations
 
 import argparse
+import os
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import rasterio
+from rasterio.windows import Window
 
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities.universal_utilities import xy_to_tile_id
@@ -35,9 +37,46 @@ CLIMATE_DOMAIN_PATTERN = cn.patterns["climate_domain"]
 ECOZONE_CODE_TO_NAME = {v: k for k, v in cn.ecozone_codes.items()}
 
 
+def _table_path(path: str | os.PathLike[str]) -> str:
+    text = os.fspath(path).replace("\\", "/")
+    if text.startswith("s3://"):
+        return text
+    if text.startswith(f"{cn.project_dir}/") or text.startswith("climate/"):
+        return f"s3://{cn.s3_bucket_name}/{text.lstrip('/')}"
+    return str(Path(text).expanduser().resolve())
+
+
+def _is_s3_path(path: str) -> bool:
+    return path.startswith("s3://")
+
+
 def _tile_raster_path(tile_id: str) -> str:
     s3_path = f"{CLIMATE_DOMAIN_DIR}{CLIMATE_DOMAIN_PATTERN.format(tile_id=tile_id)}"
     return s3_path.replace("s3://", "/vsis3/")
+
+
+def _sample_tile_codes(src: rasterio.DatasetReader, coords: list[tuple[float, float]]) -> np.ndarray:
+    """Sample a strip-organized tile with one raster read per touched row."""
+
+    codes = np.zeros(len(coords), dtype=np.int16)
+    row_groups: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for pos, (x, y) in enumerate(coords):
+        row, col = src.index(x, y)
+        if 0 <= row < src.height and 0 <= col < src.width:
+            row_groups[row].append((pos, col))
+
+    for row, entries in row_groups.items():
+        cols = [col for _, col in entries]
+        col_min = max(0, min(cols))
+        col_max = min(src.width - 1, max(cols))
+        data = src.read(
+            1,
+            window=Window(col_min, row, col_max - col_min + 1, 1),
+            boundless=False,
+        )
+        for pos, col in entries:
+            codes[pos] = int(data[0, col - col_min])
+    return codes
 
 
 def assign_biome_column(
@@ -78,19 +117,19 @@ def assign_biome_column(
     for i, (tid, indices) in enumerate(sorted_groups, 1):
         raster_path = _tile_raster_path(tid)
         try:
-            with rasterio.open(raster_path) as src:
-                coords = [
-                    (float(out.iloc[idx][lon_col]), float(out.iloc[idx][lat_col]))
-                    for idx in indices
-                ]
-                for idx, vals in zip(indices, src.sample(coords)):
-                    code = int(vals[0])
-                    biomes[idx] = ECOZONE_CODE_TO_NAME.get(code, "unknown")
+            with rasterio.Env(GDAL_CACHEMAX=512):
+                with rasterio.open(raster_path) as src:
+                    coords = [
+                        (float(out.iloc[idx][lon_col]), float(out.iloc[idx][lat_col]))
+                        for idx in indices
+                    ]
+                    for idx, code in zip(indices, _sample_tile_codes(src, coords)):
+                        biomes[idx] = ECOZONE_CODE_TO_NAME.get(code, "unknown")
         except Exception as exc:
             print(f"  WARNING: could not open tile {tid} ({raster_path}): {exc}")
             for idx in indices:
                 biomes[idx] = "unknown"
-        if i % 25 == 0 or i == n_tiles:
+        if i % 5 == 0 or i == n_tiles:
             print(f"  [{i:3d}/{n_tiles}] tiles sampled", flush=True)
 
     out[biome_col] = biomes
@@ -102,12 +141,12 @@ def parse_args() -> argparse.Namespace:
         description="Assign biome labels to point observations from the climate_domain raster.",
     )
     p.add_argument(
-        "--input", type=Path, required=True,
-        help="Input CSV with latitude/longitude columns.",
+        "--input", required=True,
+        help="Input CSV with latitude/longitude columns. Local path, s3:// URI, or S3 key.",
     )
     p.add_argument(
-        "--output", type=Path, required=True,
-        help="Output CSV path (input + biome column).",
+        "--output", required=True,
+        help="Output CSV path (input + biome column). Local path, s3:// URI, or S3 key.",
     )
     p.add_argument(
         "--lat-column", default="latitude",
@@ -127,8 +166,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    input_path = args.input.resolve()
-    if not input_path.exists():
+    input_path = _table_path(args.input)
+    if not _is_s3_path(input_path) and not Path(input_path).exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     df = pd.read_csv(input_path)
@@ -152,8 +191,9 @@ def main() -> None:
     for name, count in counts.items():
         print(f"  {name}: {count:,}")
 
-    output_path = args.output.resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path = _table_path(args.output)
+    if not _is_s3_path(output_path):
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
     print(f"\nWrote {output_path}")
 
