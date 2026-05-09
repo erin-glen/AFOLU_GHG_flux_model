@@ -191,6 +191,38 @@ def fishnet_with_GADM_iso(shapefile_uri):
 # ----------------------------------------------------------------------
 # Coiled / Dask
 # ----------------------------------------------------------------------
+def upload_repo_source_to_dask(client: Client) -> None:
+    """Upload this repo's ``src`` package so remote workers can import it."""
+
+    import tempfile
+    import zipfile
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]
+    src_dir = repo_root / "src"
+    if not src_dir.exists():
+        print(f"Local source directory not found; skipping Dask source upload: {src_dir}")
+        return
+
+    zip_path = Path(tempfile.gettempdir()) / "afolu_ghg_flux_model_src.zip"
+    newest_source_mtime = max(
+        p.stat().st_mtime
+        for p in src_dir.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
+    )
+    if not zip_path.exists() or zip_path.stat().st_mtime < newest_source_mtime:
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for path in src_dir.rglob("*"):
+                if not path.is_file() or "__pycache__" in path.parts:
+                    continue
+                if path.suffix in {".pyc", ".pyo"}:
+                    continue
+                zf.write(path, path.relative_to(repo_root).as_posix())
+
+    client.upload_file(str(zip_path), load=True)
+    print(f"Uploaded repo source to Dask workers: {zip_path}")
+
+
 # Connects to or creates a Coiled cluster unless running locally
 def connect_to_cluster(
     cluster_name: str = "afolu_cluster",
@@ -223,8 +255,9 @@ def connect_to_cluster(
     for info in all_clusters:
         if info.get("name") == cluster_name and info.get("current_state", {}).get("state") == "ready":
             print(f"Connecting to running cluster '{cluster_name}'.")
-            cluster = coiled.Cluster(name=cluster_name)
+            cluster = coiled.Cluster(name=cluster_name, shutdown_on_close=False)
             client = Client(cluster)
+            upload_repo_source_to_dask(client)
             return cluster, client, run_local
 
     print(f"Cluster named {cluster_name} not found. Running locally.")

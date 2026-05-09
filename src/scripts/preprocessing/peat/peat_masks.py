@@ -13,7 +13,6 @@ from pathlib import Path
 import pandas as pd
 import geopandas as gpd
 import rasterio
-import fiona
 import botocore
 import dask
 from dask import delayed
@@ -114,6 +113,8 @@ def vector_job(tid, mode="default", date_str=None):
     Processes the 'peatmap' dataset (vector) for a given tile. Clips to tile
     bounds, then rasterizes at the final resolution (EPSG:4326, 0.00025).
     """
+    import fiona
+
     ds_key = "peatmap"
     local_out, s3_out = output_paths(ds_key, tid, date_str=date_str)
 
@@ -319,6 +320,9 @@ def main(
     date=None,
     raw_date=None,
     raw_path=None,
+    cluster_name="peat_masks",
+    n_workers=20,
+    worker_memory="32GiB",
 ):
     cluster = None
     client_obj = None
@@ -330,9 +334,10 @@ def main(
         log.info("Running locally.")
     else:
         cluster, client_obj, run_local = uutil.connect_to_cluster(
-            cluster_name="peat_masks",
-            n_workers=20,
+            cluster_name=cluster_name,
+            n_workers=n_workers,
             region="us-east-1",
+            worker_memory=worker_memory,
         )
 
         if run_local:
@@ -347,7 +352,10 @@ def main(
         raise ValueError("--raw_path requires --dataset so it is applied to exactly one source")
     tids = [tile_id] if tile_id else cn.tile_id_list
 
-    log.info(f"Datasets: {ds_keys}, Tiles: {len(tids)}, output_date={date_str}, raw_date={raw_date}")
+    log.info(
+        f"Datasets: {ds_keys}, Tiles: {len(tids)}, output_date={date_str}, "
+        f"raw_date={raw_date}, cluster_name={cluster_name}, n_workers={n_workers}"
+    )
     tasks = build_tasks(tids, ds_keys, run_mode, date_str, raw_date, raw_path)
 
     dask.compute(*tasks)
@@ -368,6 +376,9 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", choices=["peatml", "gpd", "peatmap", "ogh", "ogh_unthresholded"], help="Dataset (optional)")
     parser.add_argument("--client", default="coiled", choices=["local", "coiled"], help="Run mode (default: coiled)")
     parser.add_argument("--run_mode", default="default", choices=["default", "test"], help="Run mode")
+    parser.add_argument("--cluster_name", default="peat_masks", help="Coiled cluster name to attach to.")
+    parser.add_argument("--n_workers", type=int, default=20, help="Expected Coiled worker count for logging/cluster helper.")
+    parser.add_argument("--worker_memory", default="32GiB", help="Expected Coiled worker memory for logging/cluster helper.")
     parser.add_argument("--date", default=None, help="Output date tag (YYYYMMDD). Defaults to today's UTC date.")
     parser.add_argument(
         "--raw_date",
@@ -391,4 +402,7 @@ if __name__ == "__main__":
         args.date,
         args.raw_date,
         args.raw_path,
+        args.cluster_name,
+        args.n_workers,
+        args.worker_memory,
     )
