@@ -146,16 +146,7 @@ Primary scripts:
 - `src/scripts/zonal_statistics/02b_run_probability_class_area_stats.py`
 - `src/scripts/uncertainty/build_probability_area_curve.py`
 
-Run global probability-class area by ADM0:
-
-```bash
-python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
-  --contextual_date 20250925 \
-  --probability_date {OGH_PROB_DATE} \
-  --overwrite_existing
-```
-
-Run the same by ADM0 and biome:
+Run probability-class area by ADM0 and biome:
 
 ```bash
 python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
@@ -165,13 +156,9 @@ python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
   --overwrite_existing
 ```
 
-Build area-vs-threshold curves:
+Build per-biome area-vs-threshold curves:
 
 ```bash
-python -m src.scripts.uncertainty.build_probability_area_curve \
-  --probability-date {OGH_PROB_DATE} \
-  --output {THRESHOLD_DIR}/area_vs_threshold_{OGH_PROB_DATE}.csv
-
 python -m src.scripts.uncertainty.build_probability_area_curve \
   --probability-date {OGH_PROB_DATE} \
   --per-biome \
@@ -201,23 +188,23 @@ python -m src.scripts.uncertainty.fscore_threshold_curves_bounds \
   --output-dir {THRESHOLD_DIR} \
   --biome-column biome \
   --report-thresholds {BASELINE_THRESHOLD_0_TO_1} \
-  --area-curve-table {THRESHOLD_DIR}/area_vs_threshold_{OGH_PROB_DATE}.csv \
   --biome-area-curves {THRESHOLD_DIR}/area_vs_threshold_{OGH_PROB_DATE}_biome.csv \
   --biome-bounds-metric f1 \
   --mapped-area-unit Mha
 ```
 
-When `--area-curve-table` is supplied without `--mapped-area`, the diagnostic
-script infers mapped area from the area curve at the operational/report
-threshold.
+The per-biome curve supplies biome-specific mapped area for threshold matching.
+If a standalone global extent bound is needed as an additional QA product,
+derive a global curve by summing the biome curves or run the non-biome area
+stat path explicitly.
 
 Outputs to retain:
 
 - `threshold_metrics.csv`
 - `selected_thresholds.csv`
 - `extent_bounds_summary.csv`, if mapped area is supplied
-- `area_bound_threshold_matches.csv`
 - `biome_thresholds_summary.csv`
+- per-biome `extent_bounds_summary.csv`
 - per-biome `area_bound_threshold_matches.csv`
 
 Decisions to record:
