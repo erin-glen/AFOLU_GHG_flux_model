@@ -60,6 +60,17 @@ VALID_BURNED_STATE_CODES = np.array(
 # preprocessing threshold previously applied during tiling.
 DEFAULT_OGH_THRESHOLD = 10.0
 DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M = 500.0
+PEAT_THRESHOLD_SCENARIO_ALIASES = {
+    "baseline": "baseline",
+    "base": "baseline",
+    "operational": "baseline",
+    "low": "low_area",
+    "low_area": "low_area",
+    "low-area": "low_area",
+    "high": "high_area",
+    "high_area": "high_area",
+    "high-area": "high_area",
+}
 
 
 def validate_drainage_distance_threshold_m(value: float) -> float:
@@ -1147,26 +1158,30 @@ def parse_biome_thresholds(
     raw: Optional[str],
     fallback: Optional[float] = None,
     fscore_metric: str = "f1",
+    threshold_scenario: str = "baseline",
 ) -> Optional[dict[int, float]]:
     """Parse per-biome thresholds from a JSON string or CSV file path.
 
     Returns a dict mapping ecozone codes (int) to threshold values (float),
     or ``None`` if *raw* is ``None``.
 
-    ``fscore_metric`` selects which threshold column to read from a CSV
-    input (``"f1"`` → ``best_f1_threshold``, ``"f2"`` → ``best_f2_threshold``).
-    Ignored for JSON input, where thresholds are given directly.
+    For CSV input, ``fscore_metric`` selects F1 or F2 threshold columns and
+    ``threshold_scenario`` selects the publication scenario:
+
+    - ``baseline`` reads ``best_f1_threshold``/``best_f2_threshold`` when
+      available, otherwise ``operational_threshold``.
+    - ``low_area``/``low`` reads the higher-threshold, low-area envelope
+      column (``low_area_threshold`` or legacy ``lower_bound_threshold``).
+    - ``high_area``/``high`` reads the lower-threshold, high-area envelope
+      column (``high_area_threshold`` or legacy ``upper_bound_threshold``).
+
+    ``fscore_metric`` and ``threshold_scenario`` are ignored for JSON input,
+    where thresholds are given directly as a biome-to-threshold mapping.
     """
     import json
 
     if raw is None:
         return None
-
-    metric_key = fscore_metric.lower()
-    if metric_key not in {"f1", "f2"}:
-        raise ValueError(
-            f"fscore_metric must be 'f1' or 'f2'; got {fscore_metric!r}"
-        )
 
     raw = raw.strip()
 
@@ -1175,12 +1190,32 @@ def parse_biome_thresholds(
     elif raw.endswith(".csv"):
         import pandas as pd
         df = pd.read_csv(raw)
-        threshold_col = f"best_{metric_key}_threshold"
-        if threshold_col not in df.columns:
-            raise KeyError(
-                f"CSV must contain a '{threshold_col}' column. "
-                f"Found: {df.columns.tolist()}"
+        metric_key = fscore_metric.lower()
+        if metric_key not in {"f1", "f2"}:
+            raise ValueError(
+                f"fscore_metric must be 'f1' or 'f2'; got {fscore_metric!r}"
             )
+        scenario_key = normalize_peat_threshold_scenario(threshold_scenario)
+        if "metric" in df.columns:
+            csv_metrics = sorted(
+                df["metric"].dropna().astype(str).str.lower().unique()
+            )
+            metric_mask = df["metric"].astype(str).str.lower() == metric_key
+            if not metric_mask.any():
+                raise ValueError(
+                    f"CSV metric column does not contain {metric_key!r}; "
+                    f"found: {csv_metrics}"
+                )
+            df = df.loc[metric_mask].copy()
+        if "biome" not in df.columns:
+            raise KeyError(
+                f"CSV must contain a 'biome' column. Found: {df.columns.tolist()}"
+            )
+        threshold_col = select_biome_threshold_column(
+            df.columns,
+            metric_key=metric_key,
+            scenario_key=scenario_key,
+        )
         name_map = dict(zip(df["biome"], df[threshold_col]))
     elif raw.endswith(".json"):
         with open(raw) as fh:
@@ -1210,8 +1245,8 @@ def parse_biome_thresholds(
                     f"{list(cn.ecozone_codes.keys())}"
                 )
 
-    # The fscore script and CLI examples express thresholds on a 0–1 scale,
-    # but the OGH raster stores probabilities as uint8 0–100.  Rescale so
+    # The fscore script and CLI examples express thresholds on a 0-1 scale,
+    # but the OGH raster stores probabilities as uint8 0-100.  Rescale so
     # the comparison `peat_layer > thresh` works on the native raster values.
     if code_map and all(v <= 1.0 for v in code_map.values()):
         code_map = {k: v * 100.0 for k, v in code_map.items()}
@@ -1223,6 +1258,55 @@ def parse_biome_thresholds(
         code_map[unknown_code] = fallback
 
     return code_map
+
+
+def normalize_peat_threshold_scenario(value: str) -> str:
+    """Normalize user-facing threshold-scenario aliases."""
+    key = str(value).strip().lower()
+    try:
+        return PEAT_THRESHOLD_SCENARIO_ALIASES[key]
+    except KeyError as exc:
+        raise ValueError(
+            "--peat_threshold_scenario must be one of: "
+            f"{sorted(PEAT_THRESHOLD_SCENARIO_ALIASES)}; got {value!r}"
+        ) from exc
+
+
+def select_biome_threshold_column(
+    columns,
+    *,
+    metric_key: str,
+    scenario_key: str,
+) -> str:
+    """Return the CSV threshold column for a metric/scenario pair."""
+    if scenario_key == "baseline":
+        candidates = [
+            f"best_{metric_key}_threshold",
+            "operational_threshold",
+            "baseline_threshold",
+        ]
+    elif scenario_key == "low_area":
+        candidates = [
+            "low_area_threshold",
+            "lower_bound_threshold",
+        ]
+    elif scenario_key == "high_area":
+        candidates = [
+            "high_area_threshold",
+            "upper_bound_threshold",
+        ]
+    else:
+        raise ValueError(f"Unexpected threshold scenario: {scenario_key!r}")
+
+    available = set(columns)
+    for candidate in candidates:
+        if candidate in available:
+            return candidate
+    raise KeyError(
+        "CSV does not contain a threshold column for "
+        f"scenario={scenario_key!r}, metric={metric_key!r}. "
+        f"Expected one of {candidates}; found: {list(columns)}"
+    )
 
 
 def run_drainage_model(
@@ -1519,7 +1603,7 @@ def main(argv=None):
 
     # quick test when no CLI args ------------------------------------
     if not argv:
-        print("No CLI args: running 1‑tile local smoke test")
+        print("No CLI args: running 1-tile local smoke test")
         run_drainage_model(
             cluster_name=None,
             bounding_box=[112, -2, 113, -1],  # 1 x 1 degree tile
@@ -1544,7 +1628,7 @@ def main(argv=None):
         return
 
     # normal CLI parsing --------------------------------------------
-    p = argparse.ArgumentParser("Organic‑soils drainage model")
+    p = argparse.ArgumentParser("Organic-soils drainage model")
     p.add_argument("--cluster_name")
     p.add_argument(
         "--bounding_box",
@@ -1605,8 +1689,8 @@ def main(argv=None):
         type=parse_optional_float,
         default=DEFAULT_OGH_THRESHOLD,
         help=(
-            "Threshold applied to OGH peat probabilities; values strictly "
-            "greater than or equal to the threshold are treated as peat. Pass 'none' "
+            "Threshold applied to OGH peat probabilities; values greater than "
+            "or equal to the threshold are treated as peat. Pass 'none' "
             "to disable thresholding. When --peat_threshold_by_biome is "
             "also set, this value is used as the fallback for unknown ecozones."
         ),
@@ -1627,11 +1711,14 @@ def main(argv=None):
         help=(
             "Per-biome peat probability thresholds. Accepts either an inline "
             "JSON string (e.g., '{\"tropical\": 0.15, \"boreal\": 0.30, "
-            "\"temperate\": 0.20}') or a path to a CSV file with 'biome' and "
-            "'best_f1_threshold'/'best_f2_threshold' columns (as produced by "
-            "the fscore script's --biome-column mode). Use --fscore_metric to "
-            "pick which column. When set, --peat_threshold is used as the "
-            "fallback for unknown ecozones."
+            "\"temperate\": 0.20}') or a path to a CSV file with a 'biome' "
+            "column and baseline/scenario threshold columns. Baseline summary "
+            "CSVs can use 'best_f1_threshold'/'best_f2_threshold'; scenario "
+            "CSVs can use 'operational_threshold', 'low_area_threshold', and "
+            "'high_area_threshold'. Use --fscore_metric and "
+            "--peat_threshold_scenario to choose which thresholds to read. "
+            "When set, --peat_threshold is used as the fallback for unknown "
+            "ecozones."
         ),
     )
     p.add_argument(
@@ -1639,9 +1726,24 @@ def main(argv=None):
         choices=["f1", "f2"],
         default="f1",
         help=(
-            "When --peat_threshold_by_biome points to a CSV, read thresholds "
-            "from the 'best_f1_threshold' or 'best_f2_threshold' column. "
-            "Ignored for JSON input. Default: f1."
+            "When --peat_threshold_by_biome points to a CSV, select the F1 "
+            "or F2 threshold set. For biome-threshold summary CSVs this reads "
+            "'best_f1_threshold' or 'best_f2_threshold'. For scenario-bound "
+            "CSVs, use the matching F1 or F2 scenario table. Ignored for JSON "
+            "input. Default: f1."
+        ),
+    )
+    p.add_argument(
+        "--peat_threshold_scenario",
+        choices=sorted(PEAT_THRESHOLD_SCENARIO_ALIASES),
+        default="baseline",
+        help=(
+            "When --peat_threshold_by_biome points to a CSV, choose which "
+            "per-biome threshold scenario to read. 'baseline' reads best-F1/"
+            "best-F2 or operational thresholds; 'low_area'/'low' reads the "
+            "higher-threshold low-area envelope; 'high_area'/'high' reads the "
+            "lower-threshold high-area envelope. Ignored for JSON input. "
+            "Default: baseline."
         ),
     )
     p.add_argument(
@@ -1691,6 +1793,7 @@ def main(argv=None):
         args.peat_threshold_by_biome,
         fallback=args.peat_threshold,
         fscore_metric=args.fscore_metric,
+        threshold_scenario=args.peat_threshold_scenario,
     )
     effective_threshold = biome_thresholds if biome_thresholds is not None else args.peat_threshold
 

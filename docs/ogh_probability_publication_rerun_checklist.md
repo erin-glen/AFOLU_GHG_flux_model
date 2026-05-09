@@ -12,8 +12,9 @@ Use placeholders consistently:
 - `{THRESHOLD_DIR}`: local directory containing threshold diagnostics.
 - `{BASELINE_BIOME_THRESHOLDS}`: CSV from `biome_thresholds_summary.csv` or
   equivalent JSON thresholds for the baseline/max-F1 option.
-- `{LOW_AREA_THRESHOLDS}`: high probability thresholds for the low-area envelope.
-- `{HIGH_AREA_THRESHOLDS}`: low probability thresholds for the high-area envelope.
+- `{SCENARIO_BOUNDS_THRESHOLDS}`: CSV from `scenario_bounds_thresholds_f1.csv`
+  or `scenario_bounds_thresholds_f2.csv`, containing baseline, low-area, and
+  high-area threshold columns.
 
 ## Critical Findings
 
@@ -315,6 +316,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
   --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
   --fscore_metric f1 \
+  --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant default \
   --create_zarr \
@@ -354,6 +356,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
   --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
   --fscore_metric f1 \
+  --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m {LOW_DRAINAGE_THRESHOLD_M} \
   --emission_factor_variant default --create_zarr \
   --run_date {RUN_DATE} --run_name ogh_sensitivity_250m
@@ -365,6 +368,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
   --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
   --fscore_metric f1 \
+  --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m {HIGH_DRAINAGE_THRESHOLD_M} \
   --emission_factor_variant default --create_zarr \
   --run_date {RUN_DATE} --run_name ogh_sensitivity_750m
@@ -381,6 +385,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
   --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
   --fscore_metric f1 \
+  --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant default --create_zarr \
   --run_date {RUN_DATE} --run_name ogh_sensitivity_500m
@@ -394,8 +399,9 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
   --count_burned_years --peat_dataset ogh \
-  --peat_threshold_by_biome {LOW_AREA_THRESHOLDS} \
+  --peat_threshold_by_biome {SCENARIO_BOUNDS_THRESHOLDS} \
   --fscore_metric f1 \
+  --peat_threshold_scenario low_area \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant low --create_zarr \
   --run_date {RUN_DATE} --run_name ogh_sensitivity_low
@@ -405,8 +411,9 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
   --count_burned_years --peat_dataset ogh \
-  --peat_threshold_by_biome {HIGH_AREA_THRESHOLDS} \
+  --peat_threshold_by_biome {SCENARIO_BOUNDS_THRESHOLDS} \
   --fscore_metric f1 \
+  --peat_threshold_scenario high_area \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant high --create_zarr \
   --run_date {RUN_DATE} --run_name ogh_sensitivity_high
