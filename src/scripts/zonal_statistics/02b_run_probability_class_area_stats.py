@@ -336,6 +336,20 @@ def run(args: argparse.Namespace) -> None:
         logger.info("Reduction end: %s", timestr())
 
         df = _df_from_result(res, include_biome=include_biome)
+        row_count = int(len(df))
+        probability_class_count = int(df["probability_class"].nunique()) if row_count else 0
+        if row_count < args.min_output_rows:
+            raise ValueError(
+                "Probability class-area output failed row-count sanity check: "
+                f"{row_count} rows < minimum {args.min_output_rows}. "
+                "Refusing to stage/upload likely incomplete outputs."
+            )
+        if probability_class_count < args.min_probability_classes:
+            raise ValueError(
+                "Probability class-area output failed probability-class sanity check: "
+                f"{probability_class_count} class(es) < minimum {args.min_probability_classes}. "
+                "Refusing to stage/upload likely incomplete outputs."
+            )
 
         out_meta = {
             "contextual_date": args.contextual_date,
@@ -346,7 +360,8 @@ def run(args: argparse.Namespace) -> None:
             "roi_bbox": bbox,
             "tile_ids": tiles,
             "include_biome": include_biome,
-            "row_count": int(len(df)),
+            "row_count": row_count,
+            "probability_class_count": probability_class_count,
         }
         if include_biome:
             out_meta["climate_domain_date"] = args.climate_domain_date
@@ -420,6 +435,25 @@ def main(argv=None):
     parser.add_argument("--no_sparse", action="store_true", default=False)
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49)
     parser.add_argument("--force_align", action="store_true")
+    parser.add_argument(
+        "--min_output_rows",
+        type=int,
+        default=1,
+        help=(
+            "Minimum rows required in the reduced class-area table before "
+            "staging/upload. Raise this for production global runs."
+        ),
+    )
+    parser.add_argument(
+        "--min_probability_classes",
+        type=int,
+        default=1,
+        help=(
+            "Minimum distinct probability classes required in the reduced "
+            "class-area table before staging/upload. Raise this for production "
+            "global runs."
+        ),
+    )
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run_local", action="store_true")

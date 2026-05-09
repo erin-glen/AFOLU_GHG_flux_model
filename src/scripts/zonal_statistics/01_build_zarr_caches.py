@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -35,6 +36,7 @@ import dask.array as da
 import fsspec
 import numpy as np
 import posixpath
+import rasterio
 import s3fs
 import xarray as xr
 import zarr
@@ -168,6 +170,10 @@ ORGANIC_PROBABILITY_GTIF_FOLDER_TEMPLATE = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/"
     "peat_mask/OGH/tiles_unthresholded/{date}/"
 )
+DEFAULT_MIN_ORGANIC_PROBABILITY_CHUNKS = 1000
+DEFAULT_MIN_ORGANIC_PROBABILITY_SIZE_GB = 1.0
+DEFAULT_MIN_ORGANIC_PROBABILITY_SOURCE_TIFS = 100
+DEFAULT_ORGANIC_PROBABILITY_PROBE_TILES = 3
 
 CLIMATE_DOMAIN_DATASET = "climate_domain"
 CLIMATE_DOMAIN_DATE = "20190418"
@@ -280,7 +286,12 @@ def align_like_nearest_tol(arr: xr.DataArray, ref: xr.DataArray, tol_deg: float)
     ref2 = round_xy(ref)
     return arr2.reindex_like(ref2, method="nearest", tolerance=tol_deg)
 
-def make_xarray_chunks_from_tiffs(tiffs: List[str], chunk_size: int) -> xr.DataArray:
+def make_xarray_chunks_from_tiffs(
+    tiffs: List[str],
+    chunk_size: int,
+    *,
+    mask_and_scale: bool = True,
+) -> xr.DataArray:
     if not tiffs:
         raise FileNotFoundError("No GeoTIFFs found for dataset.")
     with dask.annotate(label="open_mfdataset"):
@@ -288,9 +299,18 @@ def make_xarray_chunks_from_tiffs(tiffs: List[str], chunk_size: int) -> xr.DataA
             tiffs,
             parallel=True,
             chunks={"x": chunk_size, "y": chunk_size},
+            mask_and_scale=mask_and_scale,
         ).squeeze()
     da_ = _first_xy_var(ds)
     return da_
+
+def strip_cf_scale_metadata(arr: xr.DataArray) -> xr.DataArray:
+    """Remove decode metadata after intentionally reading native raster values."""
+    out = arr.copy(deep=False)
+    for key in ("_FillValue", "missing_value", "scale_factor", "add_offset"):
+        out.attrs.pop(key, None)
+        out.encoding.pop(key, None)
+    return out
 
 def _dtype_cast(arr: xr.DataArray, dtype_str: str) -> xr.DataArray:
     if dtype_str == "uint32":
@@ -322,6 +342,151 @@ def _s3_object_stats(zarr_path: str) -> Tuple[int, float]:
             pass
     size_gb = size_bytes / (1024 ** 3)
     return nobj, size_gb
+
+def _s3_uri_to_vsis3(uri: str) -> str:
+    return uri.replace("s3://", "/vsis3/", 1)
+
+def _s3_size_gb(uris: List[str]) -> float:
+    fs = s3fs.S3FileSystem(anon=False)
+    size_bytes = 0
+    for uri in uris:
+        key = uri.replace("s3://", "", 1)
+        try:
+            size_bytes += fs.size(key)
+        except Exception:
+            pass
+    return size_bytes / (1024 ** 3)
+
+def _zarr_data_chunk_stats(zarr_path: str, variable_name: str) -> Tuple[int, float]:
+    fs = s3fs.S3FileSystem(anon=False)
+    bucket, key = _split_s3(zarr_path.rstrip("/"))
+    root = f"{bucket}/{key}"
+    objects = fs.find(root)
+    v3_prefix = f"/{variable_name}/c/"
+    v2_prefix = f"/{variable_name}/"
+    chunks = [
+        obj for obj in objects
+        if (
+            v3_prefix in obj
+            or (
+                v2_prefix in obj
+                and not obj.endswith(".zarray")
+                and not obj.endswith(".zattrs")
+                and not obj.endswith("zarr.json")
+            )
+        )
+    ]
+    size_bytes = 0
+    for obj in chunks:
+        try:
+            size_bytes += fs.size(obj)
+        except Exception:
+            pass
+    return len(chunks), size_bytes / (1024 ** 3)
+
+@dataclass
+class RasterProbe:
+    tile_name: str
+    x: float
+    y: float
+    source_value: int
+
+def _find_nonzero_source_probe(tif_uri: str, grid_steps: int = 6, window_size: int = 256) -> RasterProbe | None:
+    """Find one nonzero pixel in a source GeoTIFF without reading the whole tile."""
+    tile_name = posixpath.basename(tif_uri)
+    with rasterio.open(_s3_uri_to_vsis3(tif_uri)) as src:
+        row_starts = np.linspace(0, max(0, src.height - window_size), grid_steps, dtype=int)
+        col_starts = np.linspace(0, max(0, src.width - window_size), grid_steps, dtype=int)
+        for row in row_starts:
+            for col in col_starts:
+                win = rasterio.windows.Window(
+                    int(col),
+                    int(row),
+                    min(window_size, src.width - int(col)),
+                    min(window_size, src.height - int(row)),
+                )
+                data = src.read(1, window=win, masked=True)
+                filled = np.ma.filled(data, 0)
+                nz = np.argwhere(filled > 0)
+                if nz.size == 0:
+                    continue
+                rr, cc = nz[0]
+                value = int(filled[rr, cc])
+                x, y = src.xy(int(row) + int(rr), int(col) + int(cc))
+                return RasterProbe(tile_name=tile_name, x=float(x), y=float(y), source_value=value)
+    return None
+
+def _select_source_probe_tifs(tiffs: List[str], n_tiles: int) -> List[str]:
+    fs = s3fs.S3FileSystem(anon=False)
+    with_sizes = []
+    for uri in tiffs:
+        try:
+            with_sizes.append((fs.size(uri.replace("s3://", "", 1)), uri))
+        except Exception:
+            pass
+    with_sizes.sort(reverse=True)
+    return [uri for _, uri in with_sizes[:max(0, n_tiles)]]
+
+def validate_organic_probability_content(
+    zarr_path: str,
+    *,
+    date: str,
+    logger: logging.Logger,
+    min_data_chunks: int,
+    min_size_gb: float,
+    min_source_tifs: int,
+    probe_tiles: int,
+) -> None:
+    """Fail fast if the OGH probability zarr looks sparse or diverges from source tiles."""
+    source_tifs = list_folder_uris(organic_probability_gtif_folder(date))
+    source_size_gb = _s3_size_gb(source_tifs)
+    data_chunks, chunk_size_gb = _zarr_data_chunk_stats(zarr_path, ORGANIC_PROBABILITY_VAR_NAME)
+    logger.info(
+        "flm: OGH probability content check | source_tifs=%d source_size=%.2f GB "
+        "| zarr_data_chunks=%d zarr_data_size=%.2f GB",
+        len(source_tifs), source_size_gb, data_chunks, chunk_size_gb,
+    )
+
+    failures: List[str] = []
+    if len(source_tifs) < min_source_tifs:
+        failures.append(f"source TIFF count {len(source_tifs)} < minimum {min_source_tifs}")
+    if data_chunks < min_data_chunks:
+        failures.append(f"zarr data chunk count {data_chunks} < minimum {min_data_chunks}")
+    if chunk_size_gb < min_size_gb:
+        failures.append(f"zarr data chunk size {chunk_size_gb:.2f} GB < minimum {min_size_gb:.2f} GB")
+
+    if probe_tiles > 0:
+        probes: List[RasterProbe] = []
+        for tif_uri in _select_source_probe_tifs(source_tifs, probe_tiles * 4):
+            probe = _find_nonzero_source_probe(tif_uri)
+            if probe is not None:
+                probes.append(probe)
+            if len(probes) >= probe_tiles:
+                break
+
+        if len(probes) < probe_tiles:
+            failures.append(f"found only {len(probes)} nonzero source probe tile(s), expected {probe_tiles}")
+        else:
+            arr = _first_xy_var(xr.open_zarr(zarr_path, consolidated=None, storage_options={"anon": False}))
+            tol = pixel_step(arr) * 0.51
+            probe_rows = []
+            for probe in probes:
+                value = arr.sel(x=probe.x, y=probe.y, method="nearest", tolerance=tol)
+                if isinstance(value.data, da.Array):
+                    value = value.compute()
+                zarr_value = int(np.asarray(value).item())
+                probe_rows.append((probe.tile_name, probe.source_value, zarr_value))
+                if zarr_value <= 0:
+                    failures.append(
+                        f"zarr value is zero at source nonzero probe "
+                        f"{probe.tile_name} ({probe.x:.6f}, {probe.y:.6f}); source={probe.source_value}"
+                    )
+            logger.info("flm: OGH probability source/zarr probes: %s", probe_rows)
+
+    if failures:
+        raise ValueError(
+            "OGH probability zarr content validation failed: " + "; ".join(failures)
+        )
 
 def validate_zarr(zarr_path: str, ref: xr.DataArray, *, logger: logging.Logger) -> None:
     arr = _first_xy_var(xr.open_zarr(zarr_path, consolidated=None, storage_options={"anon": False}))
@@ -456,11 +621,33 @@ def ensure_organic_probability_contextual_zarr(
     chunk_size: int,
     logger: logging.Logger,
     date: str = ORGANIC_PROBABILITY_DATE,
+    force_rebuild: bool = False,
+    min_data_chunks: int = DEFAULT_MIN_ORGANIC_PROBABILITY_CHUNKS,
+    min_size_gb: float = DEFAULT_MIN_ORGANIC_PROBABILITY_SIZE_GB,
+    min_source_tifs: int = DEFAULT_MIN_ORGANIC_PROBABILITY_SOURCE_TIFS,
+    probe_tiles: int = DEFAULT_ORGANIC_PROBABILITY_PROBE_TILES,
 ) -> str:
     zarr_path = organic_probability_zarr_path(date)
+    if force_rebuild and zarr_exists(zarr_path):
+        logger.info(
+            "flm: Removing existing ogh_unthresholded_probability Zarr because "
+            "--rebuild_organic_probability was passed: %s",
+            zarr_path,
+        )
+        remove_store_recursively(zarr_path)
+
     if zarr_exists(zarr_path):
         try:
             validate_zarr(zarr_path, ref, logger=logger)
+            validate_organic_probability_content(
+                zarr_path,
+                date=date,
+                logger=logger,
+                min_data_chunks=min_data_chunks,
+                min_size_gb=min_size_gb,
+                min_source_tifs=min_source_tifs,
+                probe_tiles=probe_tiles,
+            )
             logger.info("flm: Using existing ogh_unthresholded_probability contextual Zarr: %s", zarr_path)
             return zarr_path
         except Exception as exc:
@@ -478,9 +665,11 @@ def ensure_organic_probability_contextual_zarr(
             f"No GeoTIFFs found under {source_folder} to build ogh_unthresholded_probability"
         )
 
-    da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
+    da_in = strip_cf_scale_metadata(
+        make_xarray_chunks_from_tiffs(tiffs, chunk_size, mask_and_scale=False)
+    )
     da_aligned = align_like_nearest_tol(da_in, ref, tol)
-    da_uint = da_aligned.fillna(0).astype("uint8").chunk(
+    da_uint = strip_cf_scale_metadata(da_aligned.fillna(0).astype("uint8")).chunk(
         {d: chunk_size for d in ("x", "y") if d in da_aligned.dims}
     )
     ds_out = xr.Dataset({ORGANIC_PROBABILITY_VAR_NAME: da_uint})
@@ -496,6 +685,15 @@ def ensure_organic_probability_contextual_zarr(
         ensure_consolidated_v2(zarr_path)
 
     validate_zarr(zarr_path, ref, logger=logger)
+    validate_organic_probability_content(
+        zarr_path,
+        date=date,
+        logger=logger,
+        min_data_chunks=min_data_chunks,
+        min_size_gb=min_size_gb,
+        min_source_tifs=min_source_tifs,
+        probe_tiles=probe_tiles,
+    )
     logger.info("flm: Built ogh_unthresholded_probability contextual Zarr ✅ %s", zarr_path)
     return zarr_path
 
@@ -597,6 +795,11 @@ def run(args: argparse.Namespace) -> None:
         chunk_size=args.chunk_size,
         logger=logger,
         date=args.organic_probability_date,
+        force_rebuild=args.rebuild_organic_probability,
+        min_data_chunks=args.min_organic_probability_chunks,
+        min_size_gb=args.min_organic_probability_size_gb,
+        min_source_tifs=args.min_organic_probability_source_tifs,
+        probe_tiles=args.organic_probability_probe_tiles,
     )
     ensure_climate_domain_contextual_zarr(ref=pixel_area_full, tol=tol, chunk_size=args.chunk_size, logger=logger)
 
@@ -772,6 +975,52 @@ def main(argv=None):
                         help="'w' overwrite, 'w-' skip if exists (validate only).")
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
                         help="Fraction of one pixel as nearest reindex tolerance (default 0.49).")
+    parser.add_argument(
+        "--rebuild_organic_probability",
+        action="store_true",
+        help=(
+            "Remove and rebuild the OGH probability contextual Zarr even if a "
+            "store already exists. Use this when a previous build may have "
+            "partially written the store."
+        ),
+    )
+    parser.add_argument(
+        "--min_organic_probability_chunks",
+        type=int,
+        default=DEFAULT_MIN_ORGANIC_PROBABILITY_CHUNKS,
+        help=(
+            "Minimum OGH probability data chunks required after build/validation. "
+            "Default: %(default)s"
+        ),
+    )
+    parser.add_argument(
+        "--min_organic_probability_size_gb",
+        type=float,
+        default=DEFAULT_MIN_ORGANIC_PROBABILITY_SIZE_GB,
+        help=(
+            "Minimum OGH probability data-chunk size in GB required after "
+            "build/validation. Default: %(default)s"
+        ),
+    )
+    parser.add_argument(
+        "--min_organic_probability_source_tifs",
+        type=int,
+        default=DEFAULT_MIN_ORGANIC_PROBABILITY_SOURCE_TIFS,
+        help=(
+            "Minimum processed source GeoTIFF count expected for OGH probability. "
+            "Default: %(default)s"
+        ),
+    )
+    parser.add_argument(
+        "--organic_probability_probe_tiles",
+        type=int,
+        default=DEFAULT_ORGANIC_PROBABILITY_PROBE_TILES,
+        help=(
+            "Number of large source GeoTIFFs to probe and compare against the "
+            "built zarr. Set to 0 to disable source/zarr probe comparison. "
+            "Default: %(default)s"
+        ),
+    )
     parser.add_argument(
         "--include_legacy_model_output_caches",
         action="store_true",
