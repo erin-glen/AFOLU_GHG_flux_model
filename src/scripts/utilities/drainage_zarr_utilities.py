@@ -8,6 +8,7 @@ import fsspec
 import numpy as np
 import xarray as xr
 import zarr
+from zarr.storage import FsspecStore
 
 from src.scripts.utilities import constants_and_names as cn
 
@@ -70,6 +71,25 @@ def create_mega_zarr_path(
     return path
 
 
+def make_zarr_store(zarr_path: str, *, read_only: bool = False):
+    """Return a zarr v3-compatible store for local or S3 zarr paths."""
+
+    if zarr_path.startswith("s3://"):
+        fs = fsspec.filesystem("s3", anon=False, asynchronous=True)
+        path = zarr_path.removeprefix("s3://").rstrip("/")
+        return FsspecStore(fs, read_only=read_only, path=path)
+    return zarr_path
+
+
+def open_mega_zarr_dataset(zarr_path: str) -> xr.Dataset:
+    """Open a drainage mega-zarr using the store API expected by zarr v3."""
+
+    return xr.open_zarr(
+        make_zarr_store(zarr_path, read_only=True),
+        consolidated=False,
+    )
+
+
 def initialize_global_mega_zarr(
     zarr_path: str,
     outputs_to_zarr: Iterable[str],
@@ -79,7 +99,7 @@ def initialize_global_mega_zarr(
     logger,
 ) -> None:
     logger.info("Initializing drainage mega-zarr: %s", zarr_path)
-    store = fsspec.get_mapper(zarr_path)
+    store = make_zarr_store(zarr_path)
 
     outputs = list(outputs_to_zarr)
     x, y, _ = global_coords()
@@ -135,7 +155,7 @@ def populate_mega_zarr(
     bounds: Sequence[float],
     year_index: int,
 ) -> None:
-    store = fsspec.get_mapper(zarr_path)
+    store = make_zarr_store(zarr_path)
     group = zarr.open_group(store=store, mode="r+")
     y0, y1, x0, x1 = bounds_to_indices(bounds)
     for name in outputs_to_zarr:
@@ -157,7 +177,7 @@ def open_zarr_window(
     bounds: Sequence[float],
     year_index: int,
 ) -> np.ndarray:
-    store = fsspec.get_mapper(zarr_path)
+    store = make_zarr_store(zarr_path, read_only=True)
     group = zarr.open_group(store=store, mode="r")
     y0, y1, x0, x1 = bounds_to_indices(bounds)
     return group[dataset][year_index, y0:y1, x0:x1]

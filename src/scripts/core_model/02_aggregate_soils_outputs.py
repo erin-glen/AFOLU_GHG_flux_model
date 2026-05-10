@@ -12,7 +12,6 @@ under ``{BASE_URL}/{dataset}/...``.  The canonical packed-state dataset is
 
 import argparse
 import dask
-import fsspec
 import numpy as np
 import zarr
 
@@ -313,8 +312,7 @@ def main(
         output_date,
         logger,
     )
-    fs = fsspec.filesystem("s3", anon=False)
-    zarr.open_group(fs.get_mapper(zarr_path), mode="r")
+    zarr.open_group(dzu.make_zarr_store(zarr_path, read_only=True), mode="r")
 
     if tile_ids:
         unknown_tile_ids = [tile_id for tile_id in tile_ids if tile_id not in cn.tile_id_list]

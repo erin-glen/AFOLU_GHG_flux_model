@@ -8,12 +8,15 @@ presence and distance scripts.
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import posixpath
-from typing import Iterable, List, Tuple
+import time
+from typing import Callable, Iterable, List, Optional, Tuple, TypeVar
 
 import boto3
 import numpy as np
+import rasterio
 import rioxarray as rxr
 from rasterio.warp import transform_bounds
 
@@ -22,6 +25,66 @@ import src.scripts.preprocessing.preprocessing_constants as cn
 
 
 PEAT_30M_PATTERN = "_union_mask.tif"
+LOG = logging.getLogger(__name__)
+T = TypeVar("T")
+
+
+def _raster_open_retry_config() -> Tuple[int, float]:
+    """Return retry count and base delay for transient GDAL/S3 opens."""
+
+    attempts = int(os.environ.get("AFOLU_RASTER_OPEN_RETRIES", "4"))
+    delay_seconds = float(os.environ.get("AFOLU_RASTER_OPEN_RETRY_SECONDS", "5"))
+    return max(attempts, 1), max(delay_seconds, 0.0)
+
+
+def _open_with_retries(
+    opener: Callable[..., T],
+    path: str,
+    *,
+    attempts: Optional[int] = None,
+    delay_seconds: Optional[float] = None,
+    **kwargs,
+) -> T:
+    """Open a raster path, retrying transient GDAL/S3 read failures."""
+
+    default_attempts, default_delay = _raster_open_retry_config()
+    attempts = default_attempts if attempts is None else max(int(attempts), 1)
+    delay_seconds = default_delay if delay_seconds is None else max(float(delay_seconds), 0.0)
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return opener(path, **kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                break
+
+            sleep_seconds = delay_seconds * attempt
+            LOG.warning(
+                "Raster open failed for %s on attempt %s/%s: %s; retrying in %.1fs",
+                path,
+                attempt,
+                attempts,
+                exc,
+                sleep_seconds,
+            )
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+
+    raise RuntimeError(f"Failed to open raster after {attempts} attempt(s): {path}") from last_exc
+
+
+def open_raster_with_retries(path: str, **kwargs):
+    """Open a rasterio dataset with retry/backoff for transient /vsis3 errors."""
+
+    return _open_with_retries(rasterio.open, path, **kwargs)
+
+
+def open_rioxarray_with_retries(path: str, **kwargs):
+    """Open a rioxarray raster with retry/backoff for transient /vsis3 errors."""
+
+    return _open_with_retries(rxr.open_rasterio, path, **kwargs)
 
 
 def _split_feature_type(feature_type: str) -> Tuple[str, str]:
@@ -150,7 +213,7 @@ def peat_mask_path(tile_id: str) -> str:
 def load_mask_tile(tile_id: str):
     """Open an entire 10x10 union mask tile as an xarray.DataArray."""
 
-    return rxr.open_rasterio(peat_mask_path(tile_id), masked=True)
+    return open_rioxarray_with_retries(peat_mask_path(tile_id), masked=True)
 
 
 def load_mask_chunk(tile_id: str, bounds_wgs84: List[float]):

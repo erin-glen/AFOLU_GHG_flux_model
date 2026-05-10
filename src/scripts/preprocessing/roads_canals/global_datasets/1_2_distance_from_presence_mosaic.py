@@ -219,7 +219,7 @@ def _mosaic_presence(bounds_wgs84: List[float],
     #    Presence is 0/1; use method='max' to combine.
     #    Beware of band axis: merge returns (count, H, W).
     with rasterio.Env():
-        datasets = [rasterio.open(p) for p in srcs]
+        datasets = [roads_io.open_raster_with_retries(p) for p in srcs]
         try:
             mosaic, out_transform = rio_merge(
                 datasets, bounds=expanded_bounds, nodata=0, method="max"
@@ -242,6 +242,7 @@ def _process_chunk_distance(
     date_str: str,
     halo_m: float,
     maxdist_m: Optional[float] = None,
+    overwrite_existing: bool = False,
 ) -> dict:
     """
     Build presence mosaic with halo, compute distance in meters, crop to interior,
@@ -257,16 +258,36 @@ def _process_chunk_distance(
 
     # 0) Where to write
     chunk_px = uutil.calc_chunk_length_pixels(chunk_bounds)
+    out_name = roads_io.distance_raster_name(
+        tile_id=tile_id,
+        bounds=chunk_bounds,
+        feature_type=feature_type,
+    )
+    s3_uri, s3_key = roads_io.build_s3_uri(
+        feature_type, "distance", chunk_px, date_str, out_name
+    )
+    s3_client = roads_io.ensure_s3_client()
+    if not overwrite_existing and _s3_exists(s3_client, cn.s3_bucket_name, s3_key):
+        msg = "distance output already exists"
+        LOG.info("[tile %s | %s] %s: %s", tile_id, chunk_str, msg, s3_uri)
+        return dict(tile=tile_id, bounds=chunk_bounds, status="skip_existing", s3=[s3_uri], msgs=msg)
+
     local_dir = roads_io.local_product_dir(feature_type, "distance")
 
     # 1) Presence mosaic with halo
-    presence, mosaic_transform = _mosaic_presence(
-        bounds_wgs84=chunk_bounds,
-        feature_type=feature_type,
-        chunk_px=chunk_px,
-        date_str=date_str,
-        halo_m=halo_m,
-    )
+    try:
+        presence, mosaic_transform = _mosaic_presence(
+            bounds_wgs84=chunk_bounds,
+            feature_type=feature_type,
+            chunk_px=chunk_px,
+            date_str=date_str,
+            halo_m=halo_m,
+        )
+    except Exception as exc:
+        msg = f"presence_mosaic_failed:{exc}"
+        LOG.error("[tile %s | %s] %s", tile_id, chunk_str, msg, exc_info=True)
+        return dict(tile=tile_id, bounds=chunk_bounds, status="error", s3=[], msgs=msg)
+
     if presence is None:
         msg = "presence mosaic empty (no presence rasters found in ROI+halo)"
         LOG.info("[tile %s | %s] %s", tile_id, chunk_str, msg)
@@ -303,10 +324,18 @@ def _process_chunk_distance(
     # 4) Mask to peat (union 30 m) for *this tile's* interior chunk
     #    We only need the interior chunk mask; no need to mosaic masks since
     #    output is a single 1° cell for this tile.
-    da_mask_interior, peat_bool = roads_io.load_mask_chunk(tile_id, chunk_bounds)
+    try:
+        da_mask_interior, peat_bool = roads_io.load_mask_chunk(tile_id, chunk_bounds)
+    except Exception as exc:
+        msg = f"mask_open_failed:{exc}"
+        LOG.error("[tile %s | %s] %s", tile_id, chunk_str, msg, exc_info=True)
+        return dict(tile=tile_id, bounds=chunk_bounds, status="error", s3=[], msgs=msg)
+
     if peat_bool is None:
         msg = "peat mask empty for chunk"
         LOG.info("[tile %s | %s] %s", tile_id, chunk_str, msg)
+        if hasattr(da_mask_interior, "close"):
+            da_mask_interior.close()
         return dict(tile=tile_id, bounds=chunk_bounds, status="skip", s3=[], msgs=msg)
 
     # Align dimensions just in case (should already match)
@@ -329,11 +358,6 @@ def _process_chunk_distance(
     dist_crop_masked = np.where(peat_bool, dist_crop, 0.0).astype(np.float32)
 
     # 5) Save, hansenize, upload
-    out_name = roads_io.distance_raster_name(
-        tile_id=tile_id,
-        bounds=chunk_bounds,
-        feature_type=feature_type,
-    )
     local_out = os.path.join(local_dir, out_name)
 
     # Use rasterio to avoid dimension mismatches from inherited coordinates.
@@ -356,9 +380,6 @@ def _process_chunk_distance(
         da_mask_interior.close()
 
     # Hansenize/retile and upload (keep same pattern as your stage-1 script)
-    s3_uri, s3_key = roads_io.build_s3_uri(
-        feature_type, "distance", chunk_px, date_str, out_name
-    )
     hansen_local = os.path.join(tempfile.gettempdir(), out_name)
     try:
         warp_to_hansen_coiled(
@@ -412,6 +433,7 @@ def _process_tile(
     chunk_bounds: Optional[List[float]] = None,
     halo_m: float = 1000.0,
     maxdist_m: Optional[float] = 1000.0,
+    overwrite_existing: bool = False,
 ) -> List[delayed]:
     """
     Build delayed tasks per 1° chunk within a 10x10 tile (or a single chunk if provided).
@@ -431,6 +453,7 @@ def _process_tile(
             date_str=date_str,
             halo_m=float(halo_m),
             maxdist_m=float(maxdist_m) if maxdist_m is not None else None,
+            overwrite_existing=overwrite_existing,
         ))
     return tasks
 
@@ -441,6 +464,7 @@ def _process_all_tiles(
     chunk_size: float = 1.0,
     halo_m: float = 1000.0,
     maxdist_m: Optional[float] = 1000.0,
+    overwrite_existing: bool = False,
 ) -> List[delayed]:
     s3 = roads_io.ensure_s3_client()
     prefix = cn.datasets["peat"]["union_mask"]["30m"]
@@ -463,6 +487,7 @@ def _process_all_tiles(
                     chunk_bounds=None,
                     halo_m=halo_m,
                     maxdist_m=maxdist_m,
+                    overwrite_existing=overwrite_existing,
                 )
             )
 
@@ -475,6 +500,7 @@ def _process_manifest_chunks(
     date_str: str,
     halo_m: float = 1000.0,
     maxdist_m: Optional[float] = 1000.0,
+    overwrite_existing: bool = False,
 ) -> List[delayed]:
     tasks: List[delayed] = []
     for tile_id, bounds in roads_io.read_chunk_manifest(manifest_path):
@@ -486,9 +512,35 @@ def _process_manifest_chunks(
                 chunk_bounds=bounds,
                 halo_m=halo_m,
                 maxdist_m=maxdist_m,
+                overwrite_existing=overwrite_existing,
             )
         )
     return tasks
+
+
+def _log_batch_results(results: Tuple[dict, ...]) -> None:
+    """Log per-chunk outcomes and fail the stage if any chunk reported an error."""
+
+    error_results = []
+    for result in results:
+        LOG.info(
+            "[result] tile=%s bounds=%s status=%s s3=%s msgs=%s",
+            result.get("tile"),
+            result.get("bounds"),
+            result.get("status"),
+            result.get("s3"),
+            result.get("msgs"),
+        )
+        if result.get("status") == "error":
+            error_results.append(result)
+
+    if error_results:
+        first = error_results[0]
+        raise RuntimeError(
+            f"{len(error_results)} distance chunk task(s) failed in this batch; "
+            f"first failure tile={first.get('tile')} bounds={first.get('bounds')} "
+            f"msg={first.get('msgs')}"
+        )
 
 
 def main(
@@ -503,6 +555,7 @@ def main(
     client: str = "local",
     batch_size: int = 20,
     loglevel: str = "INFO",
+    overwrite_existing: bool = False,
 ):
     logging.basicConfig(
         level=getattr(logging, str(loglevel).upper(), logging.INFO),
@@ -539,6 +592,7 @@ def main(
                 date_str=date_str,
                 halo_m=halo_m,
                 maxdist_m=maxdist,
+                overwrite_existing=overwrite_existing,
             )
         elif tile_id:
             cb = None
@@ -553,6 +607,7 @@ def main(
                 chunk_bounds=cb,
                 halo_m=halo_m,
                 maxdist_m=maxdist,
+                overwrite_existing=overwrite_existing,
             )
         else:
             if chunk_bounds:
@@ -564,6 +619,7 @@ def main(
                 chunk_size=chunk_size,
                 halo_m=halo_m,
                 maxdist_m=maxdist,
+                overwrite_existing=overwrite_existing,
             )
 
         if not tasks:
@@ -575,7 +631,8 @@ def main(
         for i in range(0, len(tasks), int(batch_size)):
             batch = tasks[i:i+int(batch_size)]
             LOG.info("Submitting batch of %d tasks (completed=%d)", len(batch), completed)
-            _ = dask.compute(*batch)
+            results = dask.compute(*batch)
+            _log_batch_results(results)
             completed += len(batch)
 
         LOG.info("Completed processing")
@@ -600,6 +657,11 @@ if __name__ == "__main__":
     p.add_argument("--client", default="local", choices=["local", "coiled"])
     p.add_argument("--batch_size", type=int, default=20)
     p.add_argument("--loglevel", default="INFO")
+    p.add_argument(
+        "--overwrite_existing",
+        action="store_true",
+        help="Recompute chunks even when the expected distance output already exists on S3.",
+    )
     args = p.parse_args()
 
     main(
@@ -614,4 +676,5 @@ if __name__ == "__main__":
         client=args.client,
         batch_size=args.batch_size,
         loglevel=args.loglevel,
+        overwrite_existing=args.overwrite_existing,
     )

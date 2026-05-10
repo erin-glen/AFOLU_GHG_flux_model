@@ -16,6 +16,22 @@ Use placeholders consistently:
   or `scenario_bounds_thresholds_f2.csv`, containing baseline, low-area, and
   high-area threshold columns.
 
+## Current 2026-05 Rerun Status
+
+- OGH unthresholded probability tiles are using date tag `20260508`.
+- The broad binary OGH mask used for the refreshed union was built with
+  threshold `9` for roads/canals coverage.
+- The refreshed 30 m peat union mask is using date tag `20260508`.
+- Roads/canals were fully rerun from the refreshed peat union mask, without
+  reprojecting source road/canal vectors, and the aggregated distance products
+  are using date tag `20260509`.
+- `dirs["osm_roads"]`, `dirs["osm_canals"]`, and `dirs["grip"]` now point to
+  the `distance/40000_pixels/20260509` folders.
+- Before launching the full all-period production run and sensitivity matrix,
+  run one global OGH baseline gate for `2021_2024` and carry that single run
+  through aggregation, zonal statistics, publication QA/comparison scripts, and
+  global map aggregation.
+
 ## Critical Findings
 
 1. OGH thresholding is now applied in the core model, not only during tiling.
@@ -390,6 +406,35 @@ Aggregate `presence` too if QA maps or counts need the 10x10 presence rasters.
 Primary script:
 
 - `src/scripts/core_model/0_drainage_emissions_model.py`
+
+Single-period global gate before the full matrix:
+
+```bash
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2021 \
+  --end_year 2024 \
+  --interval_type five_year \
+  --count_burned_years \
+  --peat_dataset ogh \
+  --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
+  --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
+  --fscore_metric f1 \
+  --peat_threshold_scenario baseline \
+  --drainage_distance_threshold_m 500 \
+  --emission_factor_variant default \
+  --create_zarr \
+  --run_date {RUN_DATE} \
+  --run_name ogh_biome_thresholds
+```
+
+For the 20260510 test gate, use `--peat_threshold 10`,
+`{BASELINE_BIOME_THRESHOLDS}` =
+`/mnt/c/tmp/afolu/uncertainty/ogh_probability/20260508/threshold_curves_biome_f1/biome_thresholds_summary.csv`,
+`{RUN_DATE}=20260510`, and run only `2024` through Stages 7-10 before
+starting the full matrix.
 
 Baseline, all inventory periods:
 
