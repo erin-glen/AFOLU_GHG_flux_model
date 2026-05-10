@@ -469,11 +469,34 @@ def _process_all_tiles(
     return tasks
 
 
+def _process_manifest_chunks(
+    manifest_path: str,
+    feature_type: str,
+    date_str: str,
+    halo_m: float = 1000.0,
+    maxdist_m: Optional[float] = 1000.0,
+) -> List[delayed]:
+    tasks: List[delayed] = []
+    for tile_id, bounds in roads_io.read_chunk_manifest(manifest_path):
+        tasks.extend(
+            _process_tile(
+                tile_id=tile_id,
+                feature_type=feature_type,
+                date_str=date_str,
+                chunk_bounds=bounds,
+                halo_m=halo_m,
+                maxdist_m=maxdist_m,
+            )
+        )
+    return tasks
+
+
 def main(
     tile_id: Optional[str] = None,
     feature_type: str = "osm_roads",
     date: Optional[str] = None,
     chunk_bounds: Optional[str] = None,
+    chunk_manifest: Optional[str] = None,
     chunk_size: float = 1.0,
     halo_m: float = 1000.0,
     maxdist: Optional[float] = 1000.0,
@@ -507,7 +530,17 @@ def main(
         LOG.info("Using coiled cluster: %s", cluster.name)
 
     try:
-        if tile_id:
+        if chunk_manifest:
+            if tile_id or chunk_bounds:
+                LOG.warning("Ignoring --tile_id/--chunk_bounds because --chunk_manifest was provided.")
+            tasks = _process_manifest_chunks(
+                manifest_path=chunk_manifest,
+                feature_type=feature_type,
+                date_str=date_str,
+                halo_m=halo_m,
+                maxdist_m=maxdist,
+            )
+        elif tile_id:
             cb = None
             if chunk_bounds:
                 cb = [float(x) for x in str(chunk_bounds).split(",")]
@@ -560,6 +593,7 @@ if __name__ == "__main__":
                    choices=["osm_roads", "osm_canals", "grip_roads"])
     p.add_argument("--date", default=None, help="Date folder of presence products (e.g., 20251113). Default: cn.today_date")
     p.add_argument("--chunk_bounds", default=None, help="Optional single chunk 'minx,miny,maxx,maxy' (WGS84)")
+    p.add_argument("--chunk_manifest", default=None, help="CSV of chunks to process; expects tile_id,minx,miny,maxx,maxy")
     p.add_argument("--chunk_size", type=float, default=1.0, help="Chunk size in degrees (defaults to 1.0 for 1° cells)")
     p.add_argument("--halo_m", type=float, default=1000.0, help="Halo radius in meters to include presence across edges")
     p.add_argument("--maxdist", type=float, default=1000.0, help="Cap distances at this value in meters (set <=0 to disable)")
@@ -573,6 +607,7 @@ if __name__ == "__main__":
         feature_type=args.feature_type,
         date=args.date,
         chunk_bounds=args.chunk_bounds,
+        chunk_manifest=args.chunk_manifest,
         chunk_size=args.chunk_size,
         halo_m=args.halo_m,
         maxdist=args.maxdist,

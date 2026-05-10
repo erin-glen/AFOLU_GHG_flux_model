@@ -7,6 +7,7 @@ presence and distance scripts.
 
 from __future__ import annotations
 
+import csv
 import os
 import posixpath
 from typing import Iterable, List, Tuple
@@ -92,6 +93,52 @@ def legacy_presence_raster_name(tile_id: str, bounds: Iterable[float], feature_t
 def distance_raster_name(tile_id: str, bounds: Iterable[float], feature_type: str) -> str:
     chunk_str = chunk_bounds_to_str(bounds)
     return f"{tile_id}__{chunk_str}__{feature_type}_distance.tif"
+
+
+def chunk_manifest_key(tile_id: str, bounds: Iterable[float]) -> str:
+    """Return the canonical key used to identify one 1 degree processing cell."""
+
+    return f"{tile_id}__{chunk_bounds_to_str(bounds)}"
+
+
+def read_chunk_manifest(manifest_path: str) -> List[Tuple[str, List[float]]]:
+    """Read a changed-chunk CSV manifest.
+
+    Supported schemas:
+    - ``tile_id,minx,miny,maxx,maxy``
+    - ``tile_id,chunk_bounds`` where ``chunk_bounds`` is ``minx,miny,maxx,maxy``
+
+    Returns
+    -------
+    list
+        ``[(tile_id, [minx, miny, maxx, maxy]), ...]``
+    """
+
+    chunks: List[Tuple[str, List[float]]] = []
+    with open(manifest_path, newline="") as src:
+        reader = csv.DictReader(src)
+        for row_num, row in enumerate(reader, start=2):
+            tile_id = (row.get("tile_id") or "").strip()
+            if not tile_id:
+                raise ValueError(f"Missing tile_id in {manifest_path}:{row_num}")
+
+            if all(k in row and row[k] not in (None, "") for k in ("minx", "miny", "maxx", "maxy")):
+                bounds = [float(row[k]) for k in ("minx", "miny", "maxx", "maxy")]
+            elif row.get("chunk_bounds"):
+                bounds = [float(v.strip()) for v in row["chunk_bounds"].split(",")]
+                if len(bounds) != 4:
+                    raise ValueError(
+                        f"Expected four comma-separated values in chunk_bounds at "
+                        f"{manifest_path}:{row_num}"
+                    )
+            else:
+                raise ValueError(
+                    f"Manifest must contain minx/miny/maxx/maxy or chunk_bounds "
+                    f"columns; failed at {manifest_path}:{row_num}"
+                )
+
+            chunks.append((tile_id, bounds))
+    return chunks
 
 
 def peat_mask_path(tile_id: str) -> str:

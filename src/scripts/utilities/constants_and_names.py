@@ -254,7 +254,7 @@ peat_mask_dirs = {
     'union_mask': posixpath.join(
         full_bucket_prefix,
         processed_dir,
-        'peat_mask/union/30m/tiles/20251110',
+        'peat_mask/union/30m/tiles/20260508',
     ),
 }
 

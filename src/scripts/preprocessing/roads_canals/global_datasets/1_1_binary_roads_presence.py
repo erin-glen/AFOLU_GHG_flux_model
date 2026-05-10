@@ -31,9 +31,21 @@ import gc
 import tempfile
 import numpy as np
 import dask
-import dask_geopandas as dgpd
 import geopandas as gpd
 import xarray as xr
+
+_USE_DASK_GEOPANDAS = os.environ.get("AFOLU_USE_DASK_GEOPANDAS", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+if _USE_DASK_GEOPANDAS:
+    try:
+        import dask_geopandas as dgpd
+    except ImportError:
+        dgpd = None
+else:
+    dgpd = None
 
 from shapely.geometry import box
 from rasterio.features import rasterize
@@ -76,6 +88,9 @@ def _build_chunk_bounds(tile_bounds, chunk_size=2.0):
 
 
 def _dask_gdf_is_empty(dgdf, data_path=None):
+    if not hasattr(dgdf, "map_partitions"):
+        return len(dgdf) == 0
+
     try:
         lengths = dgdf.map_partitions(len).compute()
         total = int(sum(lengths))
@@ -105,21 +120,24 @@ def _read_lines_3395_to_mask_crs(tile_id, feature_type, dst_crs):
     vsis3_path = _vector_path_for_tile(tile_id, feature_type)
     LOG.info("[vec] reading shapefile (EPSG:3395): %s", vsis3_path)
     try:
-        dgdf = dgpd.read_file(vsis3_path, npartitions=8)
+        if dgpd is not None:
+            lines = dgpd.read_file(vsis3_path, npartitions=8)
+        else:
+            LOG.info("[vec] dask_geopandas unavailable; reading with geopandas")
+            lines = gpd.read_file(vsis3_path)
     except Exception as e:
         LOG.error("Failed to read vectors: %s", e)
         # empty in dst_crs to keep pipeline predictable
-        empty = gpd.GeoDataFrame({"geometry": []}, crs=dst_crs)
-        return dgpd.from_geopandas(empty, npartitions=1), vsis3_path
+        return gpd.GeoDataFrame({"geometry": []}, crs=dst_crs), vsis3_path
 
     # Ensure CRS is set to EPSG:3395 (override only if missing)
-    if dgdf.crs is None:
+    if lines.crs is None:
         LOG.warning("[vec] dataset has no CRS; setting to %s for %s", VECTORS_EPSG, vsis3_path)
-        dgdf = dgdf.set_crs(VECTORS_EPSG)
+        lines = lines.set_crs(VECTORS_EPSG)
     # Reproject to mask CRS as needed
-    if str(dgdf.crs) != str(dst_crs):
-        dgdf = dgdf.to_crs(dst_crs)
-    return dgdf, vsis3_path
+    if str(lines.crs) != str(dst_crs):
+        lines = lines.to_crs(dst_crs)
+    return lines, vsis3_path
 
 
 def _open_clip_mask(tile_id, bounds_wgs84):
@@ -156,7 +174,7 @@ def _rasterize_distance(da_chunk, mask_bool, lines_gdf, maxdist=None):
 # ---------------------------------------------------------------------
 
 @dask.delayed
-def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
+def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist, date_str):
     """
     For one sub-bounds:
     - open/clip mask
@@ -183,12 +201,19 @@ def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
     # Clip lines to chunk in dst_crs
     minx, miny, maxx, maxy = transform_bounds("EPSG:4326", dst_crs, *bounds_wgs84, densify_pts=21)
     chunk_poly = box(minx, miny, maxx, maxy)
-    lines_clip = dgpd.clip(lines_dgdf, chunk_poly)
+    if dgpd is not None and hasattr(lines_dgdf, "map_partitions"):
+        lines_clip = dgpd.clip(lines_dgdf, chunk_poly)
+    else:
+        lines_clip = gpd.clip(lines_dgdf, chunk_poly)
     if _dask_gdf_is_empty(lines_clip, data_path=used_path):
         return dict(tile=tile_id, bounds=bounds_wgs84, status="skip", s3=[], msgs="lines_do_not_intersect_chunk")
 
     try:
-        lines_gdf = lines_clip.compute()
+        lines_gdf = (
+            lines_clip.compute()
+            if hasattr(lines_clip, "compute")
+            else lines_clip
+        )
     except FeatureError as exc:
         return dict(tile=tile_id, bounds=bounds_wgs84, status="skip", s3=[], msgs=f"FeatureError: {exc}")
 
@@ -212,7 +237,7 @@ def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
               .rio.to_raster(local_out, compress="lzw")
 
             s3_uri, s3_key = roads_io.build_s3_uri(
-                feature_type, "presence", chunk_px, cn.today_date, fn
+                feature_type, "presence", chunk_px, date_str, fn
             )
             hansen_local = os.path.join(tempfile.gettempdir(), fn)
             try:
@@ -255,7 +280,7 @@ def _process_chunk(bounds_wgs84, tile_id, feature_type, products, maxdist):
               .rio.to_raster(local_out, compress="lzw")
 
             s3_uri, s3_key = roads_io.build_s3_uri(
-                feature_type, DISTANCE_PRODUCT, chunk_px, cn.today_date, fn
+                feature_type, DISTANCE_PRODUCT, chunk_px, date_str, fn
             )
             hansen_local = os.path.join(tempfile.gettempdir(), fn)
             try:
@@ -314,17 +339,17 @@ def _submit_in_batches(tasks, batch_size):
 # ---------------------------------------------------------------------
 
 def _process_tile(tile_id, feature_type, chunk_size=2.0, chunk_bounds=None,
-                  products=("presence",), maxdist=1000):
+                  products=("presence",), maxdist=1000, date_str=None):
     # tile bounds from the encoded tile_id (no flips)
     tile_bb = uutil.get_10x10_tile_bounds(tile_id)
     chunks = [chunk_bounds] if chunk_bounds else _build_chunk_bounds(tile_bb, chunk_size=float(chunk_size))
     tasks = []
     for b in chunks:
-        tasks.append(_process_chunk(b, tile_id, feature_type, products, maxdist))
+        tasks.append(_process_chunk(b, tile_id, feature_type, products, maxdist, date_str or cn.today_date))
     return tasks
 
 
-def _process_all_tiles(feature_type, chunk_size=2.0, products=("presence",), maxdist=1000):
+def _process_all_tiles(feature_type, chunk_size=2.0, products=("presence",), maxdist=1000, date_str=None):
     prefix = cn.datasets["peat"]["union_mask"]["30m"]
     s3 = uutil.get_s3_client() if hasattr(uutil, "get_s3_client") else None
     if s3 is None:
@@ -339,7 +364,24 @@ def _process_all_tiles(feature_type, chunk_size=2.0, products=("presence",), max
             if key.endswith(roads_io.PEAT_30M_PATTERN):
                 tile_id = os.path.basename(key).replace(roads_io.PEAT_30M_PATTERN, "")
                 tasks.extend(_process_tile(tile_id, feature_type, chunk_size=chunk_size,
-                                           products=products, maxdist=maxdist))
+                                           products=products, maxdist=maxdist,
+                                           date_str=date_str))
+    return tasks
+
+
+def _process_manifest_chunks(manifest_path, feature_type, products=("presence",), maxdist=1000, date_str=None):
+    tasks = []
+    for tile_id, bounds in roads_io.read_chunk_manifest(manifest_path):
+        tasks.extend(
+            _process_tile(
+                tile_id,
+                feature_type,
+                chunk_bounds=bounds,
+                products=products,
+                maxdist=maxdist,
+                date_str=date_str,
+            )
+        )
     return tasks
 
 # ---------------------------------------------------------------------
@@ -356,6 +398,8 @@ def main(
     product="presence",
     maxdist=1000,
     batch_size=20,
+    date=None,
+    chunk_manifest=None,
     loglevel="INFO",
 ):
     logging.basicConfig(
@@ -365,6 +409,8 @@ def main(
     LOG.info("Log level set to %s", str(loglevel).upper())
 
     products = tuple([p.strip().lower() for p in str(product).split(",") if p.strip()])
+    date_str = cn.today_date if date is None else str(date)
+    LOG.info("Output date folder set to %s", date_str)
 
     # Connect Dask/Coiled (or run local)
     run_local = (client == "local")
@@ -380,13 +426,23 @@ def main(
         if str(resolution).lower() != "30m":
             LOG.warning("This script is the 30m workflow. Use the 1km pipeline for density.")
 
-        if tile_id:
+        if chunk_manifest:
+            tasks = _process_manifest_chunks(
+                chunk_manifest,
+                feature_type,
+                products=products,
+                maxdist=int(maxdist),
+                date_str=date_str,
+            )
+        elif tile_id:
             cb = [float(x) for x in chunk_bounds.split(",")] if chunk_bounds else None
             tasks = _process_tile(tile_id, feature_type, chunk_size=chunk_size,
-                                  chunk_bounds=cb, products=products, maxdist=int(maxdist))
+                                  chunk_bounds=cb, products=products, maxdist=int(maxdist),
+                                  date_str=date_str)
         else:
             tasks = _process_all_tiles(feature_type, chunk_size=chunk_size,
-                                       products=products, maxdist=int(maxdist))
+                                       products=products, maxdist=int(maxdist),
+                                       date_str=date_str)
 
         if not tasks:
             LOG.warning("No tasks generated; nothing to compute.")
@@ -409,6 +465,7 @@ if __name__ == "__main__":
     parser.add_argument("--feature_type", default="osm_roads",
                         choices=["osm_roads", "osm_canals", "grip_roads"])
     parser.add_argument("--chunk_bounds", default=None, help="Optional single chunk: 'minx,miny,maxx,maxy' (WGS84)")
+    parser.add_argument("--chunk_manifest", default=None, help="CSV of chunks to process; expects tile_id,minx,miny,maxx,maxy")
     parser.add_argument("--chunk_size", type=float, default=2.0, help="Chunk size in degrees")
     parser.add_argument("--client", default="local", choices=["local","coiled"])
     parser.add_argument("--resolution", default="30m", help="Fixed at 30m for this script")
@@ -416,6 +473,7 @@ if __name__ == "__main__":
                         help="Comma list: presence,distance[,density] (distance uploads under distance/)")
     parser.add_argument("--maxdist", default=1000, help="Cap distance (meters) for distance (pixel-units if geographic)")
     parser.add_argument("--batch_size", default=20, help="Dask submission batch size")
+    parser.add_argument("--date", default=None, help="Output date folder. Default: cn.today_date")
     parser.add_argument("--loglevel", default="INFO", help="DEBUG, INFO, ...")
     args = parser.parse_args()
 
@@ -428,6 +486,8 @@ if __name__ == "__main__":
          product=args.product,
          maxdist=args.maxdist,
          batch_size=args.batch_size,
+         date=args.date,
+         chunk_manifest=args.chunk_manifest,
          loglevel=args.loglevel)
 
 """

@@ -297,6 +297,94 @@ python -m src.scripts.preprocessing.roads_canals.global_datasets.03_aggregate_ro
    `src/scripts/utilities/constants_and_names.py` to point to the new aggregated
    `distance/40000_pixels/{ROADS_DISTANCE_DATE}` folders before model runs.
 
+Optional delta workflow if only the peat union mask changed:
+
+The core model should still use aggregated 10x10 degree distance rasters. To
+avoid rerunning every roads/canals chunk, assemble a complete 4000-pixel
+roads/canals folder from old unchanged chunks plus newly rerun changed chunks.
+
+1. Identify 1x1 degree chunks where the union mask changed:
+
+```bash
+python -m src.scripts.preprocessing.roads_canals.global_datasets.04_changed_peat_chunks \
+  --old_union_date 20251110 \
+  --new_union_date 20260508 \
+  --output logs/roads_canals_delta/20251110_to_20260508/changed_peat_chunks_20251110_to_20260508.csv \
+  --distance_output logs/roads_canals_delta/20251110_to_20260508/distance_affected_peat_chunks_20251110_to_20260508.csv
+```
+
+The `changed_peat_chunks` manifest is used for presence. The
+`distance_affected_peat_chunks` manifest includes changed chunks plus one ring
+of neighboring chunks so distance values are refreshed where a 1 km halo can
+cross chunk boundaries.
+
+2. Copy unchanged previous presence chunks into a clean target date folder:
+
+```bash
+python -m src.scripts.preprocessing.roads_canals.global_datasets.05_assemble_delta_roads_canals \
+  --changed_manifest logs/roads_canals_delta/20251110_to_20260508/changed_peat_chunks_20251110_to_20260508.csv \
+  --target_date {ROADS_DELTA_DATE} \
+  --products presence \
+  --summary_output logs/roads_canals_delta/20251110_to_20260508/assemble_presence_{ROADS_DELTA_DATE}.json \
+  --apply
+```
+
+3. Rerun presence only for changed chunks:
+
+```bash
+python -m src.scripts.preprocessing.roads_canals.global_datasets.1_1_binary_roads_presence \
+  --feature_type osm_roads \
+  --client coiled \
+  --resolution 30m \
+  --product presence \
+  --chunk_manifest logs/roads_canals_delta/20251110_to_20260508/changed_peat_chunks_20251110_to_20260508.csv \
+  --batch_size 20 \
+  --date {ROADS_DELTA_DATE}
+```
+
+Repeat for `osm_canals` and `grip_roads`.
+
+4. Copy unchanged previous distance chunks into the same clean target date
+   folder:
+
+```bash
+python -m src.scripts.preprocessing.roads_canals.global_datasets.05_assemble_delta_roads_canals \
+  --changed_manifest logs/roads_canals_delta/20251110_to_20260508/distance_affected_peat_chunks_20251110_to_20260508.csv \
+  --target_date {ROADS_DELTA_DATE} \
+  --products distance \
+  --summary_output logs/roads_canals_delta/20251110_to_20260508/assemble_distance_{ROADS_DELTA_DATE}.json \
+  --apply
+```
+
+5. Rerun distance only for changed chunks, after target-date presence is
+   complete:
+
+```bash
+python -m src.scripts.preprocessing.roads_canals.global_datasets.1_2_distance_from_presence_mosaic \
+  --feature_type osm_roads \
+  --client coiled \
+  --date {ROADS_DELTA_DATE} \
+  --chunk_manifest logs/roads_canals_delta/20251110_to_20260508/distance_affected_peat_chunks_20251110_to_20260508.csv \
+  --halo_m 1000 \
+  --maxdist 1000 \
+  --batch_size 20
+```
+
+Repeat for `osm_canals` and `grip_roads`.
+
+6. Aggregate the complete target-date 4000-pixel folders to 10x10 degree
+   rasters:
+
+```bash
+python -m src.scripts.preprocessing.roads_canals.global_datasets.03_aggregate_roads_canals \
+  -cn drainage_cluster \
+  --products distance \
+  --pixel_resolution 4000_pixels \
+  --date {ROADS_DELTA_DATE}
+```
+
+Aggregate `presence` too if QA maps or counts need the 10x10 presence rasters.
+
 ## Stage 6: Core Model Run Matrix
 
 Primary script:
