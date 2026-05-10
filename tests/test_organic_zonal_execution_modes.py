@@ -111,8 +111,23 @@ def test_build_bbox_mask_clips_to_bbox_subset() -> None:
 
 
 def test_resolve_requested_contextual_groupers_canonical_deduped() -> None:
-    resolved = organic_zonal.resolve_requested_contextual_groupers(["KBA", "wdpa", "kba", "WDPA"])
-    assert resolved == ["wdpa", "kba"]
+    resolved = organic_zonal.resolve_requested_contextual_groupers(
+        ["drivers_of_loss", "KBA", "wdpa", "kba", "WDPA"]
+    )
+    assert resolved == ["wdpa", "kba", "drivers_of_loss"]
+
+
+def test_drivers_of_loss_contextual_grouper_registry() -> None:
+    spec = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["drivers_of_loss"]
+    assert spec["name"] == "drivers_of_TCL_1_km"
+    assert spec["zarr_path"].endswith(
+        "/contextual_layer_global_zarr/drivers_of_TCL_1_km/v20250414/"
+        "update2023_20241218__run_20260507_fillValue_removed/"
+        "drivers_of_TCL_1_km_20260507.zarr"
+    )
+    assert spec["dtype"] == np.uint8
+    assert spec["expected_groups"].dtype == np.uint8
+    assert spec["expected_groups"].tolist() == [0, 1, 2, 3, 4, 5, 6, 7]
 
 
 def test_finalize_interval_tile_outputs_preserves_optional_contextual_columns(tmp_path: Path) -> None:

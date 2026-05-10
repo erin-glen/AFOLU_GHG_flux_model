@@ -117,7 +117,7 @@ FLUX_SPECS = {
 }
 ALL_DATASETS: Dict[str, Dict[str, Any]] = {**STATE_DATASETS, **FLUX_DATASETS}
 
-CANONICAL_CONTEXTUAL_GROUPER_ORDER = ("wdpa", "kba")
+CANONICAL_CONTEXTUAL_GROUPER_ORDER = ("wdpa", "kba", "drivers_of_loss")
 
 
 def default_local_output(model_version: str, run_name: str, run_date: str) -> str:
@@ -149,6 +149,13 @@ OPTIONAL_CONTEXTUAL_GROUPERS: Dict[str, Dict[str, Any]] = {
         "expected_groups": _expected_groups_with_zero(cn.KBA_codes, dtype=np.uint16),
         "dtype": np.uint16,
         "source_label": "KBA",
+    },
+    "drivers_of_loss": {
+        "name": cn.drivers_of_loss_pattern,
+        "zarr_path": cn.drivers_of_loss_zarr_path,
+        "expected_groups": _expected_groups_with_zero(cn.drivers_codes, dtype=np.uint8),
+        "dtype": np.uint8,
+        "source_label": "drivers_of_TCL_1_km",
     },
 }
 
@@ -1446,7 +1453,7 @@ def main(argv=None):
         nargs="+",
         choices=list(CANONICAL_CONTEXTUAL_GROUPER_ORDER),
         default=[],
-        help="Optional contextual grouping axes (default: none). Choices: wdpa kba",
+        help="Optional contextual grouping axes (default: none). Choices: wdpa kba drivers_of_loss",
     )
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
                         help="Fraction of one pixel for nearest reindex tolerance (default 0.49).")

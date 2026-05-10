@@ -159,6 +159,16 @@ KBA_zarr_path = (
 # KBA classes are currently binary: 0=outside, 1=inside.
 KBA_codes = np.array([0, 1], dtype=np.uint16)
 
+drivers_of_loss_pattern = "drivers_of_TCL_1_km"
+drivers_of_loss_zarr_path = (
+    f"{full_bucket_prefix}/climate/AFOLU_flux_model/contextual_layer_global_zarr/"
+    "drivers_of_TCL_1_km/v20250414/"
+    "update2023_20241218__run_20260507_fillValue_removed/"
+    "drivers_of_TCL_1_km_20260507.zarr"
+)
+# TCL driver classes: 0=none/nodata, 1-7=driver categories.
+drivers_codes = np.array([0, 1, 2, 3, 4, 5, 6, 7], dtype=np.uint8)
+
 progress_tracking_path = "climate/AFOLU_flux_model/organic_soils/task_progress_txts/"
 
 possible_task_statuses = [
