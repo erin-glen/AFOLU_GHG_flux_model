@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """QA/QC gate for combined-state zonal outputs.
 
-Compares `combined_state` zonal outputs from 02_run_zonal_stats against legacy
-`drained` and `burned` branch outputs and returns a YES/NO recommendation for
-proceeding with deprecation of legacy state-node outputs.
+For archived runs, compares `combined_state` zonal outputs from
+02_run_zonal_stats against legacy `drained` and `burned` branch outputs. For
+current single-branch runs where those legacy branches are intentionally absent,
+the gate validates combined-state encoding and compares drained/burned
+self-projections derived from the combined branch.
 
 Example:
 python -m src.scripts.zonal_statistics.03_qaqc_combined_state_alignment \
@@ -106,27 +108,46 @@ def _load_interval_frames(model_version: str, run_name: str, run_date: str, inte
         combined_path,
         ["gadm_adm0", "interval_end", "flux_type", "value", "combined_state_nodes", "emissions_state_nodes", "drained_state_nodes", "burned_state_nodes"],
     )
-    drained = _read_parquet_df(
-        drained_path,
-        ["gadm_adm0", "interval_end", "flux_type", "value", "drained_state_nodes"],
-    )
-    burned = _read_parquet_df(
-        burned_path,
-        ["gadm_adm0", "interval_end", "flux_type", "value", "burned_state_nodes"],
-    )
-
     if combined.empty:
         raise FileNotFoundError(f"No combined-state parquet rows found for interval={interval}: {combined_path}")
-    if drained.empty:
-        raise FileNotFoundError(f"No drained parquet rows found for interval={interval}: {drained_path}")
-    if burned.empty:
-        raise FileNotFoundError(f"No burned parquet rows found for interval={interval}: {burned_path}")
-
     if "combined_state_nodes" not in combined.columns:
         if "emissions_state_nodes" in combined.columns:
             combined["combined_state_nodes"] = combined["emissions_state_nodes"]
         else:
             raise ValueError("Combined parquet missing both combined_state_nodes and emissions_state_nodes")
+
+    if "drained_state_nodes" not in combined.columns or "burned_state_nodes" not in combined.columns:
+        arr = combined["combined_state_nodes"].fillna(0).astype("uint32").to_numpy(copy=False)
+        d_dec, b_dec = zc.unpack_combined_state_to_legacy(arr)
+        if "drained_state_nodes" not in combined.columns:
+            combined["drained_state_nodes"] = d_dec.astype("uint32", copy=False)
+        if "burned_state_nodes" not in combined.columns:
+            combined["burned_state_nodes"] = b_dec.astype("uint32", copy=False)
+
+    if _exists_parquet(drained_path):
+        drained = _read_parquet_df(
+            drained_path,
+            ["gadm_adm0", "interval_end", "flux_type", "value", "drained_state_nodes"],
+        )
+    else:
+        drained = combined[
+            ["gadm_adm0", "interval_end", "flux_type", "value", "drained_state_nodes"]
+        ].copy()
+
+    if _exists_parquet(burned_path):
+        burned = _read_parquet_df(
+            burned_path,
+            ["gadm_adm0", "interval_end", "flux_type", "value", "burned_state_nodes"],
+        )
+    else:
+        burned = combined[
+            ["gadm_adm0", "interval_end", "flux_type", "value", "burned_state_nodes"]
+        ].copy()
+
+    if drained.empty:
+        raise FileNotFoundError(f"No drained/self-projected parquet rows found for interval={interval}: {drained_path}")
+    if burned.empty:
+        raise FileNotFoundError(f"No burned/self-projected parquet rows found for interval={interval}: {burned_path}")
 
     return BranchFrames(combined=combined, drained=drained, burned=burned)
 

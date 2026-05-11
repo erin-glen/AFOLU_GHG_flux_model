@@ -2,6 +2,7 @@ import os
 import logging
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import boto3
 import rasterio
@@ -16,6 +17,27 @@ log = logging.getLogger("peat-tiler-hansen")
 
 # For random writes using /vsis3/ in AWS/GDAL:
 os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
+os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.vrt")
+
+
+def _gdal_input_path(path):
+    """Return a GDAL VSI path for remote raster inputs."""
+    raw = str(path)
+    if raw.startswith("/vsi"):
+        return raw
+    if raw.startswith("s3://"):
+        return raw.replace("s3://", "/vsis3/", 1)
+    if urlparse(raw).scheme in {"http", "https"}:
+        return f"/vsicurl/{raw}"
+    return raw
+
+
+def _gdal_s3_output_path(path):
+    raw = str(path)
+    if raw.startswith("s3://"):
+        return raw.replace("s3://", "/vsis3/", 1)
+    return raw
 
 
 ################################################################################
@@ -56,9 +78,8 @@ def build_vrt_gdal_local(raw_raster_paths_list_s3, output_vrt_s3):
     # Enable random write support in environment (if not already set)
     os.environ['CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE'] = 'YES'
 
-    # Convert S3 => /vsis3/
-    raw_raster_paths_list_vsis3 = [path.replace("s3://", "/vsis3/") for path in raw_raster_paths_list_s3]
-    output_vrt_vsis3 = output_vrt_s3.replace("s3://", "/vsis3/")
+    raw_raster_paths_list_vsis3 = [_gdal_input_path(path) for path in raw_raster_paths_list_s3]
+    output_vrt_vsis3 = _gdal_s3_output_path(output_vrt_s3)
 
     # Build the VRT in S3 directly
     gdal.BuildVRT(output_vrt_vsis3, raw_raster_paths_list_vsis3)
@@ -83,8 +104,7 @@ def build_vrt_gdal_coiled(raw_raster_paths_list_s3, output_vrt_s3, local_vrt):
         print(f"VRT file already exists in S3: {output_vrt_s3}. Skipping creation.")
         return
 
-    # Convert S3 => /vsis3/
-    vsis3_paths = [s3_path.replace("s3://", "/vsis3/") for s3_path in raw_raster_paths_list_s3]
+    vsis3_paths = [_gdal_input_path(s3_path) for s3_path in raw_raster_paths_list_s3]
 
     # Make sure local directory exists
     local_vrt_path = Path(local_vrt)
@@ -130,9 +150,8 @@ def warp_to_hansen_local(source_raster_s3_path, output_raster_s3_path,
     if tiled and not (x_pixel_window and y_pixel_window):
         raise ValueError("If tiled=True, must specify x_pixel_window and y_pixel_window")
 
-    # Convert s3:// => /vsis3/
-    source_gdal_path = source_raster_s3_path.replace("s3://", "/vsis3/")
-    output_gdal_path = output_raster_s3_path.replace("s3://", "/vsis3/")
+    source_gdal_path = _gdal_input_path(source_raster_s3_path)
+    output_gdal_path = _gdal_s3_output_path(output_raster_s3_path)
 
     ds = gdal.Open(source_gdal_path)
     if not ds:
@@ -191,8 +210,7 @@ def warp_to_hansen_coiled(source_vrt_path, filename, output_raster_s3_path_and_n
     if tiled and not (x_pixel_window and y_pixel_window):
         raise ValueError("If tiled=True, must pass x_pixel_window & y_pixel_window")
 
-    # Convert s3:// => /vsis3/ for reading
-    source_vrt_path_vsis3 = source_vrt_path.replace("s3://", "/vsis3/")
+    source_vrt_path_vsis3 = _gdal_input_path(source_vrt_path)
     ds = gdal.Open(source_vrt_path_vsis3)
     if not ds:
         raise RuntimeError(f"Failed to open {source_vrt_path}")

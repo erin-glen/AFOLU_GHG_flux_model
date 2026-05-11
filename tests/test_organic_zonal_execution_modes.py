@@ -16,6 +16,16 @@ assert spec and spec.loader
 spec.loader.exec_module(organic_zonal)
 
 
+class FakeS3:
+    def __init__(self, matches):
+        self.matches = matches
+        self.patterns = []
+
+    def glob(self, pattern):
+        self.patterns.append(pattern)
+        return list(self.matches)
+
+
 def test_auto_mode_resolves_tile_for_global_and_explicit_tiles() -> None:
     args_global = SimpleNamespace(
         tile_ids=None,
@@ -37,6 +47,68 @@ def test_auto_mode_resolves_tile_for_global_and_explicit_tiles() -> None:
     assert plan_explicit["execution_mode_resolved"] == "tile"
     assert plan_explicit["tile_source"] == "explicit_ids"
     assert sorted(plan_explicit["tile_ids_to_process"]) == ["00N_010E", "00N_020E"]
+
+
+def test_aggregated_tile_prefix_and_tile_id_extraction() -> None:
+    prefix = organic_zonal.build_aggregated_tile_prefix(
+        model_version="1_0_0",
+        dataset="combined_state",
+        run_name="ogh_biome_thresholds",
+        interval_type="five_year",
+        interval="2021_2024",
+        pixel_resolution="40000_pixels",
+        run_date="20260510",
+    )
+    assert prefix.endswith(
+        "/version_1_0_0/combined_state/ogh_biome_thresholds/"
+        "five_year_intervals/2021_2024/40000_pixels/20260510/"
+    )
+    assert organic_zonal.extract_tile_id_from_path(
+        f"{prefix}70N_100W__combined_state__2021_2024.tif"
+    ) == "70N_100W"
+
+
+def test_interval_execution_plan_filters_to_aggregated_data_tiles() -> None:
+    args = SimpleNamespace(
+        model_version="1_0_0",
+        run_name="ogh_biome_thresholds",
+        run_date="20260510",
+        interval_type="five_year",
+        data_tile_filter="auto",
+        data_tile_filter_dataset="combined_state",
+        data_tile_filter_pixel_resolution="40000_pixels",
+    )
+    base_plan = {
+        "execution_mode_resolved": "tile",
+        "tile_ids_to_process": ["00N_010E", "00N_020E", "00N_030E"],
+        "tile_count": 3,
+        "tile_source": "canonical_global_roster",
+        "explicit_tile_ids": [],
+        "bbox": None,
+        "exact_tile_mask_required": False,
+        "roi_mode": "global",
+        "is_global_request": True,
+    }
+    fs = FakeS3(
+        [
+            "s3://bucket/path/00N_020E__combined_state__2021_2024.tif",
+            "s3://bucket/path/99N_999E__not_a_real_tile.tif",
+        ]
+    )
+    logger = organic_zonal.logging.getLogger("test")
+    plan = organic_zonal.resolve_interval_execution_plan(
+        base_plan=base_plan,
+        args=args,
+        interval="2021_2024",
+        fs_s3=fs,
+        logger=logger,
+    )
+    assert plan["tile_ids_to_process"] == ["00N_020E"]
+    assert plan["tile_count"] == 1
+    assert plan["base_tile_count"] == 3
+    assert plan["data_tile_filter_available_count"] == 2
+    assert plan["data_tile_filter_dropped_count"] == 2
+    assert plan["tile_source"] == "canonical_global_roster+aggregated_combined_state"
 
 
 def test_finalize_interval_tile_outputs_reaggregates_and_decodes(tmp_path: Path) -> None:

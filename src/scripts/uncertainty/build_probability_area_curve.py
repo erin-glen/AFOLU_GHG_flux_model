@@ -14,6 +14,9 @@ Output columns:
 
 By default this sums all adm0 to global, then computes
 area_ha(threshold=t) = sum_{p>=t} area_ha(p).
+When --per-biome is used, the script also writes a global companion curve from
+the same biome class-area table unless --no-global-output is passed. This avoids
+rerunning the full raster reduction just to get the global curve.
 
 You can either provide --input directly, or pass --probability-date to read
 the default 02b output location:
@@ -29,6 +32,7 @@ python -m src.scripts.uncertainty.build_probability_area_curve \
   --probability-date 20251105 \
   --per-biome \
   --output ./area_vs_threshold_20251105_biome.csv
+# Also writes ./area_vs_threshold_20251105.csv by default.
 """
 
 from __future__ import annotations
@@ -89,6 +93,21 @@ def parse_args() -> argparse.Namespace:
                         help="Produce separate threshold-vs-area CSVs per biome.")
     parser.add_argument("--biome-column", default="biome_id",
                         help="Column containing biome IDs. Default: biome_id")
+    parser.add_argument(
+        "--global-output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional global threshold-vs-area CSV to write when --per-biome is used. "
+            "Default: remove a trailing '_biome' from --output stem when present; "
+            "otherwise append '_global'."
+        ),
+    )
+    parser.add_argument(
+        "--no-global-output",
+        action="store_true",
+        help="With --per-biome, do not write the companion global curve.",
+    )
     return parser.parse_args()
 
 
@@ -112,6 +131,17 @@ def resolve_output_path(args: argparse.Namespace) -> Path:
     if args.probability_date:
         return Path(f"area_vs_threshold_{args.probability_date}.csv").resolve()
     return Path("area_vs_threshold.csv").resolve()
+
+
+def derive_global_output_path(per_biome_output_path: Path) -> Path:
+    """Return the companion global curve path for a per-biome output path."""
+
+    out_stem = per_biome_output_path.stem
+    if out_stem.endswith("_biome"):
+        global_stem = out_stem[: -len("_biome")]
+    else:
+        global_stem = f"{out_stem}_global"
+    return per_biome_output_path.with_name(f"{global_stem}{per_biome_output_path.suffix}")
 
 
 def _read_parquet_directory(path_str: str) -> pd.DataFrame:
@@ -210,7 +240,29 @@ def main() -> None:
         combined = pd.concat(combined_parts, ignore_index=True)
         combined.to_csv(output_path, index=False)
         print(f"Wrote combined per-biome curve ({len(combined)} rows) to {output_path}")
+
+        if not args.no_global_output:
+            global_output = (
+                args.global_output.expanduser().resolve()
+                if args.global_output is not None
+                else derive_global_output_path(output_path)
+            )
+            global_curve = _compute_threshold_curve(
+                work,
+                args.probability_column,
+                args.area_column,
+            )
+            global_output.parent.mkdir(parents=True, exist_ok=True)
+            global_curve.to_csv(global_output, index=False)
+            print(
+                f"Wrote companion global curve ({len(global_curve)} rows) "
+                f"from per-biome input to {global_output}"
+            )
     else:
+        if args.global_output is not None:
+            raise ValueError("--global-output is only valid with --per-biome")
+        if args.no_global_output:
+            raise ValueError("--no-global-output is only valid with --per-biome")
         out = _compute_threshold_curve(work, args.probability_column, args.area_column)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         out.to_csv(output_path, index=False)

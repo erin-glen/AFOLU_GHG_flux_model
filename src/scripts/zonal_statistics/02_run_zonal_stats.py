@@ -56,6 +56,7 @@ import argparse
 import difflib
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Tuple
@@ -193,6 +194,49 @@ def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
 
 def build_output_parquet(model_version: str, run_name: str, run_date: str, interval: str) -> str:
     return posixpath.join(ROOT, f"version_{model_version}", "zonal_stats", run_name, run_date, interval).rstrip("/") + "/"
+
+def build_aggregated_tile_prefix(
+    *,
+    model_version: str,
+    dataset: str,
+    run_name: str,
+    interval_type: str,
+    interval: str,
+    pixel_resolution: str,
+    run_date: str,
+) -> str:
+    return (
+        posixpath.join(
+            ROOT,
+            f"version_{model_version}",
+            dataset,
+            run_name,
+            f"{interval_type}_intervals",
+            interval,
+            pixel_resolution,
+            run_date,
+        ).rstrip("/")
+        + "/"
+    )
+
+def extract_tile_id_from_path(path: str) -> Optional[str]:
+    match = re.search(cn.tile_id_pattern, posixpath.basename(str(path)))
+    return match.group(0) if match else None
+
+def discover_aggregated_data_tile_ids(fs_s3: s3fs.S3FileSystem, prefix: str) -> List[str]:
+    matches = sorted(fs_s3.glob(posixpath.join(prefix.rstrip("/"), "*.tif")))
+    tile_ids = sorted(
+        {
+            tile_id
+            for tile_id in (extract_tile_id_from_path(path) for path in matches)
+            if tile_id is not None
+        }
+    )
+    if not tile_ids:
+        raise FileNotFoundError(
+            f"No aggregated tile rasters found for zonal stats data-tile filter at {prefix}"
+        )
+    return tile_ids
 
 def resolve_mega_zarr_path(model_version: str, run_name: str, run_date: str, interval_type: str,
                            zarr_chunk_size_pixels: Optional[int], logger: logging.Logger) -> str:
@@ -797,7 +841,83 @@ def resolve_execution_plan(args: argparse.Namespace) -> Dict[str, Any]:
         "exact_tile_mask_required": exact_tile_mask_required,
         "roi_mode": "tile_ids" if (resolved_mode == "roi" and tiles) else ("bounding_box" if bbox is not None else "global"),
         "is_global_request": (bbox is None and not tiles),
+        "base_tile_count": len(tile_ids_to_process),
+        "data_tile_filter": "not_resolved",
+        "data_tile_filter_dataset": None,
+        "data_tile_filter_prefix": None,
+        "data_tile_filter_available_count": None,
+        "data_tile_filter_dropped_count": 0,
     }
+
+def resolve_interval_execution_plan(
+    *,
+    base_plan: Dict[str, Any],
+    args: argparse.Namespace,
+    interval: str,
+    fs_s3: s3fs.S3FileSystem,
+    logger: logging.Logger,
+) -> Dict[str, Any]:
+    plan = dict(base_plan)
+    plan["tile_ids_to_process"] = list(base_plan["tile_ids_to_process"])
+    plan["base_tile_count"] = len(plan["tile_ids_to_process"])
+    plan["data_tile_filter"] = args.data_tile_filter
+    plan["data_tile_filter_dataset"] = args.data_tile_filter_dataset
+    plan["data_tile_filter_prefix"] = None
+    plan["data_tile_filter_available_count"] = None
+    plan["data_tile_filter_dropped_count"] = 0
+
+    if args.data_tile_filter == "off" or plan["execution_mode_resolved"] != "tile":
+        if args.data_tile_filter != "off" and plan["execution_mode_resolved"] != "tile":
+            logger.info(
+                "Data-tile filtering is only applied in tile execution mode; leaving interval %s in %s mode.",
+                interval,
+                plan["execution_mode_resolved"],
+            )
+        return plan
+
+    prefix = build_aggregated_tile_prefix(
+        model_version=args.model_version,
+        dataset=args.data_tile_filter_dataset,
+        run_name=args.run_name,
+        interval_type=args.interval_type,
+        interval=interval,
+        pixel_resolution=args.data_tile_filter_pixel_resolution,
+        run_date=args.run_date,
+    )
+    data_tile_ids = discover_aggregated_data_tile_ids(fs_s3, prefix)
+    data_tile_set = set(data_tile_ids)
+    filtered_tile_ids = [
+        tile_id for tile_id in plan["tile_ids_to_process"] if tile_id in data_tile_set
+    ]
+    dropped_count = len(plan["tile_ids_to_process"]) - len(filtered_tile_ids)
+    if not filtered_tile_ids:
+        raise ValueError(
+            "Data-tile filter removed every candidate tile for "
+            f"interval={interval}, dataset={args.data_tile_filter_dataset}, prefix={prefix}. "
+            "Check that aggregation completed for this run/date/interval, or rerun with "
+            "--data_tile_filter off."
+        )
+
+    plan["tile_ids_to_process"] = filtered_tile_ids
+    plan["tile_count"] = len(filtered_tile_ids)
+    plan["tile_source"] = (
+        f"{base_plan['tile_source']}+aggregated_{args.data_tile_filter_dataset}"
+    )
+    plan["data_tile_filter_prefix"] = prefix
+    plan["data_tile_filter_available_count"] = len(data_tile_ids)
+    plan["data_tile_filter_dropped_count"] = dropped_count
+    logger.info(
+        "Data-tile filter applied: interval=%s dataset=%s prefix=%s "
+        "candidate_tiles=%d available_data_tiles=%d selected_tiles=%d dropped_tiles=%d",
+        interval,
+        args.data_tile_filter_dataset,
+        prefix,
+        plan["base_tile_count"],
+        len(data_tile_ids),
+        len(filtered_tile_ids),
+        dropped_count,
+    )
+    return plan
 
 def build_branch_manifest(
     args: argparse.Namespace,
@@ -831,6 +951,12 @@ def build_branch_manifest(
         "roi_mode": roi_meta["roi_mode"],
         "bounding_box": roi_meta["bounding_box"],
         "tile_ids": roi_meta["tile_ids"],
+        "processed_tile_ids": None,
+        "data_tile_filter": None,
+        "data_tile_filter_dataset": None,
+        "data_tile_filter_prefix": None,
+        "data_tile_filter_available_count": None,
+        "data_tile_filter_dropped_count": None,
         "adm0_zarr_path": adm0_zarr_path(),
         "pixel_area_zarr_path": PIXEL_AREA_ZARR,
         # Informational-only metadata (not used for skip equivalence checks):
@@ -907,9 +1033,15 @@ def manifests_match(existing: Dict[str, Any], current: Dict[str, Any]) -> bool:
         "roi_mode",
         "bounding_box",
         "tile_ids",
+        "processed_tile_ids",
         "execution_mode",
         "tile_source",
         "tile_count",
+        "data_tile_filter",
+        "data_tile_filter_dataset",
+        "data_tile_filter_prefix",
+        "data_tile_filter_available_count",
+        "data_tile_filter_dropped_count",
         "adm0_zarr_path",
         "pixel_area_zarr_path",
     ]
@@ -1238,10 +1370,17 @@ def run(args: argparse.Namespace) -> None:
             logger,
         )
         logger.info("Using mega-zarr source: %s", mega_zarr_path)
-        roi_meta = normalized_roi_metadata(execution_plan["explicit_tile_ids"], execution_plan["bbox"])
 
         for interval_start_year, interval_end_year in interval_pairs:
             interval = f"{interval_start_year}_{interval_end_year}"
+            interval_plan = resolve_interval_execution_plan(
+                base_plan=execution_plan,
+                args=args,
+                interval=interval,
+                fs_s3=fs_s3,
+                logger=logger,
+            )
+            roi_meta = normalized_roi_metadata(interval_plan["explicit_tile_ids"], interval_plan["bbox"])
             dest_root = build_output_parquet(args.model_version, args.run_name, args.run_date, interval)
             dest_e = posixpath.join(dest_root.rstrip("/"), "combined_state")
             manifest_e = build_branch_manifest(
@@ -1252,9 +1391,19 @@ def run(args: argparse.Namespace) -> None:
                 roi_meta,
                 selected_contextual_groupers,
             )
-            manifest_e["execution_mode"] = execution_plan["execution_mode_resolved"]
-            manifest_e["tile_source"] = execution_plan["tile_source"]
-            manifest_e["tile_count"] = execution_plan["tile_count"]
+            manifest_e["execution_mode"] = interval_plan["execution_mode_resolved"]
+            manifest_e["tile_source"] = interval_plan["tile_source"]
+            manifest_e["tile_count"] = interval_plan["tile_count"]
+            manifest_e["processed_tile_ids"] = (
+                interval_plan["tile_ids_to_process"]
+                if interval_plan["execution_mode_resolved"] == "tile"
+                else None
+            )
+            manifest_e["data_tile_filter"] = interval_plan["data_tile_filter"]
+            manifest_e["data_tile_filter_dataset"] = interval_plan["data_tile_filter_dataset"]
+            manifest_e["data_tile_filter_prefix"] = interval_plan["data_tile_filter_prefix"]
+            manifest_e["data_tile_filter_available_count"] = interval_plan["data_tile_filter_available_count"]
+            manifest_e["data_tile_filter_dropped_count"] = interval_plan["data_tile_filter_dropped_count"]
             logger.info(
                 "Manifest contextual metadata: selected_contextual_groupers=%s contextual_grouper_paths=%s",
                 manifest_e.get("selected_contextual_groupers"),
@@ -1290,8 +1439,8 @@ def run(args: argparse.Namespace) -> None:
                 delete_remote_prefix(fs_s3, dest_e)
 
             logger.info("Processing interval %s : %s", interval, timestr())
-            if execution_plan["execution_mode_resolved"] == "roi":
-                bbox = execution_plan["bbox"]
+            if interval_plan["execution_mode_resolved"] == "roi":
+                bbox = interval_plan["bbox"]
                 logger.info("Mega-zarr open start: interval=%s year=%s path=%s", interval, interval_end_year, mega_zarr_path)
                 mega_ds = open_mega_zarr_region(mega_zarr_path, interval_end_year, bbox, args.chunk_size)
                 adm0 = open_zarr_region(adm0_zarr_path(), bbox, args.chunk_size).astype("uint32")
@@ -1315,8 +1464,8 @@ def run(args: argparse.Namespace) -> None:
                     logger=logger,
                 )
                 where_mask = (adm0_aligned > 0)
-                if execution_plan["exact_tile_mask_required"]:
-                    where_mask = where_mask & build_exact_tile_mask(ref, execution_plan["explicit_tile_ids"])
+                if interval_plan["exact_tile_mask_required"]:
+                    where_mask = where_mask & build_exact_tile_mask(ref, interval_plan["explicit_tile_ids"])
                 df_e = run_combined_state_reduce(
                     selected_flux_arrays=flux_arrays,
                     selected_flux_keys=selected_fluxes_ordered,
@@ -1338,7 +1487,7 @@ def run(args: argparse.Namespace) -> None:
                 if stage_dir.exists():
                     shutil.rmtree(stage_dir, ignore_errors=True)
                 stage_dir.mkdir(parents=True, exist_ok=True)
-                for tile_id in execution_plan["tile_ids_to_process"]:
+                for tile_id in interval_plan["tile_ids_to_process"]:
                     logger.info("Tile start: interval=%s tile_id=%s", interval, tile_id)
                     tile_bbox = list(uu.get_10x10_tile_bounds(tile_id))
                     mega_ds = open_mega_zarr_region(mega_zarr_path, interval_end_year, tile_bbox, args.chunk_size)
@@ -1360,9 +1509,9 @@ def run(args: argparse.Namespace) -> None:
                         logger=logger,
                     )
                     tile_where_mask = (adm0_aligned > 0)
-                    if execution_plan["bbox"] is not None:
-                        logger.info("Applying bbox clip mask in tile mode: interval=%s tile_id=%s bbox=%s", interval, tile_id, execution_plan["bbox"])
-                        tile_where_mask = tile_where_mask & build_bbox_mask(ref, execution_plan["bbox"])
+                    if interval_plan["bbox"] is not None:
+                        logger.info("Applying bbox clip mask in tile mode: interval=%s tile_id=%s bbox=%s", interval, tile_id, interval_plan["bbox"])
+                        tile_where_mask = tile_where_mask & build_bbox_mask(ref, interval_plan["bbox"])
                     df_tile = run_combined_state_reduce(
                         selected_flux_arrays=flux_arrays,
                         selected_flux_keys=selected_fluxes_ordered,
@@ -1409,7 +1558,7 @@ def run(args: argparse.Namespace) -> None:
             logger.info("Uploaded combined_state interval %s → %s", interval, dest_e)
             if not args.keep_local:
                 shutil.rmtree(local_e, ignore_errors=True)
-                if execution_plan["execution_mode_resolved"] == "tile" and not args.keep_tile_stage:
+                if interval_plan["execution_mode_resolved"] == "tile" and not args.keep_tile_stage:
                     shutil.rmtree(tile_stage_root / interval, ignore_errors=True)
 
         if not args.keep_local and not args.keep_tile_stage:
@@ -1479,6 +1628,26 @@ def main(argv=None):
                         help="Delete and replace existing remote interval subtree(s) before upload.")
     parser.add_argument("--execution_mode", choices=["auto", "roi", "tile"], default="auto")
     parser.add_argument("--auto_tile_threshold_tiles", type=int, default=8)
+    parser.add_argument(
+        "--data_tile_filter",
+        choices=["auto", "off"],
+        default="auto",
+        help=(
+            "In tile execution mode, auto-discover per-interval 10x10 tiles that "
+            "have aggregated data and run zonal stats only for those tiles. Use "
+            "'off' to process the full candidate tile set."
+        ),
+    )
+    parser.add_argument(
+        "--data_tile_filter_dataset",
+        default="combined_state",
+        help="Aggregated output dataset used to discover tiles with data (default: combined_state).",
+    )
+    parser.add_argument(
+        "--data_tile_filter_pixel_resolution",
+        default=f"{cn.full_raster_dims}_pixels",
+        help="Aggregated output pixel-resolution folder used by --data_tile_filter (default: 40000_pixels).",
+    )
     parser.add_argument("--keep_tile_stage", action="store_true")
     args = parser.parse_args(argv)
     if args.local_output is None:

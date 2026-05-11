@@ -8,6 +8,8 @@ Use placeholders consistently:
 
 - `{RUN_DATE}`: production run date tag, `YYYYMMDD`.
 - `{OGH_PROB_DATE}`: processed OGH unthresholded probability tile date tag.
+- `{OGH_SOURCE_TIF_URL}`: HTTPS URL for the delivered OpenGeoHub probability
+  GeoTIFF/COG.
 - `{MODEL_VERSION}`: underscore model version, for example `0_1_4`.
 - `{THRESHOLD_DIR}`: local directory containing threshold diagnostics.
 - `{BASELINE_BIOME_THRESHOLDS}`: CSV from `biome_thresholds_summary.csv` or
@@ -31,6 +33,11 @@ Use placeholders consistently:
   run one global OGH baseline gate for `2021_2024` and carry that single run
   through aggregation, zonal statistics, publication QA/comparison scripts, and
   global map aggregation.
+- The `20260510` OGH baseline gate completed through 0.01-degree global raster
+  aggregation for `2021_2024`; display rendering was intentionally skipped for
+  this gate.
+- The gate also produced the 0.01-degree `combined_state_reclassified` raster
+  with four organic-state map classes.
 
 ## Critical Findings
 
@@ -49,9 +56,9 @@ Use placeholders consistently:
    roads/canals presence/distance products so newly organic pixels do not get
    missing/zero drainage-distance inputs.
 
-4. `01_build_zarr_caches.py` hard-codes `ORGANIC_PROBABILITY_DATE`. Either
-   update that constant before running, or add a CLI flag for the probability
-   date before the production rerun.
+4. `01_build_zarr_caches.py` has an `--organic_probability_date` /
+   `--probability_date` flag. Pass it explicitly for every rerun so the
+   contextual Zarr and processed GeoTIFF source date stay aligned.
 
 5. Publication comparison scripts expect specific run names. Either keep those
    names, or update the hard-coded comparison definitions in
@@ -70,9 +77,13 @@ Use placeholders consistently:
    - Update `peat_mask_dirs["ogh_unthresholded"]` and, if creating a binary OGH
      tile for roads extent, `peat_mask_dirs["ogh"]` in
      `src/scripts/utilities/constants_and_names.py`.
-   - Pass explicit date tags with `--date`, `--raw_date`, and
+   - Pass explicit date tags with `--date` and
      `--organic_probability_date` so multi-day reruns do not drift with
-     `today_date`.
+     `today_date`. Use `--raw_date` only when reading the configured dated S3
+     source path instead of an explicit `--raw_path`.
+   - If OpenGeoHub provides a public range-readable GeoTIFF/COG URL, prefer
+     passing it directly with `--raw_path {OGH_SOURCE_TIF_URL}` instead of
+     downloading and re-uploading the raw raster to `gfw2-data`.
    - If rerunning the peat union, pass `--dataset_date ogh={OGH_BINARY_DATE}`
      and any other refreshed input dates so it does not silently use the
      default historical inputs.
@@ -107,7 +118,7 @@ Command:
 python -m src.scripts.preprocessing.peat.peat_masks \
   --dataset ogh_unthresholded \
   --date {OGH_PROB_DATE} \
-  --raw_date {OGH_PROB_DATE} \
+  --raw_path {OGH_SOURCE_TIF_URL} \
   --client coiled
 ```
 
@@ -116,6 +127,10 @@ Expected output:
 - 10x10 degree OGH unthresholded probability tiles under the intended
   `peat_mask/OGH/tiles_unthresholded/{OGH_PROB_DATE}/` prefix after the date
   path harmonization above.
+- When the source GeoTIFF/COG covers less than the canonical global tile roster,
+  `peat_masks.py` filters out non-overlapping tiles before scheduling work.
+  For OGH outputs, all-zero warped tiles are skipped by default; pass
+  `--upload_empty_tiles` only when a complete zero-filled tile set is required.
 
 Optional, only if roads/canals need a refreshed broad organic-soil mask:
 
@@ -123,7 +138,7 @@ Optional, only if roads/canals need a refreshed broad organic-soil mask:
 python -m src.scripts.preprocessing.peat.peat_masks \
   --dataset ogh \
   --date {OGH_BINARY_DATE} \
-  --raw_date {OGH_PROB_DATE} \
+  --raw_path {OGH_SOURCE_TIF_URL} \
   --client coiled
 ```
 
@@ -153,8 +168,8 @@ This ensures the contextual zarrs needed by zonal statistics:
 - OGH unthresholded probability
 - climate domain
 
-The probability date is currently driven by the script constant, so confirm it
-matches `{OGH_PROB_DATE}` before running.
+The probability date should be supplied explicitly with
+`--organic_probability_date` even when the current default happens to match.
 
 ## Stage 3: Probability Area Stats and Area Curves
 
@@ -173,7 +188,8 @@ python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
   --overwrite_existing
 ```
 
-Build per-biome area-vs-threshold curves:
+Build per-biome and global area-vs-threshold curves from the single biome
+class-area reduction:
 
 ```bash
 python -m src.scripts.uncertainty.build_probability_area_curve \
@@ -181,6 +197,11 @@ python -m src.scripts.uncertainty.build_probability_area_curve \
   --per-biome \
   --output {THRESHOLD_DIR}/area_vs_threshold_{OGH_PROB_DATE}_biome.csv
 ```
+
+This also writes `{THRESHOLD_DIR}/area_vs_threshold_{OGH_PROB_DATE}.csv`
+by default, derived from the same biome class-area table. Do not run a second
+non-biome `02b_run_probability_class_area_stats` reduction unless doing a
+deliberate QA comparison.
 
 ## Stage 4: Threshold Tuning
 
@@ -205,15 +226,15 @@ python -m src.scripts.uncertainty.fscore_threshold_curves_bounds \
   --output-dir {THRESHOLD_DIR} \
   --biome-column biome \
   --report-thresholds {BASELINE_THRESHOLD_0_TO_1} \
+  --area-curve-table {THRESHOLD_DIR}/area_vs_threshold_{OGH_PROB_DATE}.csv \
   --biome-area-curves {THRESHOLD_DIR}/area_vs_threshold_{OGH_PROB_DATE}_biome.csv \
   --biome-bounds-metric f1 \
   --mapped-area-unit Mha
 ```
 
 The per-biome curve supplies biome-specific mapped area for threshold matching.
-If a standalone global extent bound is needed as an additional QA product,
-derive a global curve by summing the biome curves or run the non-biome area
-stat path explicitly.
+The global area curve is now derived from the same biome class-area output so
+threshold tuning can use both products without a second raster reduction.
 
 Outputs to retain:
 
@@ -595,6 +616,12 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --overwrite_existing
 ```
 
+By default, zonal stats now discovers the 10x10 tiles with aggregated
+`combined_state` rasters for each `{RUN_NAME}` / `{RUN_DATE}` /
+inventory period and only loops over those tiles. Use
+`--data_tile_filter off` only when intentionally processing the full
+canonical tile roster.
+
 Optional combined-state QA for runs/intervals that need a publication gate:
 
 ```bash
@@ -666,15 +693,14 @@ python -m src.scripts.zonal_statistics.pub_scripts.pub_nghgi \
   --validate_jrc
 ```
 
-## Stage 10: Global Map Aggregation
+## Stage 10: Global Raster Aggregation
 
 Primary scripts:
 
 - `src/scripts/postprocessing/visualization/create_global_raster.py`
-- `src/scripts/postprocessing/visualization/create_global_displays.py`
 - `src/scripts/postprocessing/visualization/build_drained_binary_raster.py`
 
-Aggregate global rasters for the three inventory source versions at minimum:
+Aggregate 0.01-degree global rasters for the three inventory source versions at minimum:
 
 ```bash
 python -m src.scripts.postprocessing.visualization.create_global_raster \
@@ -686,15 +712,13 @@ python -m src.scripts.postprocessing.visualization.create_global_raster \
   --native_deg 0.00025
 ```
 
-Render display assets:
+When `combined_state` is included, this command also writes a companion
+`combined_state_reclassified` GeoTIFF with these UInt8 classes:
+`1=undrained organic soil`, `2=drained only`, `3=burned only`,
+`4=drained+burned`, and `255=nodata/non-organic`.
 
-```bash
-python -m src.scripts.postprocessing.visualization.create_global_displays \
-  --date_tag {RUN_DATE} \
-  --run_name {RUN_NAME} \
-  --model_version {MODEL_VERSION} \
-  --read_from_s3
-```
+Do not render display assets for this rerun gate; the 0.01-degree aggregated
+rasters are the required map artifacts.
 
 Run at least for:
 

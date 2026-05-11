@@ -8,7 +8,9 @@ import logging
 import tempfile
 import posixpath as pp
 import re
+import math
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pandas as pd
 import geopandas as gpd
@@ -17,6 +19,8 @@ import botocore
 import dask
 from dask import delayed
 from dask.distributed import LocalCluster, Client
+from rasterio.warp import transform_bounds
+from rasterio.windows import Window, from_bounds
 from shapely.geometry import box
 
 # Adjust imports according to your folder structure
@@ -36,6 +40,7 @@ BUCKET = cn.s3_bucket_name
 RESOLUTION = cn.resolution
 PEAT_CACHE = Path(tempfile.gettempdir()) / "peatmap_cache"
 DATE_TOKEN_RE = re.compile(r"^\d{8}$")
+WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 ################################################################################
 # Helper Functions
@@ -72,11 +77,176 @@ def dated_raw_path(path, raw_date):
     return "/".join(parts)
 
 
+def _has_uri_scheme(path):
+    return bool(urlparse(str(path)).scheme)
+
+
+def _is_http_url(path):
+    return urlparse(str(path)).scheme in {"http", "https"}
+
+
+def _is_s3_uri(path):
+    return str(path).startswith("s3://")
+
+
+def _is_vsi_path(path):
+    return str(path).startswith("/vsi")
+
+
+def _is_absolute_path(path):
+    raw = str(path)
+    return os.path.isabs(raw) or bool(WINDOWS_ABS_PATH_RE.match(raw))
+
+
+def _split_s3_uri(uri):
+    bucket, key = str(uri)[len("s3://") :].split("/", 1)
+    return bucket, key
+
+
+def _is_single_tif_path(path):
+    parsed = urlparse(str(path))
+    path_part = parsed.path if parsed.scheme else str(path)
+    return path_part.lower().endswith((".tif", ".tiff"))
+
+
+def _source_file_exists(path):
+    if _is_s3_uri(path):
+        bucket, key = _split_s3_uri(path)
+        return uutil.s3_file_exists(bucket, key)
+    if _is_http_url(path) or _is_vsi_path(path):
+        # Let GDAL do the detailed open/error handling for HTTP/VSI sources.
+        # This avoids issuing one extra HEAD request per output tile.
+        return True
+    return Path(path).exists()
+
+
+def _gdal_input_path(path):
+    raw = str(path)
+    if raw.startswith("/vsi"):
+        return raw
+    if _is_s3_uri(raw):
+        return raw.replace("s3://", "/vsis3/", 1)
+    if _is_http_url(raw):
+        return f"/vsicurl/{raw}"
+    return raw
+
+
+def _tile_intersects_bounds(tile_id, source_bounds):
+    tile_w, tile_s, tile_e, tile_n = bounds_for_tile(tile_id)
+    src_w, src_s, src_e, src_n = source_bounds
+    return (
+        max(tile_w, src_w) < min(tile_e, src_e)
+        and max(tile_s, src_s) < min(tile_n, src_n)
+    )
+
+
+def _source_raster_bounds(path):
+    with rasterio.Env(
+        GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
+        CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif,.tiff",
+    ):
+        with rasterio.open(_gdal_input_path(path)) as src:
+            bounds = src.bounds
+            if src.crs and src.crs.to_epsg() != 4326:
+                left, bottom, right, top = transform_bounds(
+                    src.crs, "EPSG:4326", *bounds, densify_pts=21
+                )
+            else:
+                left, bottom, right, top = bounds.left, bounds.bottom, bounds.right, bounds.top
+            return (float(left), float(bottom), float(right), float(top))
+
+
+def _filter_tiles_to_source_bounds(tids, source_path):
+    if not source_path or not _is_single_tif_path(source_path):
+        return list(tids)
+
+    try:
+        source_bounds = _source_raster_bounds(source_path)
+    except Exception as exc:
+        log.warning("Could not read source bounds for %s; processing all tiles. Error: %s", source_path, exc)
+        return list(tids)
+
+    filtered = [tid for tid in tids if _tile_intersects_bounds(tid, source_bounds)]
+    skipped = len(tids) - len(filtered)
+    log.info(
+        "Source bounds %s overlap %d/%d tile(s); skipping %d out-of-bounds tile(s).",
+        source_bounds,
+        len(filtered),
+        len(tids),
+        skipped,
+    )
+    return filtered
+
+
+def _raster_has_positive_data(path):
+    with rasterio.open(path) as src:
+        for _, window in src.block_windows(1):
+            data = src.read(1, window=window, masked=True)
+            if bool((data > 0).any()):
+                return True
+    return False
+
+
+def _round_and_clip_window(window, width, height):
+    col_off = max(0, int(math.floor(window.col_off)))
+    row_off = max(0, int(math.floor(window.row_off)))
+    col_end = min(width, int(math.ceil(window.col_off + window.width)))
+    row_end = min(height, int(math.ceil(window.row_off + window.height)))
+    if col_end <= col_off or row_end <= row_off:
+        return None
+    return Window(col_off, row_off, col_end - col_off, row_end - row_off)
+
+
+def _window_intersection(a, b):
+    col_off = max(a.col_off, b.col_off)
+    row_off = max(a.row_off, b.row_off)
+    col_end = min(a.col_off + a.width, b.col_off + b.width)
+    row_end = min(a.row_off + a.height, b.row_off + b.height)
+    if col_end <= col_off or row_end <= row_off:
+        return None
+    return Window(col_off, row_off, col_end - col_off, row_end - row_off)
+
+
+def _source_window_has_positive_data(source_path, tile_bounds):
+    with rasterio.Env(
+        GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
+        CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif,.tiff",
+    ):
+        with rasterio.open(_gdal_input_path(source_path)) as src:
+            if src.crs and src.crs.to_epsg() != 4326:
+                return True
+            raw_window = from_bounds(*tile_bounds, transform=src.transform)
+            tile_window = _round_and_clip_window(raw_window, src.width, src.height)
+            if tile_window is None:
+                return False
+
+            for _, block_window in src.block_windows(1):
+                read_window = _window_intersection(tile_window, block_window)
+                if read_window is None:
+                    continue
+                data = src.read(1, window=read_window, masked=True)
+                if bool((data > 0).any()):
+                    return True
+    return False
+
+
+def _apply_threshold_in_blocks(path, threshold_value):
+    with rasterio.open(path, "r+") as dst:
+        for _, window in dst.block_windows(1):
+            arr = dst.read(1, window=window)
+            dst.write((arr > threshold_value).astype("uint8"), 1, window=window)
+
+
 def resolve_raw_path(ds, raw_date=None, raw_path=None):
     raw = raw_path or ds["s3_raw"]
-    raw = dated_raw_path(raw, raw_date)
-    if not raw.startswith("s3://"):
-        raw = f"s3://{BUCKET}/{raw.lstrip('/')}"
+    if raw_date and raw_path is None:
+        raw = dated_raw_path(raw, raw_date)
+    if (
+        not _has_uri_scheme(raw)
+        and not _is_vsi_path(raw)
+        and not _is_absolute_path(raw)
+    ):
+        raw = f"s3://{BUCKET}/{str(raw).lstrip('/')}"
     return raw
 
 
@@ -202,6 +372,7 @@ def mosaic_and_warp_raster(
     date_str=None,
     raw_date=None,
     raw_path=None,
+    skip_empty_tiles=True,
 ):
     """
     If ds['s3_raw'] is a single .tif, skip listing and warp that file directly.
@@ -217,14 +388,19 @@ def mosaic_and_warp_raster(
     raw_path = resolve_raw_path(ds, raw_date=raw_date, raw_path=raw_path)
 
     # Single .tif approach
-    if raw_path.lower().endswith('.tif'):
+    if _is_single_tif_path(raw_path):
         source_for_warp = raw_path
         log.info(f"[{ds_key}|{tid}] Using single-file approach: {source_for_warp}")
 
     else:
+        if not _is_s3_uri(raw_path):
+            raise ValueError(
+                f"[{ds_key}|{tid}] folder-style raw inputs must be S3 prefixes; "
+                f"got {raw_path!r}. Pass a single .tif/.tiff URL or file with --raw_path."
+            )
         # Possibly multiple .tif => do the mosaic approach
         # Remove s3://bucket/ to get the prefix for listing
-        listing_prefix = raw_path.replace(f"s3://{BUCKET}/", "", 1)
+        listing_prefix = raw_path
         raw_pattern = ds.get('raw_pattern', '*.tif')
 
         try:
@@ -252,12 +428,18 @@ def mosaic_and_warp_raster(
             source_for_warp = all_rasters[0]
 
     # Verify the raster exists before warping
-    if not uutil.s3_file_exists(BUCKET, raw_path.replace(f"s3://{BUCKET}/", "", 1)):
+    if not _source_file_exists(source_for_warp):
         log.error(f"[{ds_key}|{tid}] raw raster not found: {raw_path}")
         return
 
     # Warp to 10×10 deg output
     xmin, ymin, xmax, ymax = bounds_for_tile(tid)
+    tile_bounds = (xmin, ymin, xmax, ymax)
+    if skip_empty_tiles and ds_key in {"ogh", "ogh_unthresholded"} and _is_single_tif_path(source_for_warp):
+        if not _source_window_has_positive_data(source_for_warp, tile_bounds):
+            log.info(f"[{ds_key}|{tid}] source window contains no positive values. Skipping warp/upload.")
+            return
+
     warp_to_hansen_coiled(
         source_vrt_path=source_for_warp,
         filename=str(local_out),
@@ -276,10 +458,14 @@ def mosaic_and_warp_raster(
     # Apply threshold if needed
     threshold_value = ds.get("threshold", None)
     if threshold_value is not None:
-        with rasterio.open(local_out, "r+") as dst:
-            arr = dst.read(1)
-            arr = (arr > threshold_value).astype("uint8")
-            dst.write(arr, 1)
+        _apply_threshold_in_blocks(local_out, threshold_value)
+
+    if skip_empty_tiles and ds_key in {"ogh", "ogh_unthresholded"}:
+        if not _raster_has_positive_data(local_out):
+            log.info(f"[{ds_key}|{tid}] output contains no positive values. Skipping upload.")
+            if local_out.exists():
+                local_out.unlink()
+            return
 
     if mode != "test":
         uutil.upload_file_to_s3(str(local_out), BUCKET, s3_out)
@@ -290,7 +476,7 @@ def mosaic_and_warp_raster(
 ################################################################################
 # Build and submit tasks
 ################################################################################
-def build_tasks(tids, ds_keys, mode, date_str=None, raw_date=None, raw_path=None):
+def build_tasks(tids, ds_keys, mode, date_str=None, raw_date=None, raw_path=None, skip_empty_tiles=True):
     tasks = []
     for tid in tids:
         for k in ds_keys:
@@ -305,6 +491,7 @@ def build_tasks(tids, ds_keys, mode, date_str=None, raw_date=None, raw_path=None
                         date_str,
                         raw_date,
                         raw_path,
+                        skip_empty_tiles,
                     )
                 )
     return tasks
@@ -323,6 +510,7 @@ def main(
     cluster_name="peat_masks",
     n_workers=20,
     worker_memory="32GiB",
+    skip_empty_tiles=True,
 ):
     cluster = None
     client_obj = None
@@ -351,12 +539,22 @@ def main(
     if raw_path and len(ds_keys) != 1:
         raise ValueError("--raw_path requires --dataset so it is applied to exactly one source")
     tids = [tile_id] if tile_id else cn.tile_id_list
+    if len(ds_keys) == 1 and ds_keys[0] != "peatmap":
+        raw_for_bounds = resolve_raw_path(
+            cn.datasets["peat"][ds_keys[0]],
+            raw_date=raw_date,
+            raw_path=raw_path,
+        )
+        tids = _filter_tiles_to_source_bounds(tids, raw_for_bounds)
 
     log.info(
         f"Datasets: {ds_keys}, Tiles: {len(tids)}, output_date={date_str}, "
-        f"raw_date={raw_date}, cluster_name={cluster_name}, n_workers={n_workers}"
+        f"raw_date={raw_date}, cluster_name={cluster_name}, n_workers={n_workers}, "
+        f"skip_empty_tiles={skip_empty_tiles}"
     )
-    tasks = build_tasks(tids, ds_keys, run_mode, date_str, raw_date, raw_path)
+    if not tids:
+        log.info("No tiles remain after source-bounds filtering. Nothing to do.")
+    tasks = build_tasks(tids, ds_keys, run_mode, date_str, raw_date, raw_path, skip_empty_tiles)
 
     dask.compute(*tasks)
 
@@ -379,19 +577,28 @@ if __name__ == "__main__":
     parser.add_argument("--cluster_name", default="peat_masks", help="Coiled cluster name to attach to.")
     parser.add_argument("--n_workers", type=int, default=20, help="Expected Coiled worker count for logging/cluster helper.")
     parser.add_argument("--worker_memory", default="32GiB", help="Expected Coiled worker memory for logging/cluster helper.")
+    parser.add_argument(
+        "--upload_empty_tiles",
+        action="store_true",
+        help="Upload all-zero OGH output tiles instead of skipping them.",
+    )
     parser.add_argument("--date", default=None, help="Output date tag (YYYYMMDD). Defaults to today's UTC date.")
     parser.add_argument(
         "--raw_date",
         default=None,
         help=(
             "Date folder for dated raw raster inputs. For OGH single-file inputs, "
-            "this replaces or inserts the YYYYMMDD folder before the GeoTIFF name."
+            "this replaces or inserts the YYYYMMDD folder before the configured "
+            "GeoTIFF name. Ignored when --raw_path is supplied."
         ),
     )
     parser.add_argument(
         "--raw_path",
         default=None,
-        help="Fully specified raw raster path/key for the selected dataset. Requires --dataset.",
+        help=(
+            "Fully specified raw raster path/key for the selected dataset. "
+            "Supports s3://, https://, /vsi*, and local paths. Requires --dataset."
+        ),
     )
     args = parser.parse_args()
     main(
@@ -405,4 +612,5 @@ if __name__ == "__main__":
         args.cluster_name,
         args.n_workers,
         args.worker_memory,
+        not args.upload_empty_tiles,
     )

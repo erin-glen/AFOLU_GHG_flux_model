@@ -19,6 +19,10 @@ Assumptions (this version)
   take the mode of each component independently per block, then repack. The
   has-drained / has-burned bits are set whenever the aggregated component is nonzero.
   Output is written as UInt32 with nodata=0.
+- Whenever `combined_state` is aggregated, also write a UInt8
+  `combined_state_reclassified` companion raster:
+  1=undrained organic soil, 2=drained only, 3=burned only, 4=drained+burned,
+  255=nodata/non-organic.
 - No unit conversions are performed; no input tiles are modified or overwritten.
 
 Examples
@@ -70,6 +74,24 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
 # --------------------------------------------------------------------
 # Constants / helpers
 # --------------------------------------------------------------------
+
+COMBINED_STATE_RECLASS_DATASET = "combined_state_reclassified"
+COMBINED_STATE_RECLASS_NODATA = np.uint8(255)
+COMBINED_STATE_RECLASS_UNDRAINED = np.uint8(1)
+COMBINED_STATE_RECLASS_DRAINED_ONLY = np.uint8(2)
+COMBINED_STATE_RECLASS_BURNED_ONLY = np.uint8(3)
+COMBINED_STATE_RECLASS_DRAINED_BURNED = np.uint8(4)
+
+_DRAINED_STATE_ID_LUT_SIZE = 1 << zc.COMBINED_STATE_DRAINED_BITS
+
+COMBINED_STATE_RECLASS_TAGS = {
+    "class_1": "undrained organic soil",
+    "class_2": "drained only",
+    "class_3": "burned only",
+    "class_4": "drained+burned",
+    "nodata": str(int(COMBINED_STATE_RECLASS_NODATA)),
+}
+
 
 def _split_cli_items(values: Optional[List[str]]) -> Optional[List[str]]:
     """Normalize repeated, comma-delimited, or space-delimited CLI values."""
@@ -133,6 +155,92 @@ def _mode_per_component(arr: np.ndarray, native_deg: float, target_deg: float) -
     return out
 
 
+def _build_drained_state_luts() -> Tuple[np.ndarray, np.ndarray]:
+    """Return LUTs identifying organic-soil and drained-state ids."""
+    organic = np.zeros(_DRAINED_STATE_ID_LUT_SIZE, dtype=bool)
+    drained = np.zeros(_DRAINED_STATE_ID_LUT_SIZE, dtype=bool)
+    for idx, code in zc.DRAINED_STATE_ID_TO_CODE.items():
+        if not 0 <= idx < _DRAINED_STATE_ID_LUT_SIZE:
+            continue
+        if code.startswith("16"):
+            organic[idx] = True
+        elif code.startswith(("11", "12", "13", "14", "15")):
+            organic[idx] = True
+            drained[idx] = True
+    return organic, drained
+
+
+_ORGANIC_BY_DRAINED_ID, _DRAINED_BY_DRAINED_ID = _build_drained_state_luts()
+
+
+def _reclassify_combined_state(arr: np.ndarray) -> np.ndarray:
+    """
+    Collapse packed combined_state values into publication map classes.
+
+    Output classes:
+        1: undrained organic soil, not burned
+        2: drained only
+        3: burned only
+        4: drained + burned
+        255: nodata / non-organic / no state
+    """
+    packed = np.asarray(arr, dtype=np.uint32)
+    drained_id = (packed & np.uint32(zc.COMBINED_STATE_DRAINED_MASK)).astype(np.uint16)
+    burned_id = (
+        (packed >> np.uint32(zc.COMBINED_STATE_BURNED_SHIFT))
+        & np.uint32(zc.COMBINED_STATE_BURNED_MASK)
+    ).astype(np.uint16)
+
+    valid_drained_id = drained_id < np.uint16(_DRAINED_STATE_ID_LUT_SIZE)
+    organic = np.zeros(packed.shape, dtype=bool)
+    drained = np.zeros(packed.shape, dtype=bool)
+    organic[valid_drained_id] = _ORGANIC_BY_DRAINED_ID[drained_id[valid_drained_id]]
+    drained[valid_drained_id] = _DRAINED_BY_DRAINED_ID[drained_id[valid_drained_id]]
+
+    burned = burned_id > 0
+    organic |= burned
+
+    out = np.full(packed.shape, COMBINED_STATE_RECLASS_NODATA, dtype=np.uint8)
+    out[organic & ~drained & ~burned] = COMBINED_STATE_RECLASS_UNDRAINED
+    out[organic & drained & ~burned] = COMBINED_STATE_RECLASS_DRAINED_ONLY
+    out[organic & ~drained & burned] = COMBINED_STATE_RECLASS_BURNED_ONLY
+    out[organic & drained & burned] = COMBINED_STATE_RECLASS_DRAINED_BURNED
+    return out
+
+
+def _fill_reclassified_memmap(
+    src: np.ndarray,
+    dst: np.memmap,
+    *,
+    block_rows: int = 512,
+) -> None:
+    """Write the combined-state class raster in row blocks to keep memory bounded."""
+    rows = src.shape[0]
+    for row0 in range(0, rows, block_rows):
+        row1 = min(row0 + block_rows, rows)
+        dst[row0:row1, :] = _reclassify_combined_state(src[row0:row1, :])
+        dst.flush()
+
+
+def _combined_state_reclass_output(global_output_path: str, global_outfile: str) -> Tuple[str, str]:
+    """Return output directory and filename for the combined-state class raster."""
+    out_dir = global_output_path.rstrip("/")
+    marker = "/combined_state/"
+    if marker in out_dir:
+        out_dir = out_dir.replace(marker, f"/{COMBINED_STATE_RECLASS_DATASET}/")
+    else:
+        out_dir = f"{out_dir}/{COMBINED_STATE_RECLASS_DATASET}"
+
+    if "__combined_state_" in global_outfile:
+        out_name = global_outfile.replace(
+            "__combined_state_",
+            f"__{COMBINED_STATE_RECLASS_DATASET}_",
+        )
+    else:
+        stem, ext = os.path.splitext(global_outfile)
+        out_name = f"{stem}__{COMBINED_STATE_RECLASS_DATASET}{ext or '.tif'}"
+    return out_dir, out_name
+
 
 def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
     pp_dir = items.get("per_pixel_dir")
@@ -163,6 +271,7 @@ def _save_global_raster_correct(
     logger,
     int_nodata: Optional[int] = None,
     spool_dir: Optional[str] = None,
+    tags: Optional[dict[str, str]] = None,
 ) -> str:
     """
     Write a single-band GeoTIFF with a correct geotransform derived from rows & cols.
@@ -211,6 +320,8 @@ def _save_global_raster_correct(
     with rasterio.Env(**env_kwargs):
         with rasterio.open(vsi_path, "w", **profile) as dst:
             dst.write(arr, 1)
+            if tags:
+                dst.update_tags(**tags)
 
     logger.info("Saved global (%s) → %s", np.dtype(dtype).name, dst_path)
     return dst_path
@@ -366,6 +477,7 @@ def combine_global_raster(
     *,
     out_dtype: Optional[np.dtype] = None,
     int_nodata: Optional[int] = None,
+    write_combined_state_reclass: bool = False,
 ):
     """Legacy in-RAM combine; now writes with correct transform and S3-safe spooling."""
     logger = lu.setup_logging()
@@ -413,6 +525,22 @@ def combine_global_raster(
         int_nodata=int_nodata_eff,
         spool_dir=tempfile.gettempdir(),  # safe default
     )
+    if write_combined_state_reclass:
+        reclass_dir, reclass_name = _combined_state_reclass_output(
+            global_output_path,
+            global_outfile,
+        )
+        _ = _save_global_raster_correct(
+            bounds=(-180, -90, 180, 90),
+            arr=_reclassify_combined_state(global_raster),
+            dtype=np.uint8,
+            dst_base=reclass_dir,
+            dst_name=reclass_name,
+            logger=logger,
+            int_nodata=int(COMBINED_STATE_RECLASS_NODATA),
+            spool_dir=tempfile.gettempdir(),
+            tags=COMBINED_STATE_RECLASS_TAGS,
+        )
     return "Success"
 
 
@@ -427,6 +555,7 @@ def combine_global_raster_streaming(
     *,
     out_dtype: Optional[np.dtype] = None,
     int_nodata: Optional[int] = None,
+    write_combined_state_reclass: bool = False,
 ):
     """
     Stream tiles into a global memmap on disk; then write with correct transform.
@@ -490,6 +619,31 @@ def combine_global_raster_streaming(
         int_nodata=int_nodata_eff,
         spool_dir=tmpdir,  # <-- S3 spooling will use this same directory
     )
+
+    if write_combined_state_reclass:
+        reclass_dir, reclass_name = _combined_state_reclass_output(
+            global_output_path,
+            global_outfile,
+        )
+        reclass_path = os.path.join(tmpdir, "combined_state_reclass_mm.dat")
+        reclass_mm = np.memmap(reclass_path, dtype=np.uint8, mode="w+", shape=(rows, cols))
+        _fill_reclassified_memmap(global_mm, reclass_mm)
+        _ = _save_global_raster_correct(
+            bounds=(-180, -90, 180, 90),
+            arr=reclass_mm,
+            dtype=np.uint8,
+            dst_base=reclass_dir,
+            dst_name=reclass_name,
+            logger=logger,
+            int_nodata=int(COMBINED_STATE_RECLASS_NODATA),
+            spool_dir=tmpdir,
+            tags=COMBINED_STATE_RECLASS_TAGS,
+        )
+        del reclass_mm
+        try:
+            os.remove(reclass_path)
+        except Exception:
+            pass
 
     # Cleanup
     try:
@@ -614,6 +768,7 @@ def aggregate_main(
                 is_final=is_final,
                 out_dtype=np.uint32,
                 int_nodata=0,  # 0 = no drained and no burned component present
+                write_combined_state_reclass=True,
             )
         else:
             _ = combine_global_raster_streaming(
@@ -644,7 +799,11 @@ def aggregate_main(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Aggregate to a target resolution and build global mosaics (SUM for totals; combined_state aggregated by component-wise mode and repacked)."
+        description=(
+            "Aggregate to a target resolution and build global mosaics "
+            "(SUM for totals; combined_state aggregated by component-wise mode, "
+            "repacked, and accompanied by a four-class reclassified raster)."
+        )
     )
     parser.add_argument("-cn", "--cluster_name", required=True)
     parser.add_argument("--date_tag", required=True)
