@@ -226,8 +226,9 @@ def sql_components_latest() -> str:
     Aggregate drained N2O, CO2 and peat area by emissions_state, then keep only
     the *latest* interval_end present in the data.
 
-    Critical bit: match gas flux types using prefix so that names like
-    `drained_co2_Mg_CO2...` and `drained_n2o_Mg_CO2e...` are picked up.
+    Critical bit: match on-site CO2 only. New zonal stats use the explicit
+    ``drained_co2_onsite`` name; archived runs may still contain the legacy
+    ``drained_co2`` field.
     """
     return f"""
     WITH base AS (
@@ -250,9 +251,16 @@ def sql_components_latest() -> str:
           CASE WHEN flux_type LIKE 'drained_n2o%%'
                THEN value ELSE 0 END
         ) AS drained_n2o,
-        -- capture drained_co2_Mg_CO2, drained_co2*, etc.
+        -- capture on-site CO2, excluding off-site and total CO2 fields.
         SUM(
-          CASE WHEN flux_type LIKE 'drained_co2%%'
+          CASE WHEN (
+                 flux_type LIKE 'drained_co2_onsite%%'
+                 OR (
+                   flux_type LIKE 'drained_co2%%'
+                   AND flux_type NOT LIKE 'drained_co2_offsite%%'
+                   AND flux_type NOT LIKE 'drained_total_co2%%'
+                 )
+               )
                THEN value ELSE 0 END
         ) AS drained_co2,
         -- peat area (ha)

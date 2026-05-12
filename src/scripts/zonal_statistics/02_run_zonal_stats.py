@@ -21,7 +21,7 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --run_name zarr_test_full \
   --chunk_size 10000 \
   --tile_ids 00N_110E,10N_120E \
-  --datasets drained_total burned_total drained_co2 drained_n2o
+  --datasets drained_total burned_total drained_co2_onsite drained_n2o
 
 # Explicit tiled execution (recommended for global/disjoint/large runs)
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
@@ -97,9 +97,10 @@ STATE_DATASETS: Dict[str, Dict[str, Any]] = {
 
 FLUX_DATASETS: Dict[str, Dict[str, Any]] = {
     "drained_total": {"source_var": "drained_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #standard drained output
-    "drained_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #subset for FAO/NGHGI
+    "drained_co2_onsite": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #subset for FAO/NGHGI
+    "drained_co2_offsite": {"source_var": "drained_co2_offsite_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #off-site DOC CO2
     "drained_n2o": {"source_var": "drained_n2o_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #subset for FAO/NGHGI
-    "drained_total_co2": {"source_var": "drained_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #for LULUCF
+    "drained_total_co2": {"source_var": ["drained_co2_Mg_CO2_ha_yr", "drained_co2_offsite_Mg_CO2_ha_yr"], "kind": "flux_per_ha_yr_sum"}, #for LULUCF
     "drained_total_ch4": {"source_var": ["drained_ch4_land_Mg_CO2e_ha_yr", "drained_ch4_ditch_Mg_CO2e_ha_yr"], "kind": "flux_per_ha_yr_sum"}, #for LULUCF
     "burned_total": {"source_var": "burned_total_Mg_CO2e_ha_yr", "kind": "flux_per_ha_yr"}, #standard burned output
     "burned_total_co2": {"source_var": "burned_co2_Mg_CO2_ha_yr", "kind": "flux_per_ha_yr"}, #for LULUCF
@@ -108,13 +109,19 @@ FLUX_DATASETS: Dict[str, Dict[str, Any]] = {
 
 FLUX_SPECS = {
     "drained_total": {"code": 0, "label": "drained_total_Mg_CO2e", "group": "drained"},
-    "drained_co2": {"code": 3, "label": "drained_co2_Mg_CO2", "group": "drained"},
+    "drained_co2_onsite": {"code": 3, "label": "drained_co2_onsite_Mg_CO2", "group": "drained"},
+    "drained_co2_offsite": {"code": 9, "label": "drained_co2_offsite_Mg_CO2", "group": "drained"},
     "drained_n2o": {"code": 4, "label": "drained_n2o_Mg_CO2e", "group": "drained"},
     "drained_total_co2": {"code": 5, "label": "drained_total_co2_Mg_CO2", "group": "drained"},
     "drained_total_ch4": {"code": 6, "label": "drained_total_ch4_Mg_CO2e", "group": "drained"},
     "burned_total": {"code": 1, "label": "burned_total_Mg_CO2e", "group": "burned"},
     "burned_total_co2": {"code": 7, "label": "burned_total_co2_Mg_CO2", "group": "burned"},
     "burned_total_ch4": {"code": 8, "label": "burned_total_ch4_Mg_CO2e", "group": "burned"},
+}
+FLUX_DATASET_ALIASES: Dict[str, str] = {
+    # One-release compatibility for older CLI args/manifests. New outputs use
+    # the explicit on-site name so off-site CO2 cannot be mistaken for absent.
+    "drained_co2": "drained_co2_onsite",
 }
 ALL_DATASETS: Dict[str, Dict[str, Any]] = {**STATE_DATASETS, **FLUX_DATASETS}
 
@@ -164,7 +171,8 @@ OPTIONAL_CONTEXTUAL_GROUPERS: Dict[str, Dict[str, Any]] = {
 def ordered_dataset_keys(selected: Optional[List[str]]) -> List[str]:
     if not selected:
         return list(FLUX_DATASETS.keys())
-    return [k for k in FLUX_DATASETS if k in set(selected)]
+    selected_canonical = {FLUX_DATASET_ALIASES.get(k, k) for k in selected}
+    return [k for k in FLUX_DATASETS if k in selected_canonical]
 
 # ---- Contextual Zarrs (must match Step 1) ----
 CONTEXTUAL_ZARR_ROOT = (
@@ -690,7 +698,8 @@ def resolve_flux_selection(selected_names: List[str], logger: Optional[logging.L
     ignored_state_keys = [k for k in selected_names if k in STATE_DATASETS]
     if ignored_state_keys and logger is not None:
         logger.warning("Ignoring state dataset keys passed to --datasets (flux-only selection now): %s", ignored_state_keys)
-    filtered = [k for k in selected_names if k in FLUX_DATASETS]
+    canonical_names = list(dict.fromkeys(FLUX_DATASET_ALIASES.get(k, k) for k in selected_names))
+    filtered = [k for k in canonical_names if k in FLUX_DATASETS]
     drained_fluxes = [k for k in filtered if FLUX_SPECS.get(k, {}).get("group") == "drained"]
     burned_fluxes = [k for k in filtered if FLUX_SPECS.get(k, {}).get("group") == "burned"]
     if not filtered:
@@ -1595,7 +1604,7 @@ def main(argv=None):
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT)
     parser.add_argument("--run_name", default="ogh_standard_model")
-    parser.add_argument("--datasets", nargs="+", choices=sorted(list(FLUX_DATASETS.keys()) + list(STATE_DATASETS.keys())),
+    parser.add_argument("--datasets", nargs="+", choices=sorted(list(FLUX_DATASETS.keys()) + list(FLUX_DATASET_ALIASES.keys()) + list(STATE_DATASETS.keys())),
                         help="Flux datasets to process (default: all flux datasets). State keys are ignored for compatibility.")
     parser.add_argument(
         "--contextual_groupers",

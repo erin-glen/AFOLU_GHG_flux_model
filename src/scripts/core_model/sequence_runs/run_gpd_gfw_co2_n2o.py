@@ -9,7 +9,7 @@ This orchestrator:
     * 2_per_pixel_soils_outputs (GFW + GPD)
     * 3_aggregate_soils_outputs (GFW + GPD)
     * 01_build_zarr_caches (GFW + GPD)
-    * 02_run_zonal_stats (GFW + GPD) for datasets: drained_co2, drained_n2o
+    * 02_run_zonal_stats (GFW + GPD) for datasets: drained_co2_onsite, drained_n2o
 - Streams stdout/stderr to the console and to per-step log files.
 - Supports dry-run, skip lists, and continue-on-error semantics.
 
@@ -128,7 +128,7 @@ def build_commands(
         ("01_build_zarr_caches[gpd]", base_zarr + ["--run_name", "gpd_standard_model_500m"])
     )
 
-    # --- Zonal statistics: run zonal stats (drained_co2 + drained_n2o only) ---
+    # --- Zonal statistics: run zonal stats (on-site drained CO2 + drained N2O only) ---
     base_zstats = [
         "python",
         "-m",
@@ -146,7 +146,7 @@ def build_commands(
         "--diagnostics",
         "off",
         "--datasets",
-        "drained_co2",
+        "drained_co2_onsite",
         "drained_n2o",
     ]
     cmds.append(

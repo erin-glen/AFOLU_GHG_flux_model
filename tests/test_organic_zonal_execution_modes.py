@@ -189,6 +189,42 @@ def test_resolve_requested_contextual_groupers_canonical_deduped() -> None:
     assert resolved == ["wdpa", "kba", "drivers_of_loss"]
 
 
+def test_default_flux_selection_includes_offsite_and_total_co2_sums_sources() -> None:
+    assert "drained_co2_onsite" in organic_zonal.ordered_dataset_keys(None)
+    assert "drained_co2_offsite" in organic_zonal.ordered_dataset_keys(None)
+    assert "drained_co2" not in organic_zonal.ordered_dataset_keys(None)
+    assert organic_zonal.ordered_dataset_keys(["drained_co2"]) == ["drained_co2_onsite"]
+    assert (
+        organic_zonal.FLUX_SPECS["drained_co2_onsite"]["label"]
+        == "drained_co2_onsite_Mg_CO2"
+    )
+    assert organic_zonal.FLUX_DATASETS["drained_total_co2"]["source_var"] == [
+        "drained_co2_Mg_CO2_ha_yr",
+        "drained_co2_offsite_Mg_CO2_ha_yr",
+    ]
+    assert (
+        organic_zonal.zc.ZONAL_FLUX_LABELS_BY_KEY["drained_co2_offsite"]
+        == "drained_co2_offsite_Mg_CO2"
+    )
+
+    dsx = xr.Dataset(
+        {
+            "drained_co2_Mg_CO2_ha_yr": xr.DataArray(
+                np.array([[2.0]], dtype=np.float32), dims=("y", "x")
+            ),
+            "drained_co2_offsite_Mg_CO2_ha_yr": xr.DataArray(
+                np.array([[0.5]], dtype=np.float32), dims=("y", "x")
+            ),
+        }
+    )
+    arr = organic_zonal.dataset_from_mega(
+        organic_zonal.FLUX_DATASETS["drained_total_co2"],
+        dsx,
+        dataset_key="drained_total_co2",
+    )
+    assert np.isclose(float(arr.values[0, 0]), 2.5)
+
+
 def test_drivers_of_loss_contextual_grouper_registry() -> None:
     spec = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["drivers_of_loss"]
     assert spec["name"] == "drivers_of_TCL_1_km"

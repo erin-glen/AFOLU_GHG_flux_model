@@ -57,10 +57,16 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "var": "drained_total",
         "dtype": "float32",
     },
-    "drained_co2": {
+    "drained_co2_onsite": {
         "folder": "drained_co2_Mg_CO2_pixel_yr",
-        "zarr": "drained_co2_Mg_CO2_pixel_yr_{interval}.zarr",
-        "var": "drained_co2",
+        "zarr": "drained_co2_onsite_Mg_CO2_pixel_yr_{interval}.zarr",
+        "var": "drained_co2_onsite",
+        "dtype": "float32",
+    },
+    "drained_co2_offsite": {
+        "folder": "drained_co2_offsite_Mg_CO2_pixel_yr",
+        "zarr": "drained_co2_offsite_Mg_CO2_pixel_yr_{interval}.zarr",
+        "var": "drained_co2_offsite",
         "dtype": "float32",
     },
     "drained_n2o": {
@@ -70,7 +76,10 @@ DATASETS: Dict[str, Dict[str, Any]] = {
         "dtype": "float32",
     },
     "drained_total_co2": {
-        "folder": "drained_total_co2_Mg_CO2_pixel_yr",
+        "folders": [
+            "drained_co2_Mg_CO2_pixel_yr",
+            "drained_co2_offsite_Mg_CO2_pixel_yr",
+        ],
         "zarr": "drained_total_co2_Mg_CO2_pixel_yr_{interval}.zarr",
         "var": "drained_total_co2",
         "dtype": "float32",
@@ -120,7 +129,8 @@ DATASETS: Dict[str, Dict[str, Any]] = {
 }
 FLUX_DATASET_KEYS: Tuple[str, ...] = (
     "drained_total",
-    "drained_co2",
+    "drained_co2_onsite",
+    "drained_co2_offsite",
     "drained_n2o",
     "drained_total_co2",
     "drained_total_ch4",
@@ -128,6 +138,9 @@ FLUX_DATASET_KEYS: Tuple[str, ...] = (
     "burned_total_co2",
     "burned_total_ch4",
 )
+DATASET_ALIASES: Dict[str, str] = {
+    "drained_co2": "drained_co2_onsite",
+}
 
 ZARR_CACHE_PREFIX = OUTPUT_BASE + "/zarr/{run_name}/{run_date}/{interval}/"
 FOLDER_TEMPLATE = (
@@ -139,7 +152,8 @@ FOLDER_TEMPLATE = (
 def ordered_dataset_keys(selected: Optional[List[str]]) -> List[str]:
     if not selected:
         return list(DATASETS.keys())
-    return [k for k in DATASETS if k in set(selected)]
+    selected_canonical = {DATASET_ALIASES.get(k, k) for k in selected}
+    return [k for k in DATASETS if k in selected_canonical]
 
 # ---- Contextual Zarrs (canonical reference grid = pixel_area) ----
 CONTEXTUAL_ZARR_ROOT = (
@@ -756,9 +770,19 @@ def build_paths(interval: str, *, tile_pixels: int, dataset_names: Optional[List
     out: Dict[str, Dict[str, Any]] = {}
     for name in ordered_dataset_keys(dataset_names):
         spec = DATASETS[name]
-        folder_uri = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
-        out[name] = {"folder": folder_uri, "zarr": zarr_base + spec["zarr"].format(interval=interval),
-                     "var": spec["var"], "dtype": spec["dtype"]}
+        path_spec = {
+            "zarr": zarr_base + spec["zarr"].format(interval=interval),
+            "var": spec["var"],
+            "dtype": spec["dtype"],
+        }
+        if "folders" in spec:
+            path_spec["folders"] = [
+                FOLDER_TEMPLATE.format(folder=folder, interval=interval, **kw2)
+                for folder in spec["folders"]
+            ]
+        else:
+            path_spec["folder"] = FOLDER_TEMPLATE.format(folder=spec["folder"], interval=interval, **kw2)
+        out[name] = path_spec
     return out
 
 def run(args: argparse.Namespace) -> None:
@@ -883,9 +907,11 @@ def run(args: argparse.Namespace) -> None:
 
         for key in dataset_names:
             spec = paths[key]
-            folder = spec["folder"]; zpath = spec["zarr"]; var = spec["var"]; dtype = spec["dtype"]
+            folders = spec.get("folders") or [spec["folder"]]
+            folder_label = " + ".join(folders)
+            zpath = spec["zarr"]; var = spec["var"]; dtype = spec["dtype"]
 
-            logger.info("flm: Building %s → %s", folder, zpath)
+            logger.info("flm: Building %s → %s", folder_label, zpath)
 
             exists = zarr_exists(zpath)
             if exists and args.write_mode == "w-":
@@ -898,36 +924,43 @@ def run(args: argparse.Namespace) -> None:
                 remove_store_recursively(zpath)
 
             # Open inputs
-            try:
-                tiffs = list_folder_uris(folder)
-            except FileNotFoundError:
-                if key == "combined_state_nodes":
-                    legacy_folder = folder.replace("/combined_state/", "/emissions_state/")
-                    logger.warning(
-                        "flm: canonical combined_state cache input missing; using legacy archived folder %s",
-                        legacy_folder,
-                    )
-                    tiffs = list_folder_uris(legacy_folder)
-                else:
-                    raise
-            if not tiffs:
-                raise FileNotFoundError(f"No GeoTIFFs found under {folder}")
-            logger.info("flm:   • %d TIFF(s) found", len(tiffs))
+            da_parts: List[xr.DataArray] = []
+            for folder in folders:
+                try:
+                    tiffs = list_folder_uris(folder)
+                except FileNotFoundError:
+                    if key == "combined_state_nodes":
+                        legacy_folder = folder.replace("/combined_state/", "/emissions_state/")
+                        logger.warning(
+                            "flm: canonical combined_state cache input missing; using legacy archived folder %s",
+                            legacy_folder,
+                        )
+                        tiffs = list_folder_uris(legacy_folder)
+                    else:
+                        raise
+                if not tiffs:
+                    raise FileNotFoundError(f"No GeoTIFFs found under {folder}")
+                logger.info("flm:   • %d TIFF(s) found in %s", len(tiffs), folder)
 
-            try:
-                da_in = make_xarray_chunks_from_tiffs(tiffs, args.chunk_size)
-            except Exception as e:
-                logger.warning("open_mfdataset failed: %s. Attempting to filter unreadable tiles.", e)
-                valid: List[str] = []
-                for u in tiffs:
-                    try:
-                        with xr.open_dataset(u):
-                            valid.append(u)
-                    except Exception:
-                        logger.warning("Skipping unreadable TIFF: %s", u)
-                if not valid:
-                    raise RuntimeError(f"All tiles failed for {folder}")
-                da_in = make_xarray_chunks_from_tiffs(valid, args.chunk_size)
+                try:
+                    da_part = make_xarray_chunks_from_tiffs(tiffs, args.chunk_size)
+                except Exception as e:
+                    logger.warning("open_mfdataset failed: %s. Attempting to filter unreadable tiles.", e)
+                    valid: List[str] = []
+                    for u in tiffs:
+                        try:
+                            with xr.open_dataset(u):
+                                valid.append(u)
+                        except Exception:
+                            logger.warning("Skipping unreadable TIFF: %s", u)
+                    if not valid:
+                        raise RuntimeError(f"All tiles failed for {folder}")
+                    da_part = make_xarray_chunks_from_tiffs(valid, args.chunk_size)
+                da_parts.append(da_part)
+
+            da_in = da_parts[0]
+            for da_part in da_parts[1:]:
+                da_in = da_in + da_part
 
             # Align to canonical grid
             da_aligned = align_like_nearest_tol(da_in, ref, tol)
@@ -969,7 +1002,7 @@ def main(argv=None):
     parser.add_argument("--tile_pixels", type=int, default=40000,
                         help="Input tile size in pixels in the source folder path (4000 or 40000).")
     parser.add_argument("--run_name", default="ogh_standard_model")
-    parser.add_argument("--datasets", nargs="+", choices=sorted(DATASETS.keys()),
+    parser.add_argument("--datasets", nargs="+", choices=sorted(list(DATASETS.keys()) + list(DATASET_ALIASES.keys())),
                         help="Legacy mode only: explicit flux datasets to process.")
     parser.add_argument("--write_mode", choices=["w", "w-"], default="w-",
                         help="'w' overwrite, 'w-' skip if exists (validate only).")

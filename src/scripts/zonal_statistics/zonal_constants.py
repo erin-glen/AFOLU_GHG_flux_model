@@ -10,7 +10,10 @@ STATE_CODE_PAD_DIGITS = PAD_DIGITS
 
 ZONAL_FLUX_LABELS_BY_KEY: dict[str, str] = {
     "drained_total": "drained_total_Mg_CO2e",
+    "drained_co2_onsite": "drained_co2_onsite_Mg_CO2",
+    # Compatibility for archived zonal parquets/manifests.
     "drained_co2": "drained_co2_Mg_CO2",
+    "drained_co2_offsite": "drained_co2_offsite_Mg_CO2",
     "drained_n2o": "drained_n2o_Mg_CO2e",
     "drained_total_co2": "drained_total_co2_Mg_CO2",
     "drained_total_ch4": "drained_total_ch4_Mg_CO2e",
