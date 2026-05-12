@@ -10,6 +10,7 @@ Capacity tips:
 """
 
 import argparse
+import inspect
 import sys
 import coiled
 
@@ -88,6 +89,7 @@ def create_cluster(
     allow_cross_zone: bool = False,
     arch: str = "arm",
     scheduler_vm_types: list[str] | None = None,
+    software: str | None = None,
 ):
     """
     Create a Coiled cluster with availability-friendly instance-type fallbacks.
@@ -106,31 +108,38 @@ def create_cluster(
     idle_timeout_minutes = IDLE_TIMEOUT_MINUTES.get(worker_memory, 20)
     idle_timeout = f"{idle_timeout_minutes} minutes"
 
-    cluster = coiled.Cluster(
-        name=cluster_name,
-        workspace=workspace,            # replaces deprecated account kwarg
-        region=region,
-
-        n_workers=n_workers,
-
+    cluster_kwargs = {
+        "name": cluster_name,
+        "software": software,
+        "region": region,
+        "n_workers": n_workers,
         # Availability knobs
-        spot_policy=spot_policy,        # "on-demand" | "spot" | "spot_with_fallback"
-        use_best_zone=use_best_zone,    # pick best AZ in-region for your requested instances
-        allow_cross_zone=allow_cross_zone,  # may improve capacity; may increase network cost
-
-        idle_timeout=idle_timeout,
-
-        tags={"project": "AFOLU_flux_model"},
-
+        "spot_policy": spot_policy,        # "on-demand" | "spot" | "spot_with_fallback"
+        "use_best_zone": use_best_zone,    # pick best AZ in-region for your requested instances
+        "allow_cross_zone": allow_cross_zone,  # may improve capacity; may increase network cost
+        "idle_timeout": idle_timeout,
+        "tags": {"project": "AFOLU_flux_model"},
         # Instance types (lists prioritized in order)
-        scheduler_vm_types=scheduler_vm_types_final,
-        worker_vm_types=worker_vm_types,
+        "scheduler_vm_types": scheduler_vm_types_final,
+        "worker_vm_types": worker_vm_types,
+        "worker_options": {"nthreads": int(threads_per_worker)},
+    }
+    cluster_params = inspect.signature(coiled.Cluster).parameters
+    cluster_kwargs = {
+        key: value
+        for key, value in cluster_kwargs.items()
+        if key in cluster_params
+    }
+    if "workspace" in cluster_params:
+        cluster_kwargs["workspace"] = workspace
+    else:
+        cluster_kwargs["account"] = workspace
 
-        worker_options={"nthreads": int(threads_per_worker)},
-    )
+    cluster = coiled.Cluster(**cluster_kwargs)
 
     print(f"Cluster created with name: {cluster.name}")
     print(f"Workspace: {workspace}; Region: {region}; Arch: {arch}")
+    print(f"Software environment: {software or 'package sync/default'}")
     print(f"Spot policy: {spot_policy}; use_best_zone: {use_best_zone}; allow_cross_zone: {allow_cross_zone}")
     print(f"Scheduler types (priority): {scheduler_vm_types_final}")
     print(f"Worker types (priority): {worker_vm_types}")
@@ -165,6 +174,8 @@ if __name__ == "__main__":
                         help="CPU architecture for all instance types (default: arm)")
     parser.add_argument("--scheduler-vm-types", type=_csv_list, default=None,
                         help='Override scheduler instance types as CSV (must match --arch), e.g. "m7g.large,m6g.large,t4g.large"')
+    parser.add_argument("--software", type=str, default=None,
+                        help="Optional Coiled software environment name, e.g. coiled_20251119")
 
     args = parser.parse_args()
 
@@ -180,6 +191,7 @@ if __name__ == "__main__":
         allow_cross_zone=args.cross_zone,
         arch=args.arch,
         scheduler_vm_types=args.scheduler_vm_types,
+        software=args.software,
     )
 
 """
