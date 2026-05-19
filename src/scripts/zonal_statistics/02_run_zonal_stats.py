@@ -438,6 +438,22 @@ def patch_zarr_asyncarray_config_on_workers(client, logger: logging.Logger) -> N
             return {"ok": False, "error": repr(exc)}
 
     try:
+        from distributed.diagnostics.plugin import WorkerPlugin
+
+        class ZarrAsyncArrayConfigPlugin(WorkerPlugin):
+            def setup(self, worker) -> None:  # noqa: ANN001 - Dask plugin API
+                _ = worker
+                _patch()
+
+        plugin = ZarrAsyncArrayConfigPlugin()
+        try:
+            client.register_plugin(plugin, name="zarr-asyncarray-config")
+        except AttributeError:
+            client.register_worker_plugin(plugin, name="zarr-asyncarray-config")
+    except Exception as exc:
+        logger.warning("Unable to register worker zarr AsyncArray compatibility plugin: %s", exc)
+
+    try:
         results = client.run(_patch)
     except Exception as exc:
         logger.warning("Unable to apply worker zarr AsyncArray compatibility patch: %s", exc)
@@ -1531,10 +1547,19 @@ def run(args: argparse.Namespace) -> None:
             else:
                 stage_dir = tile_stage_root / interval
                 import shutil
-                if stage_dir.exists():
+                if stage_dir.exists() and not args.keep_tile_stage:
                     shutil.rmtree(stage_dir, ignore_errors=True)
                 stage_dir.mkdir(parents=True, exist_ok=True)
                 for tile_id in interval_plan["tile_ids_to_process"]:
+                    tile_stage_path = stage_dir / tile_id
+                    if args.keep_tile_stage and any(tile_stage_path.glob("*.parquet")):
+                        logger.info(
+                            "Tile skip: interval=%s tile_id=%s existing tile-stage parquet found at %s",
+                            interval,
+                            tile_id,
+                            tile_stage_path,
+                        )
+                        continue
                     logger.info("Tile start: interval=%s tile_id=%s", interval, tile_id)
                     tile_bbox = list(uu.get_10x10_tile_bounds(tile_id))
                     mega_ds = open_mega_zarr_region(mega_zarr_path, interval_end_year, tile_bbox, args.chunk_size)
@@ -1575,7 +1600,7 @@ def run(args: argparse.Namespace) -> None:
                         reduce_label=f"reduce:combined_state:{interval}:{tile_id}",
                     )
                     df_tile["tile_id"] = tile_id
-                    ds.write_dataset(_table_from_canonical_frame(df_tile), base_dir=str(stage_dir / tile_id), filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
+                    ds.write_dataset(_table_from_canonical_frame(df_tile), base_dir=str(tile_stage_path), filesystem=local_arrow, format="parquet", existing_data_behavior="overwrite_or_ignore")
                     logger.info("Tile end: interval=%s tile_id=%s", interval, tile_id)
                 logger.info("Tile re-aggregation start: interval=%s tile_stage_dir=%s", interval, stage_dir)
                 df_e = finalize_interval_tile_outputs(stage_dir)
