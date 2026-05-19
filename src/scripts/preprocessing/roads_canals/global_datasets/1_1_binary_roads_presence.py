@@ -394,6 +394,7 @@ def main(
     chunk_bounds=None,
     chunk_size=2.0,
     client="local",
+    cluster_name="roads_canals",
     resolution="30m",           # fixed for this script
     product="presence",
     maxdist=1000,
@@ -415,7 +416,7 @@ def main(
     # Connect Dask/Coiled (or run local)
     run_local = (client == "local")
     cluster, dclient, run_local = uutil.connect_to_cluster(
-        cluster_name="roads_canals",
+        cluster_name=cluster_name,
         n_workers=20,
         region="us-east-1",
         run_local=run_local,
@@ -468,6 +469,7 @@ if __name__ == "__main__":
     parser.add_argument("--chunk_manifest", default=None, help="CSV of chunks to process; expects tile_id,minx,miny,maxx,maxy")
     parser.add_argument("--chunk_size", type=float, default=2.0, help="Chunk size in degrees")
     parser.add_argument("--client", default="local", choices=["local","coiled"])
+    parser.add_argument("--cluster_name", default="roads_canals", help="Existing Coiled cluster name to attach to")
     parser.add_argument("--resolution", default="30m", help="Fixed at 30m for this script")
     parser.add_argument("--product", default="presence",
                         help="Comma list: presence,distance[,density] (distance uploads under distance/)")
@@ -482,6 +484,7 @@ if __name__ == "__main__":
          chunk_bounds=args.chunk_bounds,
          chunk_size=args.chunk_size,
          client=args.client,
+         cluster_name=args.cluster_name,
          resolution=args.resolution,
          product=args.product,
          maxdist=args.maxdist,

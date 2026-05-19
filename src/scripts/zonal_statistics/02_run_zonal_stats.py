@@ -419,6 +419,42 @@ def maybe_persist_reference(
     return ref.persist()
 
 
+def patch_zarr_asyncarray_config_on_workers(client, logger: logging.Logger) -> None:
+    """Patch older worker-side zarr for AsyncArray objects serialized by newer clients."""
+
+    def _patch() -> dict:
+        try:
+            import zarr
+            from zarr.core.array import AsyncArray, parse_array_config
+
+            if not hasattr(AsyncArray, "_config"):
+                AsyncArray._config = parse_array_config(None)
+            return {
+                "ok": True,
+                "zarr": getattr(zarr, "__version__", "unknown"),
+                "patched": hasattr(AsyncArray, "_config"),
+            }
+        except Exception as exc:  # pragma: no cover - defensive worker compatibility hook
+            return {"ok": False, "error": repr(exc)}
+
+    try:
+        results = client.run(_patch)
+    except Exception as exc:
+        logger.warning("Unable to apply worker zarr AsyncArray compatibility patch: %s", exc)
+        return
+
+    failed = {worker: result for worker, result in results.items() if not result.get("ok")}
+    if failed:
+        logger.warning("Worker zarr AsyncArray compatibility patch failures: %s", failed)
+    else:
+        versions = sorted({result.get("zarr", "unknown") for result in results.values()})
+        logger.info(
+            "Worker zarr AsyncArray compatibility patch applied on %d workers; zarr_versions=%s",
+            len(results),
+            versions,
+        )
+
+
 def validate_selected_sources(
     mega_ds: xr.Dataset,
     selected_dataset_keys: List[str],
@@ -1329,6 +1365,8 @@ def run(args: argparse.Namespace) -> None:
             log_note="Organic soils zonal statistics (per-pixel; robust alignment)", run_local=run_local,
             model_type="organic_soils", stage=stage,
         )
+        if client is not None and not run_local:
+            patch_zarr_asyncarray_config_on_workers(client, logger)
         if args.debug:
             logger.setLevel(logging.DEBUG)
         logger.debug("Starting run with args: %s", args)

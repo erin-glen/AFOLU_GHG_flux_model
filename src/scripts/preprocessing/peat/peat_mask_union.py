@@ -367,6 +367,9 @@ def main(
     resample=None,
     output_date=None,
     dataset_dates=None,
+    cluster_name="peat_union",
+    n_workers=40,
+    worker_memory="64GiB",
 ):
     """
     If 30m union exists, skip re-union. If --resample=1km, do 1km step from
@@ -392,10 +395,10 @@ def main(
         log.info("Running locally.")
     else:
         cluster, client_obj, run_local_flag = uu.connect_to_cluster(
-            cluster_name="peat_union",
-            n_workers=40,
+            cluster_name=cluster_name,
+            n_workers=n_workers,
             region="us-east-1",
-            worker_memory="64GiB",
+            worker_memory=worker_memory,
         )
         if run_local_flag:
             log.warning("Coiled cluster unavailable or run_local requested; falling back to local execution.")
@@ -469,6 +472,22 @@ if __name__ == "__main__":
             "Use DATASET=none for undated layouts. May be supplied multiple times."
         ),
     )
+    parser.add_argument(
+        "--cluster_name",
+        default="peat_union",
+        help="Coiled cluster name to attach to.",
+    )
+    parser.add_argument(
+        "--n_workers",
+        type=int,
+        default=40,
+        help="Expected Coiled worker count for logging/cluster helper.",
+    )
+    parser.add_argument(
+        "--worker_memory",
+        default="64GiB",
+        help="Expected Coiled worker memory for logging/cluster helper.",
+    )
     args = parser.parse_args()
     dataset_dates = parse_dataset_date_overrides(args.dataset_date)
 
@@ -480,4 +499,7 @@ if __name__ == "__main__":
         resample=args.resample,
         output_date=args.output_date,
         dataset_dates=dataset_dates,
+        cluster_name=args.cluster_name,
+        n_workers=args.n_workers,
+        worker_memory=args.worker_memory,
     )

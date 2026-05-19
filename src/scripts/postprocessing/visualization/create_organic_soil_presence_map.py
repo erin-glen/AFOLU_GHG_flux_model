@@ -103,8 +103,8 @@ def _join_s3(prefix: str, name: str) -> str:
 
 def _normalize_metric(metric: str) -> str:
     key = str(metric).strip().upper()
-    if key not in {"F1", "F2"}:
-        raise ValueError(f"--fscore_metric must be f1 or f2, got {metric!r}")
+    if key not in {"F1", "F2", "MIXED"}:
+        raise ValueError(f"--fscore_metric must be f1, f2, or mixed, got {metric!r}")
     return key
 
 
@@ -261,16 +261,16 @@ def aggregate_presence_block(
     probability = probability[: out_rows * factor, : out_cols * factor]
 
     if threshold_config.method == "global":
-        present = probability > threshold_config.fallback_threshold
+        present = probability >= threshold_config.fallback_threshold
     else:
         if climate_domain is None:
-            present = probability > threshold_config.fallback_threshold
+            present = probability >= threshold_config.fallback_threshold
         else:
             climate_domain = climate_domain[: out_rows * factor, : out_cols * factor]
-            present = probability > threshold_config.fallback_threshold
+            present = probability >= threshold_config.fallback_threshold
             for code, biome_threshold in threshold_config.thresholds_by_biome_code.items():
                 mask = climate_domain == code
-                present[mask] = probability[mask] > biome_threshold
+                present[mask] = probability[mask] >= biome_threshold
 
     return present.reshape(out_rows, factor, out_cols, factor).any(axis=(1, 3)).astype(np.uint8)
 
@@ -522,6 +522,7 @@ def run(args: argparse.Namespace) -> dict:
         "native_deg": args.native_deg,
         "tile_count": len(tile_ids),
         "status_counts": statuses,
+        "present_pixels": int(present_pixels),
         "present_1km_pixels": int(present_pixels),
         "output_path": output_path,
     }
@@ -546,7 +547,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--organic_soil_version", required=True, help="Registry version, e.g. 20260508 or 20251105_legacy.")
     parser.add_argument("--probability_date", default=None, help="Probability tile date folder. Defaults to version date.")
-    parser.add_argument("--fscore_metric", required=True, choices=["f1", "f2", "F1", "F2"])
+    parser.add_argument(
+        "--fscore_metric",
+        required=True,
+        choices=["f1", "f2", "mixed", "F1", "F2", "MIXED"],
+    )
     parser.add_argument("--threshold_method", default="per-biome", choices=["global", "per-biome", "per_biome", "biome"])
     parser.add_argument("--threshold_registry", default=str(DEFAULT_REGISTRY))
     parser.add_argument("--probability_tile_prefix", default=None, help="Override source probability tile prefix.")

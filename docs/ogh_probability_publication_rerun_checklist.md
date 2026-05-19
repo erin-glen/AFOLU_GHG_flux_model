@@ -12,21 +12,27 @@ Use placeholders consistently:
   GeoTIFF/COG.
 - `{MODEL_VERSION}`: underscore model version, for example `0_1_4`.
 - `{THRESHOLD_DIR}`: local directory containing threshold diagnostics.
-- `{BASELINE_BIOME_THRESHOLDS}`: CSV from `biome_thresholds_summary.csv` or
-  equivalent JSON thresholds for the baseline/max-F1 option.
-- `{SCENARIO_BOUNDS_THRESHOLDS}`: CSV from `scenario_bounds_thresholds_f1.csv`
-  or `scenario_bounds_thresholds_f2.csv`, containing baseline, low-area, and
-  high-area threshold columns.
+- `{BASELINE_BIOME_THRESHOLDS}`: CSV or equivalent JSON thresholds for the
+  production baseline option.
+- `{SCENARIO_BOUNDS_THRESHOLDS}`: CSV containing `operational_threshold`,
+  `low_area_threshold`, and `high_area_threshold` columns for uncertainty
+  envelopes.
 
 ## Current 2026-05 Rerun Status
 
-- OGH unthresholded probability tiles are using date tag `20260508`.
-- The broad binary OGH mask used for the refreshed union was built with
-  threshold `9` for roads/canals coverage.
-- The refreshed 30 m peat union mask is using date tag `20260508`.
-- Roads/canals were fully rerun from the refreshed peat union mask, without
-  reprojecting source road/canal vectors, and the aggregated distance products
-  are using date tag `20260509`.
+- OGH unthresholded probability tiles are using date tag `20260513`.
+- The selected production threshold profile is
+  `docs/organic_soil_threshold_profiles/20260513_mixed_boreal_f1_temperate_f1_5_tropical_f2.csv`:
+  boreal F1 `0.30`, temperate F1.5 `0.27`, tropical F2 `0.16`.
+- The broad binary OGH mask used for the refreshed union was built from the
+  20260513 probability raster with threshold `9` for roads/canals coverage.
+- The refreshed 30 m peat union mask is using date tag `20260513`, built from
+  `gfw`, `gpd`, and `ogh=20260513`; `peatmap` and `peatml` were intentionally
+  left out.
+- Roads/canals were previously rerun from the refreshed 20260508 peat union
+  mask, without reprojecting source road/canal vectors, and the aggregated
+  distance products are using date tag `20260509`. The 20260513 threshold
+  update has not yet rerun roads/canals.
 - `dirs["osm_roads"]`, `dirs["osm_canals"]`, and `dirs["grip"]` now point to
   the `distance/40000_pixels/20260509` folders.
 - Before launching the full all-period production run and sensitivity matrix,
@@ -47,8 +53,9 @@ Use placeholders consistently:
 
 2. Scalar `--peat_threshold` currently expects the native OGH raster scale
    (`0..100`). The biome CSV/JSON parser rescales `0..1` values automatically
-   only for `--peat_threshold_by_biome`. For scalar sensitivity runs, pass
-   `10` for 10 percent, not `0.10`, unless the parser is changed first.
+   only for `--peat_threshold_by_biome`. For the current mixed profile, pass
+   `--peat_threshold 0.27` only as the unknown-ecozone fallback alongside
+   `--peat_threshold_by_biome`; the parser will scale it to `27`.
 
 3. Roads/canals preprocessing is still masked to organic-soil extent, via the
    30 m peat union mask. If the updated OGH probability surface materially
@@ -278,7 +285,7 @@ If rerunning, use these scripts in order:
 
 ```bash
 python -m src.scripts.preprocessing.peat.peat_mask_union \
-  --dataset_list gfw gpd peatmap peatml ogh \
+  --dataset_list gfw gpd ogh \
   --output_date {PEAT_UNION_DATE} \
   --dataset_date ogh={OGH_BINARY_DATE} \
   --client coiled
@@ -428,6 +435,22 @@ Primary script:
 
 - `src/scripts/core_model/0_drainage_emissions_model.py`
 
+Current 20260513 production OGH threshold settings:
+
+```bash
+export OGH_MIXED_THRESHOLDS=docs/organic_soil_threshold_profiles/20260513_mixed_boreal_f1_temperate_f1_5_tropical_f2.csv
+export OGH_MIXED_RUN=ogh_mixed_f1_f15_f2_20260513
+```
+
+- Baseline profile: boreal F1 `0.30`, temperate F1.5 `0.27`, tropical F2
+  `0.16`, unknown fallback `0.27`.
+- Low-area threshold scenario: boreal `0.57`, temperate `0.54`, tropical
+  `0.20`, unknown fallback `0.27`.
+- High-area threshold scenario: boreal `0.26`, temperate `0.21`, tropical
+  `0.15`, unknown fallback `0.27`.
+- Roads/canals distance inputs remain on the existing `20260509` distance
+  products until the separate roads/canals refresh is run.
+
 Single-period global gate before the full matrix:
 
 ```bash
@@ -440,22 +463,19 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --interval_type five_year \
   --count_burned_years \
   --peat_dataset ogh \
-  --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
-  --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
-  --fscore_metric f1 \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
   --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant default \
   --create_zarr \
   --run_date {RUN_DATE} \
-  --run_name ogh_biome_thresholds
+  --run_name ${OGH_MIXED_RUN}_gate
 ```
 
-For the 20260510 test gate, use `--peat_threshold 10`,
-`{BASELINE_BIOME_THRESHOLDS}` =
-`/mnt/c/tmp/afolu/uncertainty/ogh_probability/20260508/threshold_curves_biome_f1/biome_thresholds_summary.csv`,
-`{RUN_DATE}=20260510`, and run only `2024` through Stages 7-10 before
-starting the full matrix.
+Run the gate for `2021_2024` through Stages 7-10 before starting the full
+matrix.
 
 Baseline, all inventory periods:
 
@@ -467,15 +487,15 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --all_five_year_periods \
   --count_burned_years \
   --peat_dataset ogh \
-  --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
-  --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
-  --fscore_metric f1 \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
   --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant default \
   --create_zarr \
   --run_date {RUN_DATE} \
-  --run_name ogh_biome_thresholds
+  --run_name ${OGH_MIXED_RUN}
 ```
 
 Sensitivities, 2021-2024 only:
@@ -507,25 +527,25 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
   --count_burned_years --peat_dataset ogh \
-  --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
-  --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
-  --fscore_metric f1 \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
   --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m {LOW_DRAINAGE_THRESHOLD_M} \
   --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name ogh_sensitivity_250m
+  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_250m
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
   --count_burned_years --peat_dataset ogh \
-  --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
-  --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
-  --fscore_metric f1 \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
   --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m {HIGH_DRAINAGE_THRESHOLD_M} \
   --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name ogh_sensitivity_750m
+  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_750m
 ```
 
 Run a 2021-2024 OGH baseline alias only if needed for existing pub comparison
@@ -536,13 +556,13 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
   --count_burned_years --peat_dataset ogh \
-  --peat_threshold {BASELINE_FALLBACK_THRESHOLD_0_TO_100} \
-  --peat_threshold_by_biome {BASELINE_BIOME_THRESHOLDS} \
-  --fscore_metric f1 \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
   --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name ogh_sensitivity_500m
+  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_500m
 ```
 
 Run low/high area plus emission-factor envelopes:
@@ -553,24 +573,26 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
   --count_burned_years --peat_dataset ogh \
-  --peat_threshold_by_biome {SCENARIO_BOUNDS_THRESHOLDS} \
-  --fscore_metric f1 \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
   --peat_threshold_scenario low_area \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant low --create_zarr \
-  --run_date {RUN_DATE} --run_name ogh_sensitivity_low
+  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_low
 
 # Upper-bound envelope: low threshold, high emission factors
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
   --count_burned_years --peat_dataset ogh \
-  --peat_threshold_by_biome {SCENARIO_BOUNDS_THRESHOLDS} \
-  --fscore_metric f1 \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
   --peat_threshold_scenario high_area \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant high --create_zarr \
-  --run_date {RUN_DATE} --run_name ogh_sensitivity_high
+  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_high
 ```
 
 ## Stage 7: Aggregate 10x10 Degree Tiles

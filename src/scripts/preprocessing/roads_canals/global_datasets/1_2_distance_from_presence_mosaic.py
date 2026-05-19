@@ -553,6 +553,7 @@ def main(
     halo_m: float = 1000.0,
     maxdist: Optional[float] = 1000.0,
     client: str = "local",
+    cluster_name: str = "roads_canals",
     batch_size: int = 20,
     loglevel: str = "INFO",
     overwrite_existing: bool = False,
@@ -572,7 +573,7 @@ def main(
     # Connect to Dask/Coiled
     run_local = (client == "local")
     cluster, dclient, run_local = uutil.connect_to_cluster(
-        cluster_name="roads_canals",
+        cluster_name=cluster_name,
         n_workers=20,
         region="us-east-1",
         run_local=run_local,
@@ -655,6 +656,7 @@ if __name__ == "__main__":
     p.add_argument("--halo_m", type=float, default=1000.0, help="Halo radius in meters to include presence across edges")
     p.add_argument("--maxdist", type=float, default=1000.0, help="Cap distances at this value in meters (set <=0 to disable)")
     p.add_argument("--client", default="local", choices=["local", "coiled"])
+    p.add_argument("--cluster_name", default="roads_canals", help="Existing Coiled cluster name to attach to")
     p.add_argument("--batch_size", type=int, default=20)
     p.add_argument("--loglevel", default="INFO")
     p.add_argument(
@@ -674,6 +676,7 @@ if __name__ == "__main__":
         halo_m=args.halo_m,
         maxdist=args.maxdist,
         client=args.client,
+        cluster_name=args.cluster_name,
         batch_size=args.batch_size,
         loglevel=args.loglevel,
         overwrite_existing=args.overwrite_existing,

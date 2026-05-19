@@ -251,14 +251,22 @@ def connect_to_cluster(
         print("Running locally without Dask/Coiled.")
         return None, None, run_local
 
-    all_clusters = coiled.list_clusters()
-    for info in all_clusters:
-        if info.get("name") == cluster_name and info.get("current_state", {}).get("state") == "ready":
-            print(f"Connecting to running cluster '{cluster_name}'.")
-            cluster = coiled.Cluster(name=cluster_name, shutdown_on_close=False)
-            client = Client(cluster)
-            upload_repo_source_to_dask(client)
-            return cluster, client, run_local
+    wait_seconds = int(os.environ.get("AFOLU_CLUSTER_READY_WAIT_SECONDS", "0"))
+    deadline = time.time() + wait_seconds
+    while True:
+        all_clusters = coiled.list_clusters()
+        for info in all_clusters:
+            if info.get("name") == cluster_name and info.get("current_state", {}).get("state") == "ready":
+                print(f"Connecting to running cluster '{cluster_name}'.")
+                cluster = coiled.Cluster(name=cluster_name, shutdown_on_close=False)
+                client = Client(cluster)
+                upload_repo_source_to_dask(client)
+                return cluster, client, run_local
+
+        if time.time() >= deadline:
+            break
+        print(f"Waiting for Coiled cluster '{cluster_name}' to be ready...")
+        time.sleep(30)
 
     print(f"Cluster named {cluster_name} not found. Running locally.")
     run_local = True

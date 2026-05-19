@@ -1,0 +1,5 @@
+biome,metric_basis,best_mixed_threshold,operational_threshold,low_area_threshold,high_area_threshold,mapped_area_Mha,lower_bound_area_Mha,upper_bound_area_Mha,ua_at_operational,pa_at_operational,source_probability_date,source_validation
+unknown,fallback,0.27,0.27,0.27,0.27,,,,,,20260513,heldout_spatial_test_predictions_organic_biome.csv
+tropical,f2,0.16,0.16,0.20,0.15,82.860869715345,60.155221569002,90.578303584800,0.725978647687,0.914798206278,20260513,heldout_spatial_test_predictions_organic_biome.csv
+boreal,f1,0.30,0.30,0.57,0.26,971.936919785007,386.068679042212,1072.991108874804,0.397215777262,0.905820105820,20260513,heldout_spatial_test_predictions_organic_biome.csv
+temperate,f1_5,0.27,0.27,0.54,0.21,89.921696611140,17.572260268645,122.305557407434,0.195417348609,0.735221674877,20260513,heldout_spatial_test_predictions_organic_biome.csv

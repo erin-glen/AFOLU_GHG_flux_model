@@ -16,6 +16,7 @@ import posixpath
 from typing import Iterable, Optional
 
 import boto3
+import dask
 import numpy as np
 import rasterio
 from rasterio.windows import from_bounds
@@ -252,6 +253,96 @@ def _compare_tile(
     return rows
 
 
+def _compare_tile_task(
+    tile_id: str,
+    old_key: Optional[str],
+    new_key: Optional[str],
+    chunk_size: float,
+    min_changed_pixels: int,
+) -> tuple[str, list[dict[str, object]]]:
+    """Dask-friendly wrapper returning the tile id with its changed rows."""
+
+    return tile_id, _compare_tile(
+        tile_id,
+        old_key,
+        new_key,
+        chunk_size,
+        min_changed_pixels,
+    )
+
+
+def _iter_tile_comparisons(
+    all_tile_ids: list[str],
+    old_tiles: dict[str, str],
+    new_tiles: dict[str, str],
+    *,
+    chunk_size: float,
+    min_changed_pixels: int,
+    client_mode: str,
+    cluster_name: str,
+    n_workers: int,
+    worker_memory: str,
+    batch_size: int,
+):
+    if client_mode == "local":
+        for idx, tile_id in enumerate(all_tile_ids, start=1):
+            LOG.info("Comparing tile %s (%d/%d)", tile_id, idx, len(all_tile_ids))
+            yield tile_id, _compare_tile(
+                tile_id,
+                old_tiles.get(tile_id),
+                new_tiles.get(tile_id),
+                chunk_size,
+                min_changed_pixels,
+            )
+        return
+
+    cluster, client, run_local = uutil.connect_to_cluster(
+        cluster_name=cluster_name,
+        n_workers=n_workers,
+        region="us-east-1",
+        worker_memory=worker_memory,
+    )
+    if run_local:
+        LOG.warning("Coiled cluster unavailable; falling back to local tile comparison.")
+        for idx, tile_id in enumerate(all_tile_ids, start=1):
+            LOG.info("Comparing tile %s (%d/%d)", tile_id, idx, len(all_tile_ids))
+            yield tile_id, _compare_tile(
+                tile_id,
+                old_tiles.get(tile_id),
+                new_tiles.get(tile_id),
+                chunk_size,
+                min_changed_pixels,
+            )
+        return
+
+    LOG.info("Comparing tiles on Coiled cluster: %s", cluster.name)
+    tasks = [
+        dask.delayed(_compare_tile_task)(
+            tile_id,
+            old_tiles.get(tile_id),
+            new_tiles.get(tile_id),
+            chunk_size,
+            min_changed_pixels,
+        )
+        for tile_id in all_tile_ids
+    ]
+    try:
+        batch_size = max(int(batch_size), 1)
+        for offset in range(0, len(tasks), batch_size):
+            batch = tasks[offset:offset + batch_size]
+            LOG.info(
+                "Submitting tile-comparison batch %d-%d of %d",
+                offset + 1,
+                min(offset + len(batch), len(tasks)),
+                len(tasks),
+            )
+            for tile_id, rows in dask.compute(*batch):
+                yield tile_id, rows
+    finally:
+        client.close()
+        cluster.close()
+
+
 def build_manifest(
     old_union_prefix: str,
     new_union_prefix: str,
@@ -263,6 +354,11 @@ def build_manifest(
     max_tiles: Optional[int] = None,
     min_changed_pixels: int = 1,
     distance_neighbor_chunks: int = 1,
+    client_mode: str = "local",
+    cluster_name: str = "roads_canals",
+    n_workers: int = 20,
+    worker_memory: str = "64GiB",
+    batch_size: int = 40,
 ) -> dict[str, object]:
     s3 = boto3.client("s3")
     old_tiles = _list_union_tiles(s3, old_union_prefix)
@@ -300,15 +396,19 @@ def build_manifest(
         writer = csv.DictWriter(dst, fieldnames=FIELDNAMES)
         writer.writeheader()
 
-        for idx, tile_id in enumerate(all_tile_ids, start=1):
-            LOG.info("Comparing tile %s (%d/%d)", tile_id, idx, len(all_tile_ids))
-            rows = _compare_tile(
-                tile_id,
-                old_tiles.get(tile_id),
-                new_tiles.get(tile_id),
-                chunk_size,
-                min_changed_pixels,
-            )
+        for tile_id, rows in _iter_tile_comparisons(
+            all_tile_ids,
+            old_tiles,
+            new_tiles,
+            chunk_size=chunk_size,
+            min_changed_pixels=min_changed_pixels,
+            client_mode=client_mode,
+            cluster_name=cluster_name,
+            n_workers=n_workers,
+            worker_memory=worker_memory,
+            batch_size=batch_size,
+        ):
+            LOG.info("Tile %s produced %d changed chunk(s)", tile_id, len(rows))
             for row in rows:
                 writer.writerow(row)
                 changed_rows.append(row)
@@ -361,6 +461,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tile_ids", nargs="+", default=None, help="Optional subset of tile IDs")
     parser.add_argument("--max_tiles", type=int, default=None, help="Optional cap for smoke tests")
     parser.add_argument("--min_changed_pixels", type=int, default=1)
+    parser.add_argument("--client", default="local", choices=["local", "coiled"])
+    parser.add_argument("--cluster_name", default="roads_canals", help="Coiled cluster name to attach to.")
+    parser.add_argument("--n_workers", type=int, default=20, help="Expected Coiled worker count for cluster helper.")
+    parser.add_argument("--worker_memory", default="64GiB", help="Expected Coiled worker memory for cluster helper.")
+    parser.add_argument("--batch_size", type=int, default=40, help="Tile-comparison batch size for Coiled runs.")
     parser.add_argument(
         "--distance_neighbor_chunks",
         type=int,
@@ -406,6 +511,11 @@ def main() -> None:
         max_tiles=args.max_tiles,
         min_changed_pixels=args.min_changed_pixels,
         distance_neighbor_chunks=args.distance_neighbor_chunks,
+        client_mode=args.client,
+        cluster_name=args.cluster_name,
+        n_workers=args.n_workers,
+        worker_memory=args.worker_memory,
+        batch_size=args.batch_size,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     print(f"Manifest written to {output}")

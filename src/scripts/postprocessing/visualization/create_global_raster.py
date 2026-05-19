@@ -52,6 +52,7 @@ import numpy as np
 # Write with a correct transform derived from rows & cols
 import rasterio
 from rasterio.transform import from_bounds
+from rasterio.windows import Window
 
 from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import log_utilities as lu
@@ -153,6 +154,111 @@ def _mode_per_component(arr: np.ndarray, native_deg: float, target_deg: float) -
     out |= (drained_mode > 0).astype(np.uint32) << np.uint32(zc.COMBINED_STATE_HAS_DRAINED_BIT)
     out |= (burned_mode > 0).astype(np.uint32) << np.uint32(zc.COMBINED_STATE_HAS_BURNED_BIT)
     return out
+
+
+def _aggregation_factor(native_deg: float, target_deg: float) -> int:
+    factor_f = target_deg / native_deg
+    if not np.isclose(round(factor_f), factor_f):
+        raise ValueError(f"target_deg/native_deg must be an integer; got {target_deg}/{native_deg}.")
+    return int(round(factor_f))
+
+
+def _mode_uint8_blocks(arr: np.ndarray, factor: int) -> np.ndarray:
+    """Block-mode aggregate for small uint8 category rasters."""
+    rows, cols = arr.shape
+    new_rows = rows // factor
+    new_cols = cols // factor
+    trimmed = arr[: new_rows * factor, : new_cols * factor]
+    blocks = trimmed.reshape(new_rows, factor, new_cols, factor)
+
+    best_vals = np.zeros((new_rows, new_cols), dtype=np.uint8)
+    best_counts = np.full((new_rows, new_cols), -1, dtype=np.int16)
+    for val in np.unique(trimmed):
+        counts = np.sum(blocks == val, axis=(1, 3), dtype=np.int16)
+        update = counts > best_counts
+        best_vals[update] = val
+        best_counts[update] = counts[update]
+    return best_vals
+
+
+def _mode_per_component_windowed(
+    path: str,
+    chunk_length_pixels: int,
+    native_deg: float,
+    target_deg: float,
+    logger,
+) -> np.ndarray:
+    factor = _aggregation_factor(native_deg, target_deg)
+    out_rows = chunk_length_pixels // factor
+    out_cols = chunk_length_pixels // factor
+    output = np.zeros((out_rows, out_cols), dtype=np.uint32)
+    output_rows_per_read = int(os.environ.get("AGG_TILE_OUTPUT_ROWS", "100"))
+    input_rows_per_read = max(factor, output_rows_per_read * factor)
+
+    with rasterio.Env():
+        with rasterio.open(path) as src:
+            for row0 in range(0, chunk_length_pixels, input_rows_per_read):
+                rows = min(input_rows_per_read, chunk_length_pixels - row0)
+                rows -= rows % factor
+                if rows <= 0:
+                    continue
+                c = src.read(
+                    1,
+                    window=Window(0, row0, chunk_length_pixels, rows),
+                    out_dtype="uint32",
+                )
+                drained_id = (c & np.uint32(zc.COMBINED_STATE_DRAINED_MASK)).astype(np.uint8)
+                burned_id = (
+                    (c >> np.uint32(zc.COMBINED_STATE_BURNED_SHIFT))
+                    & np.uint32(zc.COMBINED_STATE_BURNED_MASK)
+                ).astype(np.uint8)
+                drained_mode = _mode_uint8_blocks(drained_id, factor)
+                burned_mode = _mode_uint8_blocks(burned_id, factor)
+
+                packed = drained_mode.astype(np.uint32)
+                packed |= burned_mode.astype(np.uint32) << np.uint32(zc.COMBINED_STATE_BURNED_SHIFT)
+                packed |= (drained_mode > 0).astype(np.uint32) << np.uint32(zc.COMBINED_STATE_HAS_DRAINED_BIT)
+                packed |= (burned_mode > 0).astype(np.uint32) << np.uint32(zc.COMBINED_STATE_HAS_BURNED_BIT)
+
+                out0 = row0 // factor
+                out1 = out0 + packed.shape[0]
+                output[out0:out1, :] = packed
+                logger.debug("Aggregated combined_state rows %d-%d", row0, row0 + rows)
+    return output
+
+
+def _reaggregate_sum_windowed(
+    path: str,
+    chunk_length_pixels: int,
+    native_deg: float,
+    target_deg: float,
+    logger,
+) -> np.ndarray:
+    factor = _aggregation_factor(native_deg, target_deg)
+    out_rows = chunk_length_pixels // factor
+    out_cols = chunk_length_pixels // factor
+    output = np.empty((out_rows, out_cols), dtype=np.float32)
+    output_rows_per_read = int(os.environ.get("AGG_TILE_OUTPUT_ROWS", "100"))
+    input_rows_per_read = max(factor, output_rows_per_read * factor)
+
+    with rasterio.Env():
+        with rasterio.open(path) as src:
+            for row0 in range(0, chunk_length_pixels, input_rows_per_read):
+                rows = min(input_rows_per_read, chunk_length_pixels - row0)
+                rows -= rows % factor
+                if rows <= 0:
+                    continue
+                arr = src.read(
+                    1,
+                    window=Window(0, row0, chunk_length_pixels, rows),
+                    out_dtype="float32",
+                )
+                agg = _reaggregate_sum(arr, native_deg, target_deg)
+                out0 = row0 // factor
+                out1 = out0 + agg.shape[0]
+                output[out0:out1, :] = agg
+                logger.debug("Aggregated continuous rows %d-%d", row0, row0 + rows)
+    return output
 
 
 def _build_drained_state_luts() -> Tuple[np.ndarray, np.ndarray]:
@@ -331,6 +437,62 @@ def _save_global_raster_correct(
 # Tile aggregation
 # --------------------------------------------------------------------
 
+def _agg_tile_to_target_windowed(
+    tile_id: str,
+    chunk_length_pixels: int,
+    per_pixel_total_or_state_tile: str,
+    native_deg: float,
+    target_deg: float,
+    is_final: bool,
+    logger,
+):
+    parts = posixpath.basename(per_pixel_total_or_state_tile).split("__")
+    if len(parts) == 3:
+        _, dataset_name, _ = parts
+    elif len(parts) >= 4:
+        dataset_name = parts[2]
+    else:
+        raise ValueError(
+            "Expected '<tile>__<dataset>__<interval>.tif' or "
+            "'<tile>__<bounds>__<dataset>__<interval>.tif'; "
+            f"got: {posixpath.basename(per_pixel_total_or_state_tile)}"
+        )
+
+    path = _to_vsipath_if_s3(per_pixel_total_or_state_tile)
+
+    try:
+        if dataset_name == "combined_state":
+            return _mode_per_component_windowed(
+                path,
+                chunk_length_pixels,
+                native_deg,
+                target_deg,
+                logger,
+            )
+        return _reaggregate_sum_windowed(
+            path,
+            chunk_length_pixels,
+            native_deg,
+            target_deg,
+            logger,
+        )
+    except Exception as exc:
+        lu.print_and_log(
+            f"WARNING: {per_pixel_total_or_state_tile} failed ({exc}) -> zeros",
+            is_final,
+            logger,
+        )
+        factor = _aggregation_factor(native_deg, target_deg)
+        out_shape = (chunk_length_pixels // factor, chunk_length_pixels // factor)
+        if dataset_name == "combined_state":
+            logger.warning(
+                "Tile %s missing combined_state; treating as all-zero (nodata after aggregation).",
+                tile_id,
+            )
+            return np.zeros(out_shape, dtype=np.uint32)
+        return np.zeros(out_shape, dtype=np.float32)
+
+
 def agg_tile_to_target(
     tile_id: str,
     bounds: Tuple[float, float, float, float],
@@ -345,6 +507,15 @@ def agg_tile_to_target(
     """
     logger = lu.setup_logging()
     logger.info("Reading tile %s\ninput: %s", tile_id, per_pixel_total_or_state_tile)
+    return _agg_tile_to_target_windowed(
+        tile_id,
+        chunk_length_pixels,
+        per_pixel_total_or_state_tile,
+        native_deg,
+        target_deg,
+        is_final,
+        logger,
+    )
 
     # Determine dataset name up front (so we can choose the read dtype)
     parts = posixpath.basename(per_pixel_total_or_state_tile).split("__")
@@ -445,6 +616,33 @@ def iterate_tiles(
             for j, res in enumerate(results):
                 yield (i + j, res)
     else:
+        B = int(os.environ.get("AGG_DASK_BATCH", "0"))
+        if B > 0:
+            for start in range(0, len(delayed_results), B):
+                batch = delayed_results[start:start + B]
+                futures = client.compute(batch, sync=False)
+                future_to_index = {f: start + i for i, f in enumerate(futures)}
+                completed = 0
+                total = len(futures)
+                for future in as_completed(list(future_to_index.keys())):
+                    idx = future_to_index[future]
+                    try:
+                        arr = future.result()
+                    except Exception:
+                        logger.exception("Tile %s failed during %s", tile_ids[idx], stage_desc)
+                        raise
+                    completed += 1
+                    overall_completed = start + completed
+                    if overall_completed % 10 == 0 or overall_completed == len(delayed_results):
+                        logger.info(
+                            "Completed %d/%d tiles for %s",
+                            overall_completed,
+                            len(delayed_results),
+                            stage_desc,
+                        )
+                    yield (idx, arr)
+            return
+
         futures = client.compute(delayed_results, sync=False)
         future_to_index = {f: i for i, f in enumerate(futures)}
         completed = 0
@@ -567,30 +765,63 @@ def combine_global_raster_streaming(
     cols = int(round(360 / target_deg))
 
     # Use a dedicated working directory; we also point GDAL spooling here.
-    tmpdir = tempfile.mkdtemp(prefix=f"{res_label}_global_")
+    tmp_parent = os.environ.get("AGG_GLOBAL_TMPDIR")
+    if tmp_parent:
+        os.makedirs(tmp_parent, exist_ok=True)
+    tmpdir = tempfile.mkdtemp(prefix=f"{res_label}_global_", dir=tmp_parent)
     mm_path = os.path.join(tmpdir, "global_mm.dat")
+    skip_init = os.environ.get("AGG_SKIP_GLOBAL_INIT", "0") == "1"
+
+    def init_memmap(arr: np.memmap, value, label: str) -> None:
+        if skip_init:
+            logger.info(
+                "Skipping full %s memmap initialization at %s; tiles will overwrite the global grid.",
+                label,
+                mm_path,
+            )
+            return
+        init_rows = int(os.environ.get("AGG_GLOBAL_INIT_ROWS", "1024"))
+        logger.info(
+            "Initializing %s memmap at %s (shape=%s, rows_per_block=%d)",
+            label,
+            mm_path,
+            arr.shape,
+            init_rows,
+        )
+        for row0 in range(0, arr.shape[0], init_rows):
+            row1 = min(row0 + init_rows, arr.shape[0])
+            arr[row0:row1, :] = value
+            arr.flush()
+            if row1 == arr.shape[0] or row1 % (init_rows * 8) == 0:
+                logger.info("Initialized %d/%d rows for %s", row1, arr.shape[0], label)
 
     if out_dtype is None or np.issubdtype(out_dtype, np.floating):
         save_dtype = np.float32
         global_mm = np.memmap(mm_path, dtype=np.float32, mode="w+", shape=(rows, cols))
-        global_mm[:] = np.nan
+        init_memmap(global_mm, np.nan, "float")
         def paste(tile, y0, y1, x0, x1):
             t = tile.astype(np.float32, copy=False)
-            mask = ~np.isnan(t) if np.issubdtype(t.dtype, np.floating) else np.ones_like(t, dtype=bool)
-            np.copyto(global_mm[y0:y1, x0:x1], t, where=mask)
+            if skip_init:
+                global_mm[y0:y1, x0:x1] = t
+            else:
+                mask = ~np.isnan(t) if np.issubdtype(t.dtype, np.floating) else np.ones_like(t, dtype=bool)
+                np.copyto(global_mm[y0:y1, x0:x1], t, where=mask)
         int_nodata_eff = None
     else:
         if int_nodata is None:
             raise ValueError("int_nodata must be provided when out_dtype is integer.")
         save_dtype = out_dtype
         global_mm = np.memmap(mm_path, dtype=out_dtype, mode="w+", shape=(rows, cols))
-        global_mm[:] = int_nodata
+        init_memmap(global_mm, int_nodata, "integer")
         def paste(tile, y0, y1, x0, x1):
             if np.issubdtype(tile.dtype, np.floating):
                 t = np.where(np.isnan(tile), int_nodata, tile).astype(out_dtype, copy=False)
             else:
                 t = tile.astype(out_dtype, copy=False)
-            np.copyto(global_mm[y0:y1, x0:x1], t, where=(t != int_nodata))
+            if skip_init:
+                global_mm[y0:y1, x0:x1] = t
+            else:
+                np.copyto(global_mm[y0:y1, x0:x1], t, where=(t != int_nodata))
         int_nodata_eff = int_nodata
 
     flush_every = 16
@@ -711,6 +942,10 @@ def aggregate_main(
         selected_tile_ids = list(cn.tile_id_list)
 
     res_label = deg_to_label(target_deg)
+    tile_agg_func = agg_tile_to_target
+    if __name__ == "__main__":
+        from src.scripts.postprocessing.visualization import create_global_raster as cgr_module
+        tile_agg_func = cgr_module.agg_tile_to_target
 
     for key, items in download_upload_dictionary.items():
         bounds_list: List[Tuple[float, float, float, float]] = []
@@ -731,7 +966,7 @@ def aggregate_main(
             tile_ids_for_key.append(tile_id)
 
             delayed_results.append(
-                dask.delayed(agg_tile_to_target)(
+                dask.delayed(tile_agg_func)(
                     tile_id,
                     bounds,
                     chunk_length_pixels,

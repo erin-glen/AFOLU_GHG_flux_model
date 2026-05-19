@@ -1164,11 +1164,12 @@ def parse_biome_thresholds(
     Returns a dict mapping ecozone codes (int) to threshold values (float),
     or ``None`` if *raw* is ``None``.
 
-    For CSV input, ``fscore_metric`` selects F1 or F2 threshold columns and
+    For CSV input, ``fscore_metric`` selects F1, F2, or mixed threshold columns and
     ``threshold_scenario`` selects the publication scenario:
 
-    - ``baseline`` reads ``best_f1_threshold``/``best_f2_threshold`` when
-      available, otherwise ``operational_threshold``.
+    - ``baseline`` reads ``best_f1_threshold``/``best_f2_threshold``/
+      ``best_mixed_threshold`` when available, otherwise
+      ``operational_threshold``.
     - ``low_area``/``low`` reads the higher-threshold, low-area envelope
       column (``low_area_threshold`` or legacy ``lower_bound_threshold``).
     - ``high_area``/``high`` reads the lower-threshold, high-area envelope
@@ -1190,9 +1191,10 @@ def parse_biome_thresholds(
         import pandas as pd
         df = pd.read_csv(raw)
         metric_key = fscore_metric.lower()
-        if metric_key not in {"f1", "f2"}:
+        if metric_key not in {"f1", "f2", "mixed"}:
             raise ValueError(
-                f"fscore_metric must be 'f1' or 'f2'; got {fscore_metric!r}"
+                "fscore_metric must be 'f1', 'f2', or 'mixed'; "
+                f"got {fscore_metric!r}"
             )
         scenario_key = normalize_peat_threshold_scenario(threshold_scenario)
         if "metric" in df.columns:
@@ -1246,7 +1248,7 @@ def parse_biome_thresholds(
 
     # The fscore script and CLI examples express thresholds on a 0-1 scale,
     # but the OGH raster stores probabilities as uint8 0-100.  Rescale so
-    # the comparison `peat_layer > thresh` works on the native raster values.
+    # the comparison `peat_layer >= thresh` works on the native raster values.
     if code_map and all(v <= 1.0 for v in code_map.values()):
         code_map = {k: v * 100.0 for k, v in code_map.items()}
         if fallback is not None and fallback <= 1.0:
@@ -1720,14 +1722,15 @@ def main(argv=None):
     )
     p.add_argument(
         "--fscore_metric",
-        choices=["f1", "f2"],
+        choices=["f1", "f2", "mixed"],
         default="f1",
         help=(
-            "When --peat_threshold_by_biome points to a CSV, select the F1 "
-            "or F2 threshold set. For biome-threshold summary CSVs this reads "
-            "'best_f1_threshold' or 'best_f2_threshold'. For scenario-bound "
-            "CSVs, use the matching F1 or F2 scenario table. Ignored for JSON "
-            "input. Default: f1."
+            "When --peat_threshold_by_biome points to a CSV, select the F1, "
+            "F2, or mixed threshold set. For biome-threshold summary CSVs "
+            "this reads 'best_f1_threshold', 'best_f2_threshold', or "
+            "'best_mixed_threshold'. For custom scenario-bound CSVs, use "
+            "'operational_threshold', 'low_area_threshold', and "
+            "'high_area_threshold'. Ignored for JSON input. Default: f1."
         ),
     )
     p.add_argument(

@@ -222,9 +222,9 @@ dirs = {
     'peat': posixpath.join(full_bucket_prefix, raw_dir, 'soils/GFW_Global_Peatlands'),
     'dadap': posixpath.join(full_bucket_prefix, processed_dir, 'dadap_density/30m/20240925'),
     'engert': posixpath.join(full_bucket_prefix, processed_dir, 'engert_density/30m/20240925'),
-    'grip': posixpath.join(full_bucket_prefix, processed_dir, f'grip_density/distance/{full_raster_dims}_pixels/20260509'),
-    'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/distance/{full_raster_dims}_pixels/20260509'),
-    'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/distance/{full_raster_dims}_pixels/20260509'),
+    'grip': posixpath.join(full_bucket_prefix, processed_dir, f'grip_density/distance/{full_raster_dims}_pixels/20260513'),
+    'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/distance/{full_raster_dims}_pixels/20260513'),
+    'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/distance/{full_raster_dims}_pixels/20260513'),
     'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, f'sdpt/{full_raster_dims}_pixels/20250531'),
     'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
     'climate_domain': lulucf_climate_domain_dir,
@@ -249,12 +249,12 @@ peat_mask_dirs = {
     'ogh_unthresholded': posixpath.join(
         full_bucket_prefix,
         processed_dir,
-        'peat_mask/OGH/tiles_unthresholded/20260508',
+        'peat_mask/OGH/tiles_unthresholded/20260513',
     ),
     'union_mask': posixpath.join(
         full_bucket_prefix,
         processed_dir,
-        'peat_mask/union/30m/tiles/20260508',
+        'peat_mask/union/30m/tiles/20260513',
     ),
 }
 
