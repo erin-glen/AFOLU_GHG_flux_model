@@ -77,6 +77,18 @@ def test_engert_drains_independent_of_distance_threshold():
     assert _drained_soil_for_threshold(750, engert=1.0) == 2
 
 
+def test_exported_organic_soil_is_binary_peat_presence():
+    drained_soil = np.array([[0, 1, 2]], dtype=np.uint32)
+
+    organic_soil = drainage_model.organic_soil_from_drained_soil(drained_soil)
+
+    np.testing.assert_array_equal(
+        organic_soil,
+        np.array([[0, 1, 1]], dtype=np.uint8),
+    )
+    assert organic_soil.dtype == np.uint8
+
+
 @pytest.mark.parametrize("threshold_m", [0, -1, 1000, np.inf])
 def test_drainage_distance_threshold_validation(threshold_m):
     with pytest.raises(ValueError, match="drainage_distance_threshold_m"):

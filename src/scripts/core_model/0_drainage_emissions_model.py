@@ -598,6 +598,12 @@ def _calculate_drainage_and_emissions_numba(
     return out_dict_uint32, out_dict_float32
 
 
+def organic_soil_from_drained_soil(drained_soil: np.ndarray) -> np.ndarray:
+    """Return a 0/1 thresholded organic-soil mask from the drainage classifier."""
+
+    return (np.asarray(drained_soil) > 0).astype(np.uint8)
+
+
 def calculate_drainage_and_emissions(
     in_dict_uint8,
     in_dict_int16,
@@ -953,6 +959,10 @@ def calculate_and_upload_drainage(
             burned_state_for_pack.astype(np.uint32, copy=False),
         )
 
+    drained_soil = outputs.pop("drained_soil", None)
+    if drained_soil is not None:
+        outputs["organic_soil"] = organic_soil_from_drained_soil(drained_soil)
+
     # burned-area emissions are totals for the whole inventory period; convert
     # to annual values based on the number of years in the period
     interval_length = iv_end - iv_start + 1
@@ -1015,7 +1025,7 @@ def calculate_and_upload_drainage(
                 )
 
     # stats for outputs, with explicit layer categorization
-    drainage_classification_layers = ["drained_soil", "drained_state", "combined_state"]
+    drainage_classification_layers = ["organic_soil", "drained_state", "combined_state"]
     burned_classification_layers = ["burned_state"]
     numeric_layers = ["burned_years_count"]
 

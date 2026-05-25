@@ -6,6 +6,9 @@ from src.scripts.utilities import constants_and_names as cn
 from src.scripts.zonal_statistics import zonal_constants as zc
 
 
+AGGREGATE_MODULE_PATH = Path("src/scripts/core_model/02_aggregate_soils_outputs.py")
+
+
 def test_pack_unpack_combined_state_roundtrip_matches_registered_codes() -> None:
     drained_codes = np.array([0, *map(int, sorted(zc.ALL_DRAINED_STATE_CODES))], dtype=np.uint32)
     burned_codes = np.array([0, *map(int, sorted(zc.ALL_BURNED_STATE_CODES))], dtype=np.uint32)
@@ -34,17 +37,31 @@ def test_combined_state_group_values_cover_registry_outputs() -> None:
 
 
 def test_new_write_contracts_use_combined_state_names() -> None:
+    assert "organic_soil" in cn.drainage_outputs_to_zarr
+    assert cn.drainage_output_dtypes["organic_soil"] == "uint8"
     assert "combined_state" in cn.drainage_outputs_to_zarr
     assert "combined_state" in cn.drainage_output_dtypes
     assert "emissions_state" not in cn.drainage_outputs_to_zarr
+    assert "drained_soil" not in cn.drainage_outputs_to_zarr
     assert "drained_state" not in cn.drainage_outputs_to_zarr
     assert "burned_state" not in cn.drainage_outputs_to_zarr
     assert "drained_state" in cn.drainage_optional_state_outputs
     assert "burned_state" in cn.drainage_optional_state_outputs
 
     core_model_source = Path("src/scripts/core_model/0_drainage_emissions_model.py").read_text()
+    assert 'outputs["organic_soil"]' in core_model_source
     assert 'outputs["combined_state"]' in core_model_source
     assert 'outputs["emissions_state"]' not in core_model_source
 
     zonal_source = Path("src/scripts/zonal_statistics/02_run_zonal_stats.py").read_text()
     assert '"combined_state_nodes"' in zonal_source
+
+
+def test_10x10_aggregation_defaults_include_binary_organic_soil() -> None:
+    aggregate_source = AGGREGATE_MODULE_PATH.read_text()
+    data_types = list(cn.drainage_outputs_to_zarr)
+
+    assert "organic_soil" in data_types
+    assert "combined_state" in data_types
+    assert "drained_soil" not in data_types
+    assert "data_types = list(cn.drainage_outputs_to_zarr)" in aggregate_source

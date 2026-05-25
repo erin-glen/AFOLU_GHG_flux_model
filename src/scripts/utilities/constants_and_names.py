@@ -16,7 +16,7 @@ from src.scripts.utilities import local_output_paths as lop
 # ---------------------------------------------------
 
 # ── version helpers ──────────────────────────────────────────────
-model_version = "1.0.0"              # dotted string
+model_version = "1.0.1"              # dotted string
 model_version_underscore = model_version.replace(".", "_")   # "0_3_0"
 
 s3_bucket_name = 'gfw2-data'
@@ -45,7 +45,7 @@ outputs_path = posixpath.join(
 drainage_outputs_path_mega_zarr = posixpath.join(outputs_path, "mega_zarr")
 
 drainage_outputs_to_zarr = [
-    "drained_soil",
+    "organic_soil",
     "combined_state",
     "burned_years_count",
     "drained_co2_Mg_CO2_ha_yr",
@@ -69,6 +69,7 @@ drainage_optional_state_outputs = [
 ]
 
 drainage_output_dtypes = {
+    "organic_soil": "uint8",
     "drained_soil": "uint32",
     "drained_state": "uint32",
     "burned_state": "uint32",
