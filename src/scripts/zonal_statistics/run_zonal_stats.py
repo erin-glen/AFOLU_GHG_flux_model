@@ -116,14 +116,12 @@ ADM0_ZARR = (
     "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/"
     "GADM4_1_adm0_global/20250604/global_GADM41_adm0_20250604.zarr"
 )
+# Deprecated data-lake GeoTIFF source; do not rebuild pixel area from it.
 PIXEL_AREA_GTIFF_FOLDER = (
     "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/"
     "v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
 )
-PIXEL_AREA_ZARR = (
-    "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr/"
-    "pixel_area/20250730/global_pixel_area_20250730.zarr"
-)
+PIXEL_AREA_ZARR = cn.pixel_area_zarr_path
 
 # ------------------------------ small utils ------------------------------
 def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
@@ -341,6 +339,13 @@ def ensure_zarr_exists(uri_list: pd.Series, zarr_path: str, chunk_size: int) -> 
             logging.debug("Consolidating metadata for %s (zarr v2)", zarr_path)
             zarr.convenience.consolidate_metadata(fs.get_mapper(inner))
 
+def ensure_existing_zarr(zarr_path: str) -> None:
+    """Validate that an externally managed contextual Zarr already exists."""
+    fs, inner = fsspec.core.url_to_fs(zarr_path)
+    has_zgroup, _, has_v3json = _zarr_store_exists(fs, inner)
+    if not (has_zgroup or has_v3json):
+        raise FileNotFoundError(f"Required contextual Zarr is missing: {zarr_path}")
+
 @lru_cache(maxsize=None)
 def s3_exists(prefix: str) -> bool:
     fs = s3fs.S3FileSystem(anon=False)
@@ -436,11 +441,11 @@ def run(args: argparse.Namespace) -> None:
     logger.debug("Checking contextual layer adm0")
     ensure_zarr_exists(list_folder_uris(ADM0_GTIFF_FOLDER), ADM0_ZARR, args.chunk_size)
     logger.debug("Checking contextual layer pixel_area")
-    ensure_zarr_exists(list_folder_uris(PIXEL_AREA_GTIFF_FOLDER), PIXEL_AREA_ZARR, args.chunk_size)
+    ensure_existing_zarr(PIXEL_AREA_ZARR)
 
     logger.debug("Opening contextual layers")
     adm0 = open_zarr_region(ADM0_ZARR, bbox, args.chunk_size).astype("uint32")
-    pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).persist()
+    pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).rename("pixel_area").persist()
 
     # Expected groups
     gadm_adm0_ids = zc.GADM_ADM0_IDS

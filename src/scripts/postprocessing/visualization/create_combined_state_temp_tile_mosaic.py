@@ -104,6 +104,67 @@ def aggregate_combined_state_tile_to_s3(
     return dst_uri
 
 
+def aggregate_combined_state_fraction_tile_to_s3(
+    tile_id: str,
+    src_uri: str,
+    dst_uri: str,
+    native_deg: float,
+    target_deg: float,
+) -> str:
+    """Aggregate one combined_state tile to class-fraction bands and upload."""
+    logger = lu.setup_logging()
+    bounds = uu.get_10x10_tile_bounds(tile_id)
+    chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
+    arr = cgr._agg_combined_state_class_fractions_windowed(
+        tile_id=tile_id,
+        chunk_length_pixels=chunk_length_pixels,
+        combined_state_tile=src_uri,
+        native_deg=native_deg,
+        target_deg=target_deg,
+        is_final=True,
+        logger=logger,
+    ).astype(np.float32, copy=False)
+
+    transform = from_bounds(*bounds, arr.shape[2], arr.shape[1])
+    profile = {
+        "driver": "GTiff",
+        "width": arr.shape[2],
+        "height": arr.shape[1],
+        "count": arr.shape[0],
+        "dtype": "float32",
+        "crs": "EPSG:4326",
+        "transform": transform,
+        "nodata": None,
+        "tiled": True,
+        "blockxsize": 512,
+        "blockysize": 512,
+        "compress": "DEFLATE",
+        "predictor": 2,
+        "bigtiff": "IF_SAFER",
+        "num_threads": "ALL_CPUS",
+    }
+
+    fd, local_path = tempfile.mkstemp(prefix=f"{tile_id}_combined_state_fraction_0p5_", suffix=".tif")
+    os.close(fd)
+    try:
+        with rasterio.open(local_path, "w", **profile) as dst:
+            for band_idx in range(arr.shape[0]):
+                dst.write(arr[band_idx], band_idx + 1)
+                if band_idx < len(cgr.COMBINED_STATE_CLASS_BAND_DESCRIPTIONS):
+                    dst.set_band_description(
+                        band_idx + 1,
+                        cgr.COMBINED_STATE_CLASS_BAND_DESCRIPTIONS[band_idx],
+                    )
+            dst.update_tags(**cgr.COMBINED_STATE_CLASS_FRACTION_TAGS)
+        _upload_file(local_path, dst_uri)
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+    return dst_uri
+
+
 def _paste_tile(memmap: np.memmap, tile_uri: str, bounds: tuple[float, float, float, float], target_deg: float) -> None:
     with rasterio.open(cgr._to_vsipath_if_s3(tile_uri)) as src:
         arr = src.read(1, out_dtype="uint32")
@@ -115,9 +176,27 @@ def _paste_tile(memmap: np.memmap, tile_uri: str, bounds: tuple[float, float, fl
     memmap[y0:y1, x0:x1] = arr
 
 
+def _paste_fraction_tile(memmap: np.memmap, tile_uri: str, bounds: tuple[float, float, float, float], target_deg: float) -> None:
+    with rasterio.open(cgr._to_vsipath_if_s3(tile_uri)) as src:
+        arr = src.read(out_dtype="float32")
+    min_x, min_y, max_x, max_y = bounds
+    x0 = int(round((min_x + 180) / target_deg))
+    x1 = int(round((max_x + 180) / target_deg))
+    y0 = int(round((90 - max_y) / target_deg))
+    y1 = int(round((90 - min_y) / target_deg))
+    memmap[:, y0:y1, x0:x1] = arr
+
+
 def _iter_tile_uris(prefix: str, tile_ids: Iterable[str]) -> dict[str, str]:
     return {
         tile_id: f"{prefix.rstrip('/')}/{tile_id}__combined_state__0_005deg_tmp.tif"
+        for tile_id in tile_ids
+    }
+
+
+def _iter_fraction_tile_uris(prefix: str, tile_ids: Iterable[str]) -> dict[str, str]:
+    return {
+        tile_id: f"{prefix.rstrip('/')}/{tile_id}__combined_state_class_fraction__0_005deg_tmp.tif"
         for tile_id in tile_ids
     }
 
@@ -169,6 +248,7 @@ def main() -> None:
 
     tile_ids = list(cn.tile_id_list)
     temp_tile_uris = _iter_tile_uris(args.temp_tile_prefix, tile_ids)
+    temp_fraction_tile_uris = _iter_fraction_tile_uris(args.temp_tile_prefix, tile_ids)
 
     lu.print_and_log(
         f"Stage aggregate combined_state temp tiles to {res_label} started at: {uu.timestr()}",
@@ -201,6 +281,41 @@ def main() -> None:
             if completed % 10 == 0 or completed == len(tile_ids):
                 lu.print_and_log(
                     f"Completed {completed}/{len(tile_ids)} temp combined_state tiles",
+                    True,
+                    logger,
+                )
+
+    lu.print_and_log(
+        f"Stage aggregate combined_state class-fraction temp tiles to {res_label} started at: {uu.timestr()}",
+        True,
+        logger,
+    )
+    completed = 0
+    for start in range(0, len(tile_ids), args.dask_batch):
+        batch_ids = tile_ids[start:start + args.dask_batch]
+        tasks = [
+            delayed(aggregate_combined_state_fraction_tile_to_s3)(
+                tile_id,
+                cgr._per_pixel_tile_path(items, tile_id),
+                temp_fraction_tile_uris[tile_id],
+                args.native_deg,
+                args.target_deg,
+            )
+            for tile_id in batch_ids
+        ]
+        futures = client.compute(tasks, sync=False, retries=args.retries)
+        future_to_tile = {future: tile_id for future, tile_id in zip(futures, batch_ids)}
+        for future in as_completed(list(future_to_tile.keys())):
+            tile_id = future_to_tile[future]
+            try:
+                future.result()
+            except Exception:
+                logger.exception("Temp class-fraction tile aggregation failed for %s", tile_id)
+                raise
+            completed += 1
+            if completed % 10 == 0 or completed == len(tile_ids):
+                lu.print_and_log(
+                    f"Completed {completed}/{len(tile_ids)} temp class-fraction tiles",
                     True,
                     logger,
                 )
@@ -254,9 +369,44 @@ def main() -> None:
         tags=cgr.COMBINED_STATE_RECLASS_TAGS,
     )
 
+    fraction_path = os.path.join(tmpdir, "combined_state_class_fraction_mm.dat")
+    fraction_mm = np.memmap(
+        fraction_path,
+        dtype=np.float32,
+        mode="w+",
+        shape=(len(cgr.COMBINED_STATE_CLASS_BAND_DESCRIPTIONS), rows, cols),
+    )
+    fraction_mm[:] = 0.0
+
+    lu.print_and_log(
+        f"Stage build {res_label} global combined_state class-fraction mosaic started at: {uu.timestr()}",
+        True,
+        logger,
+    )
+    for idx, tile_id in enumerate(tile_ids, start=1):
+        _paste_fraction_tile(
+            fraction_mm,
+            temp_fraction_tile_uris[tile_id],
+            uu.get_10x10_tile_bounds(tile_id),
+            args.target_deg,
+        )
+        if idx % 25 == 0 or idx == len(tile_ids):
+            fraction_mm.flush()
+            lu.print_and_log(f"Pasted {idx}/{len(tile_ids)} class-fraction temp tiles", True, logger)
+
+    cgr._write_combined_state_fraction_outputs(
+        class_fraction=fraction_mm,
+        global_output_path=global_dir,
+        global_outfile=global_name,
+        logger=logger,
+        spool_dir=tmpdir,
+    )
+
+    del fraction_mm
     del reclass_mm
     del global_mm
     try:
+        os.remove(fraction_path)
         os.remove(reclass_path)
         os.remove(mm_path)
         os.rmdir(tmpdir)

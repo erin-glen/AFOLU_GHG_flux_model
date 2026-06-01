@@ -15,14 +15,20 @@ Assumptions (this version)
 --------------------------
 - All non-integer inputs are **per-pixel totals** (e.g., Mg yr^-1 per native pixel).
 - Aggregation for float datasets is **SUM** to the target grid.
-- For the bit-packed `combined_state` (uint32): we unpack to drained_id and burned_id,
-  take the mode of each component independently per block, then repack. The
-  has-drained / has-burned bits are set whenever the aggregated component is nonzero.
-  Output is written as UInt32 with nodata=0.
+- For the bit-packed `combined_state` (uint32): the backward-compatible
+  `combined_state` output remains a component-wise modal state. In addition,
+  the canonical coarse state summary is written as class fractions computed
+  from native pixels before any modal collapse.
 - Whenever `combined_state` is aggregated, also write a UInt8
-  `combined_state_reclassified` companion raster:
+  `combined_state_reclassified` companion raster from the modal state:
   1=undrained organic soil, 2=drained only, 3=burned only, 4=drained+burned,
   255=nodata/non-organic.
+- Whenever `combined_state` is aggregated, also write:
+  `combined_state_class_fraction`: 4-band Float32 native-pixel fractions with
+  bands [undrained, drained only, burned only, drained+burned].
+  `combined_state_presence_reclassified`: UInt8 display classes derived from
+  any nonzero class fraction, so minority drained/burned pixels remain visible
+  at coarse resolution.
 - No unit conversions are performed; no input tiles are modified or overwritten.
 
 Examples
@@ -77,11 +83,20 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
 # --------------------------------------------------------------------
 
 COMBINED_STATE_RECLASS_DATASET = "combined_state_reclassified"
+COMBINED_STATE_CLASS_FRACTION_DATASET = "combined_state_class_fraction"
+COMBINED_STATE_PRESENCE_RECLASS_DATASET = "combined_state_presence_reclassified"
 COMBINED_STATE_RECLASS_NODATA = np.uint8(255)
 COMBINED_STATE_RECLASS_UNDRAINED = np.uint8(1)
 COMBINED_STATE_RECLASS_DRAINED_ONLY = np.uint8(2)
 COMBINED_STATE_RECLASS_BURNED_ONLY = np.uint8(3)
 COMBINED_STATE_RECLASS_DRAINED_BURNED = np.uint8(4)
+
+COMBINED_STATE_CLASS_BAND_DESCRIPTIONS = (
+    "undrained organic soil fraction",
+    "drained only organic soil fraction",
+    "burned only organic soil fraction",
+    "drained+burned organic soil fraction",
+)
 
 _DRAINED_STATE_ID_LUT_SIZE = 1 << zc.COMBINED_STATE_DRAINED_BITS
 
@@ -91,6 +106,19 @@ COMBINED_STATE_RECLASS_TAGS = {
     "class_3": "burned only",
     "class_4": "drained+burned",
     "nodata": str(int(COMBINED_STATE_RECLASS_NODATA)),
+}
+
+COMBINED_STATE_CLASS_FRACTION_TAGS = {
+    "band_1": COMBINED_STATE_CLASS_BAND_DESCRIPTIONS[0],
+    "band_2": COMBINED_STATE_CLASS_BAND_DESCRIPTIONS[1],
+    "band_3": COMBINED_STATE_CLASS_BAND_DESCRIPTIONS[2],
+    "band_4": COMBINED_STATE_CLASS_BAND_DESCRIPTIONS[3],
+    "units": "fraction of native pixels in coarse pixel",
+}
+
+COMBINED_STATE_PRESENCE_RECLASS_TAGS = {
+    **COMBINED_STATE_RECLASS_TAGS,
+    "aggregation": "presence from combined_state_class_fraction",
 }
 
 
@@ -172,13 +200,23 @@ def _mode_uint8_blocks(arr: np.ndarray, factor: int) -> np.ndarray:
     blocks = trimmed.reshape(new_rows, factor, new_cols, factor)
 
     best_vals = np.zeros((new_rows, new_cols), dtype=np.uint8)
-    best_counts = np.full((new_rows, new_cols), -1, dtype=np.int16)
+    best_counts = np.full((new_rows, new_cols), -1, dtype=np.int32)
     for val in np.unique(trimmed):
-        counts = np.sum(blocks == val, axis=(1, 3), dtype=np.int16)
+        counts = np.sum(blocks == val, axis=(1, 3), dtype=np.int32)
         update = counts > best_counts
         best_vals[update] = val
         best_counts[update] = counts[update]
     return best_vals
+
+
+def _sum_uint8_blocks(arr: np.ndarray, factor: int) -> np.ndarray:
+    """Return block sums for uint8/bool masks."""
+    rows, cols = arr.shape
+    new_rows = rows // factor
+    new_cols = cols // factor
+    trimmed = arr[: new_rows * factor, : new_cols * factor]
+    blocks = trimmed.reshape(new_rows, factor, new_cols, factor)
+    return np.sum(blocks, axis=(1, 3), dtype=np.uint32)
 
 
 def _mode_per_component_windowed(
@@ -261,6 +299,52 @@ def _reaggregate_sum_windowed(
     return output
 
 
+def _combined_state_class_fractions_windowed(
+    path: str,
+    chunk_length_pixels: int,
+    native_deg: float,
+    target_deg: float,
+    logger,
+) -> np.ndarray:
+    """Aggregate combined_state to class-fraction bands without modal collapse."""
+    factor = _aggregation_factor(native_deg, target_deg)
+    out_rows = chunk_length_pixels // factor
+    out_cols = chunk_length_pixels // factor
+    output = np.zeros(
+        (len(COMBINED_STATE_CLASS_BAND_DESCRIPTIONS), out_rows, out_cols),
+        dtype=np.float32,
+    )
+    output_rows_per_read = int(os.environ.get("AGG_TILE_OUTPUT_ROWS", "100"))
+    input_rows_per_read = max(factor, output_rows_per_read * factor)
+
+    with rasterio.Env():
+        with rasterio.open(path) as src:
+            for row0 in range(0, chunk_length_pixels, input_rows_per_read):
+                rows = min(input_rows_per_read, chunk_length_pixels - row0)
+                rows -= rows % factor
+                if rows <= 0:
+                    continue
+                arr = src.read(
+                    1,
+                    window=Window(0, row0, chunk_length_pixels, rows),
+                    out_dtype="uint32",
+                )
+                fractions = _aggregate_combined_state_class_fractions(
+                    arr,
+                    native_deg,
+                    target_deg,
+                )
+                out0 = row0 // factor
+                out1 = out0 + fractions.shape[1]
+                output[:, out0:out1, :] = fractions
+                logger.debug(
+                    "Aggregated combined_state class fractions rows %d-%d",
+                    row0,
+                    row0 + rows,
+                )
+    return output
+
+
 def _build_drained_state_luts() -> Tuple[np.ndarray, np.ndarray]:
     """Return LUTs identifying organic-soil and drained-state ids."""
     organic = np.zeros(_DRAINED_STATE_ID_LUT_SIZE, dtype=bool)
@@ -279,17 +363,8 @@ def _build_drained_state_luts() -> Tuple[np.ndarray, np.ndarray]:
 _ORGANIC_BY_DRAINED_ID, _DRAINED_BY_DRAINED_ID = _build_drained_state_luts()
 
 
-def _reclassify_combined_state(arr: np.ndarray) -> np.ndarray:
-    """
-    Collapse packed combined_state values into publication map classes.
-
-    Output classes:
-        1: undrained organic soil, not burned
-        2: drained only
-        3: burned only
-        4: drained + burned
-        255: nodata / non-organic / no state
-    """
+def _combined_state_component_masks(arr: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``(organic, drained, burned)`` masks decoded from packed state."""
     packed = np.asarray(arr, dtype=np.uint32)
     drained_id = (packed & np.uint32(zc.COMBINED_STATE_DRAINED_MASK)).astype(np.uint16)
     burned_id = (
@@ -305,8 +380,85 @@ def _reclassify_combined_state(arr: np.ndarray) -> np.ndarray:
 
     burned = burned_id > 0
     organic |= burned
+    return organic, drained, burned
 
-    out = np.full(packed.shape, COMBINED_STATE_RECLASS_NODATA, dtype=np.uint8)
+
+def _combined_state_class_masks(arr: np.ndarray) -> np.ndarray:
+    """
+    Decode packed combined_state into four mutually exclusive class masks.
+
+    Band order is:
+        0: undrained organic soil, not burned
+        1: drained only
+        2: burned only
+        3: drained + burned
+    """
+    organic, drained, burned = _combined_state_component_masks(arr)
+    masks = np.empty((4, *organic.shape), dtype=np.uint8)
+    masks[0] = organic & ~drained & ~burned
+    masks[1] = organic & drained & ~burned
+    masks[2] = organic & ~drained & burned
+    masks[3] = organic & drained & burned
+    return masks
+
+
+def _aggregate_combined_state_class_fractions(
+    arr: np.ndarray,
+    native_deg: float,
+    target_deg: float,
+) -> np.ndarray:
+    """Aggregate native combined_state to four class-fraction bands."""
+    factor = _aggregation_factor(native_deg, target_deg)
+    denominator = np.float32(factor * factor)
+    masks = _combined_state_class_masks(arr)
+    out_rows = arr.shape[0] // factor
+    out_cols = arr.shape[1] // factor
+    fractions = np.empty((masks.shape[0], out_rows, out_cols), dtype=np.float32)
+    for idx in range(masks.shape[0]):
+        fractions[idx] = _sum_uint8_blocks(masks[idx], factor).astype(np.float32) / denominator
+    return fractions
+
+
+def _presence_reclass_from_class_fractions(fractions: np.ndarray) -> np.ndarray:
+    """
+    Derive a display class from any nonzero class fraction.
+
+    Unlike the modal reclassification, this preserves minority drained/burned
+    presence in coarse cells so it stays consistent with summed emissions.
+    """
+    class_fraction = np.asarray(fractions, dtype=np.float32)
+    if class_fraction.shape[0] != 4:
+        raise ValueError(
+            "Expected class fractions with shape (4, rows, cols); "
+            f"got {class_fraction.shape}"
+        )
+
+    has_undrained = class_fraction[0] > 0
+    has_drained = (class_fraction[1] > 0) | (class_fraction[3] > 0)
+    has_burned = (class_fraction[2] > 0) | (class_fraction[3] > 0)
+    organic = has_undrained | has_drained | has_burned
+
+    out = np.full(class_fraction.shape[1:], COMBINED_STATE_RECLASS_NODATA, dtype=np.uint8)
+    out[organic & ~has_drained & ~has_burned] = COMBINED_STATE_RECLASS_UNDRAINED
+    out[has_drained & ~has_burned] = COMBINED_STATE_RECLASS_DRAINED_ONLY
+    out[~has_drained & has_burned] = COMBINED_STATE_RECLASS_BURNED_ONLY
+    out[has_drained & has_burned] = COMBINED_STATE_RECLASS_DRAINED_BURNED
+    return out
+
+
+def _reclassify_combined_state(arr: np.ndarray) -> np.ndarray:
+    """
+    Collapse packed combined_state values into publication map classes.
+
+    Output classes:
+        1: undrained organic soil, not burned
+        2: drained only
+        3: burned only
+        4: drained + burned
+        255: nodata / non-organic / no state
+    """
+    organic, drained, burned = _combined_state_component_masks(arr)
+    out = np.full(organic.shape, COMBINED_STATE_RECLASS_NODATA, dtype=np.uint8)
     out[organic & ~drained & ~burned] = COMBINED_STATE_RECLASS_UNDRAINED
     out[organic & drained & ~burned] = COMBINED_STATE_RECLASS_DRAINED_ONLY
     out[organic & ~drained & burned] = COMBINED_STATE_RECLASS_BURNED_ONLY
@@ -328,24 +480,77 @@ def _fill_reclassified_memmap(
         dst.flush()
 
 
-def _combined_state_reclass_output(global_output_path: str, global_outfile: str) -> Tuple[str, str]:
-    """Return output directory and filename for the combined-state class raster."""
+def _fill_presence_reclassified_memmap(
+    fractions: np.ndarray,
+    dst: np.memmap,
+    *,
+    block_rows: int = 512,
+) -> None:
+    """Write presence-style class raster from fraction bands in row blocks."""
+    rows = fractions.shape[1]
+    for row0 in range(0, rows, block_rows):
+        row1 = min(row0 + block_rows, rows)
+        dst[row0:row1, :] = _presence_reclass_from_class_fractions(
+            fractions[:, row0:row1, :]
+        )
+        dst.flush()
+
+
+def _combined_state_companion_output(
+    global_output_path: str,
+    global_outfile: str,
+    dataset_name: str,
+) -> Tuple[str, str]:
+    """Return output directory and filename for a combined-state companion raster."""
     out_dir = global_output_path.rstrip("/")
     marker = "/combined_state/"
     if marker in out_dir:
-        out_dir = out_dir.replace(marker, f"/{COMBINED_STATE_RECLASS_DATASET}/")
+        out_dir = out_dir.replace(marker, f"/{dataset_name}/")
     else:
-        out_dir = f"{out_dir}/{COMBINED_STATE_RECLASS_DATASET}"
+        out_dir = f"{out_dir}/{dataset_name}"
 
     if "__combined_state_" in global_outfile:
         out_name = global_outfile.replace(
             "__combined_state_",
-            f"__{COMBINED_STATE_RECLASS_DATASET}_",
+            f"__{dataset_name}_",
         )
     else:
         stem, ext = os.path.splitext(global_outfile)
-        out_name = f"{stem}__{COMBINED_STATE_RECLASS_DATASET}{ext or '.tif'}"
+        out_name = f"{stem}__{dataset_name}{ext or '.tif'}"
     return out_dir, out_name
+
+
+def _combined_state_reclass_output(global_output_path: str, global_outfile: str) -> Tuple[str, str]:
+    """Return output directory and filename for the modal combined-state class raster."""
+    return _combined_state_companion_output(
+        global_output_path,
+        global_outfile,
+        COMBINED_STATE_RECLASS_DATASET,
+    )
+
+
+def _combined_state_class_fraction_output(
+    global_output_path: str,
+    global_outfile: str,
+) -> Tuple[str, str]:
+    """Return output directory and filename for class-fraction bands."""
+    return _combined_state_companion_output(
+        global_output_path,
+        global_outfile,
+        COMBINED_STATE_CLASS_FRACTION_DATASET,
+    )
+
+
+def _combined_state_presence_reclass_output(
+    global_output_path: str,
+    global_outfile: str,
+) -> Tuple[str, str]:
+    """Return output directory and filename for presence-style class raster."""
+    return _combined_state_companion_output(
+        global_output_path,
+        global_outfile,
+        COMBINED_STATE_PRESENCE_RECLASS_DATASET,
+    )
 
 
 def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
@@ -433,6 +638,141 @@ def _save_global_raster_correct(
     return dst_path
 
 
+def _save_global_multiband_raster_correct(
+    *,
+    bounds: Tuple[float, float, float, float],
+    arr: np.ndarray,
+    dtype: np.dtype,
+    dst_base: str,
+    dst_name: str,
+    logger,
+    nodata: Optional[float | int] = None,
+    spool_dir: Optional[str] = None,
+    tags: Optional[dict[str, str]] = None,
+    band_descriptions: Optional[Tuple[str, ...]] = None,
+) -> str:
+    """Write a multi-band GeoTIFF with a correct geotransform."""
+    if arr.ndim != 3:
+        raise ValueError(f"Expected a 3D array (bands, rows, cols); got {arr.shape}")
+
+    minx, miny, maxx, maxy = bounds
+    bands, rows, cols = arr.shape
+    transform = from_bounds(minx, miny, maxx, maxy, cols, rows)
+
+    dst_path = _join_output_path(dst_base, dst_name)
+    vsi_path = _to_vsipath_if_s3(dst_path)
+
+    is_float = np.issubdtype(dtype, np.floating)
+    creation_opts = dict(
+        driver="GTiff",
+        bigtiff="YES",
+        tiled=True,
+        blockxsize=512,
+        blockysize=512,
+        compress="DEFLATE",
+        predictor=2 if is_float else 1,
+        num_threads="ALL_CPUS",
+    )
+
+    profile = dict(
+        width=cols,
+        height=rows,
+        count=bands,
+        dtype=dtype,
+        crs="EPSG:4326",
+        transform=transform,
+        nodata=nodata,
+        **creation_opts,
+    )
+
+    env_kwargs = {}
+    if dst_path.startswith("s3://"):
+        env_kwargs["CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE"] = "YES"
+        if spool_dir:
+            env_kwargs["CPL_TMPDIR"] = spool_dir
+
+    logger.info(
+        "Writing %s (size %dÃ—%d, bands=%d, dtype=%s) ...",
+        dst_path,
+        cols,
+        rows,
+        bands,
+        np.dtype(dtype).name,
+    )
+    with rasterio.Env(**env_kwargs):
+        with rasterio.open(vsi_path, "w", **profile) as dst:
+            for band_idx in range(bands):
+                dst.write(arr[band_idx].astype(dtype, copy=False), band_idx + 1)
+                if band_descriptions and band_idx < len(band_descriptions):
+                    dst.set_band_description(band_idx + 1, band_descriptions[band_idx])
+            if tags:
+                dst.update_tags(**tags)
+
+    logger.info("Saved global multiband (%s) â†’ %s", np.dtype(dtype).name, dst_path)
+    return dst_path
+
+
+def _write_combined_state_fraction_outputs(
+    *,
+    class_fraction: np.ndarray,
+    global_output_path: str,
+    global_outfile: str,
+    logger,
+    spool_dir: Optional[str] = None,
+) -> Tuple[str, str]:
+    """Write canonical class fractions and a presence-style display raster."""
+    fraction_dir, fraction_name = _combined_state_class_fraction_output(
+        global_output_path,
+        global_outfile,
+    )
+    fraction_path = _save_global_multiband_raster_correct(
+        bounds=(-180, -90, 180, 90),
+        arr=class_fraction,
+        dtype=np.float32,
+        dst_base=fraction_dir,
+        dst_name=fraction_name,
+        logger=logger,
+        nodata=None,
+        spool_dir=spool_dir,
+        tags=COMBINED_STATE_CLASS_FRACTION_TAGS,
+        band_descriptions=COMBINED_STATE_CLASS_BAND_DESCRIPTIONS,
+    )
+
+    tmp_parent = spool_dir or tempfile.gettempdir()
+    presence_path = os.path.join(tmp_parent, "combined_state_presence_reclass_mm.dat")
+    presence_mm = np.memmap(
+        presence_path,
+        dtype=np.uint8,
+        mode="w+",
+        shape=class_fraction.shape[1:],
+    )
+    try:
+        _fill_presence_reclassified_memmap(class_fraction, presence_mm)
+        presence_dir, presence_name = _combined_state_presence_reclass_output(
+            global_output_path,
+            global_outfile,
+        )
+        presence_output_path = _save_global_raster_correct(
+            bounds=(-180, -90, 180, 90),
+            arr=presence_mm,
+            dtype=np.uint8,
+            dst_base=presence_dir,
+            dst_name=presence_name,
+            logger=logger,
+            int_nodata=int(COMBINED_STATE_RECLASS_NODATA),
+            spool_dir=spool_dir,
+            tags=COMBINED_STATE_PRESENCE_RECLASS_TAGS,
+        )
+    finally:
+        try:
+            del presence_mm
+            os.remove(presence_path)
+        except Exception:
+            pass
+
+    return fraction_path, presence_output_path
+
+
 # --------------------------------------------------------------------
 # Tile aggregation
 # --------------------------------------------------------------------
@@ -493,6 +833,43 @@ def _agg_tile_to_target_windowed(
         return np.zeros(out_shape, dtype=np.float32)
 
 
+def _agg_combined_state_class_fractions_windowed(
+    tile_id: str,
+    chunk_length_pixels: int,
+    combined_state_tile: str,
+    native_deg: float,
+    target_deg: float,
+    is_final: bool,
+    logger,
+) -> np.ndarray:
+    path = _to_vsipath_if_s3(combined_state_tile)
+    try:
+        return _combined_state_class_fractions_windowed(
+            path,
+            chunk_length_pixels,
+            native_deg,
+            target_deg,
+            logger,
+        )
+    except Exception as exc:
+        lu.print_and_log(
+            f"WARNING: {combined_state_tile} class-fraction aggregation failed ({exc}) -> zeros",
+            is_final,
+            logger,
+        )
+        factor = _aggregation_factor(native_deg, target_deg)
+        out_shape = (
+            len(COMBINED_STATE_CLASS_BAND_DESCRIPTIONS),
+            chunk_length_pixels // factor,
+            chunk_length_pixels // factor,
+        )
+        logger.warning(
+            "Tile %s missing combined_state; treating class fractions as zero.",
+            tile_id,
+        )
+        return np.zeros(out_shape, dtype=np.float32)
+
+
 def agg_tile_to_target(
     tile_id: str,
     bounds: Tuple[float, float, float, float],
@@ -549,6 +926,33 @@ def agg_tile_to_target(
 
     # Continuous totals → explicit SUM to target resolution (no unit conversions)
     return _reaggregate_sum(arr.astype(np.float32, copy=False), native_deg, target_deg)
+
+
+def agg_combined_state_class_fractions_to_target(
+    tile_id: str,
+    bounds: Tuple[float, float, float, float],
+    chunk_length_pixels: int,
+    combined_state_tile: str,
+    native_deg: float,
+    target_deg: float,
+    is_final: bool,
+) -> np.ndarray:
+    """Aggregate one combined_state tile to four class-fraction bands."""
+    logger = lu.setup_logging()
+    logger.info(
+        "Reading tile %s for combined_state class fractions\ninput: %s",
+        tile_id,
+        combined_state_tile,
+    )
+    return _agg_combined_state_class_fractions_windowed(
+        tile_id,
+        chunk_length_pixels,
+        combined_state_tile,
+        native_deg,
+        target_deg,
+        is_final,
+        logger,
+    )
 
 
 # --------------------------------------------------------------------
@@ -887,6 +1291,84 @@ def combine_global_raster_streaming(
     return "Success"
 
 
+def combine_global_fraction_stack_streaming(
+    tiles_iter: "Iterator[Tuple[int, np.ndarray]]",
+    bounds_list: List[Tuple[float, float, float, float]],
+    res_label: str,
+    global_outfile: str,
+    global_output_path: str,
+    target_deg: float,
+    is_final: bool,
+) -> str:
+    """Stream four-band combined-state class fractions into a global raster."""
+    logger = lu.setup_logging()
+
+    rows = int(round(180 / target_deg))
+    cols = int(round(360 / target_deg))
+    bands = len(COMBINED_STATE_CLASS_BAND_DESCRIPTIONS)
+
+    tmp_parent = os.environ.get("AGG_GLOBAL_TMPDIR")
+    if tmp_parent:
+        os.makedirs(tmp_parent, exist_ok=True)
+    tmpdir = tempfile.mkdtemp(prefix=f"{res_label}_class_fraction_global_", dir=tmp_parent)
+    mm_path = os.path.join(tmpdir, "combined_state_class_fraction_mm.dat")
+    global_mm = np.memmap(
+        mm_path,
+        dtype=np.float32,
+        mode="w+",
+        shape=(bands, rows, cols),
+    )
+
+    init_rows = int(os.environ.get("AGG_GLOBAL_INIT_ROWS", "1024"))
+    logger.info(
+        "Initializing combined_state class-fraction memmap at %s (shape=%s)",
+        mm_path,
+        global_mm.shape,
+    )
+    for row0 in range(0, rows, init_rows):
+        row1 = min(row0 + init_rows, rows)
+        global_mm[:, row0:row1, :] = 0.0
+        global_mm.flush()
+        if row1 == rows or row1 % (init_rows * 8) == 0:
+            logger.info("Initialized %d/%d rows for class fractions", row1, rows)
+
+    flush_every = 16
+    seen = 0
+    for idx, tile in tiles_iter:
+        min_x, min_y, max_x, max_y = bounds_list[idx]
+        x0 = int(round((min_x + 180) / target_deg))
+        x1 = int(round((max_x + 180) / target_deg))
+        y0 = int(round((90 - max_y) / target_deg))
+        y1 = int(round((90 - min_y) / target_deg))
+        if tile.shape[0] != bands:
+            raise ValueError(
+                f"Expected {bands} class-fraction bands for tile index {idx}; "
+                f"got shape {tile.shape}"
+            )
+        global_mm[:, y0:y1, x0:x1] = tile.astype(np.float32, copy=False)
+        seen += 1
+        if seen % flush_every == 0:
+            global_mm.flush()
+
+    global_mm.flush()
+    _write_combined_state_fraction_outputs(
+        class_fraction=global_mm,
+        global_output_path=global_output_path,
+        global_outfile=global_outfile,
+        logger=logger,
+        spool_dir=tmpdir,
+    )
+
+    try:
+        del global_mm
+        os.remove(mm_path)
+        os.rmdir(tmpdir)
+    except Exception:
+        pass
+
+    return "Success"
+
+
 # --------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------
@@ -1004,6 +1486,45 @@ def aggregate_main(
                 out_dtype=np.uint32,
                 int_nodata=0,  # 0 = no drained and no burned component present
                 write_combined_state_reclass=True,
+            )
+
+            fraction_delayed_results: List = []
+            for tile_id, bounds in zip(tile_ids_for_key, bounds_list):
+                tile_path = _per_pixel_tile_path(items, tile_id)
+                chunk_length_pixels = uu.calc_chunk_length_pixels(bounds)
+                fraction_delayed_results.append(
+                    dask.delayed(agg_combined_state_class_fractions_to_target)(
+                        tile_id,
+                        bounds,
+                        chunk_length_pixels,
+                        tile_path,
+                        native_deg,
+                        target_deg,
+                        is_final,
+                    )
+                )
+
+            fraction_stage_desc = f"{res_label} class-fraction aggregation for {key}"
+            lu.print_and_log(
+                f"Stage build {res_label} class-fraction global mosaic for {key} started at: {uu.timestr()}",
+                is_final,
+                logger,
+            )
+            fraction_tiles_iter = iterate_tiles(
+                delayed_results=fraction_delayed_results,
+                client=None if run_local else client,
+                logger=logger,
+                stage_desc=fraction_stage_desc,
+                tile_ids=tile_ids_for_key,
+            )
+            _ = combine_global_fraction_stack_streaming(
+                tiles_iter=fraction_tiles_iter,
+                bounds_list=bounds_list,
+                res_label=res_label,
+                global_outfile=global_outfile,
+                global_output_path=global_output_path,
+                target_deg=target_deg,
+                is_final=is_final,
             )
         else:
             _ = combine_global_raster_streaming(

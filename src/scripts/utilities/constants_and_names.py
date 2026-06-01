@@ -141,6 +141,16 @@ s3_chunk_stats_path = "climate/AFOLU_flux_model/organic_soils/chunk_stats/"
 pixel_area_dir = f"{full_bucket_prefix}/analyses/area_28m/"
 pixel_area_pattern = "hanson_2013_area"
 
+# Corrected global pixel-area zarr. This replaces the organic-soils
+# 20250925 pixel-area contextual zarr, which inherited vertically flipped
+# values from a subset of data-lake source tiles.
+pixel_area_zarr_label = "20260531_fillValue_removed"
+pixel_area_zarr_var = "band_data"
+pixel_area_zarr_path = (
+    f"{full_bucket_prefix}/climate/AFOLU_flux_model/contextual_layer_global_zarr/"
+    f"pixel_area/{pixel_area_zarr_label}/global_pixel_area_20260531.zarr"
+)
+
 # Canonical global contextual zarrs (shared with vegetation/zonal workflows).
 contextual_layer_global_zarr_root = (
     f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr"

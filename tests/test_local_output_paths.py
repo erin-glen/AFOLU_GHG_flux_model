@@ -1,5 +1,6 @@
 import importlib
 
+from src.scripts.utilities import constants_and_names as cn
 from src.scripts.utilities import local_output_paths as lop
 
 
@@ -102,3 +103,20 @@ def test_zonal_and_probability_staging_defaults(monkeypatch) -> None:
     assert probability.default_local_output("20251105", "20250925") == (
         "C:/tmp/afolu/staging/probability_area_stats/20251105/20250925"
     )
+
+
+def test_corrected_pixel_area_zarr_defaults() -> None:
+    build_zarr = importlib.import_module("src.scripts.zonal_statistics.01_build_zarr_caches")
+    organic_zonal = importlib.import_module("src.scripts.zonal_statistics.02_run_zonal_stats")
+    probability = importlib.import_module("src.scripts.zonal_statistics.02b_run_probability_class_area_stats")
+
+    assert cn.pixel_area_zarr_label == "20260531_fillValue_removed"
+    assert cn.pixel_area_zarr_var == "band_data"
+    assert cn.pixel_area_zarr_path.endswith(
+        "/contextual_layer_global_zarr/pixel_area/"
+        "20260531_fillValue_removed/global_pixel_area_20260531.zarr"
+    )
+    assert build_zarr.PIXEL_AREA_ZARR == cn.pixel_area_zarr_path
+    assert organic_zonal.PIXEL_AREA_ZARR == cn.pixel_area_zarr_path
+    assert probability.PIXEL_AREA_ZARR == cn.pixel_area_zarr_path
+    assert probability.pixel_area_zarr_path() == cn.pixel_area_zarr_path

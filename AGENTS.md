@@ -34,7 +34,9 @@ python -m src.scripts.utilities.create_cluster \
   --spot-policy spot_with_fallback
 ```
 
-Recommended naming pattern: include the workflow and date, for example `organic_soil_maps_20260512_wsl`.
+Recommended naming pattern: use a short workflow-oriented name, for example `organic_soil_maps` or `global_state_fraction`.
+
+Do not include `wsl` in cluster names. For this repo WSL is already the required launch context, so adding it to the name is redundant. Do not include dates in cluster names unless the user explicitly asks for a dated name.
 
 ### Worker Sizing
 

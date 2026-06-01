@@ -287,6 +287,8 @@ def test_manifest_match_includes_contextual_grouper_identity() -> None:
         "tile_count": 0,
         "adm0_zarr_path": "a",
         "pixel_area_zarr_path": "p",
+        "pixel_area_zarr_label": "label",
+        "pixel_area_var_name": "band_data",
     }
     changed = dict(base)
     changed["selected_contextual_groupers"] = ["wdpa"]

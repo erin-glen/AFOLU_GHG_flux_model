@@ -170,7 +170,8 @@ python -m src.scripts.zonal_statistics.01_build_zarr_caches \
 
 This ensures the contextual zarrs needed by zonal statistics:
 
-- pixel area
+- pixel area from the corrected
+  `s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20260531_fillValue_removed/global_pixel_area_20260531.zarr`
 - ADM0
 - OGH unthresholded probability
 - climate domain
@@ -190,6 +191,7 @@ Run probability-class area by ADM0 and biome:
 ```bash
 python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
   --contextual_date 20250925 \
+  --pixel_area_zarr s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20260531_fillValue_removed/global_pixel_area_20260531.zarr \
   --probability_date {OGH_PROB_DATE} \
   --include_biome \
   --overwrite_existing

@@ -160,17 +160,14 @@ CONTEXTUAL_ZARR_ROOT = (
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/global_contextual_zarrs"
 )
 
-# Update when refreshed contextual layers are published.
 PIXEL_AREA_DATASET = "pixel_area"
-PIXEL_AREA_DATE = "20250925"
-PIXEL_AREA_ZARR = posixpath.join(
-    CONTEXTUAL_ZARR_ROOT,
-    PIXEL_AREA_DATASET,
-    PIXEL_AREA_DATE,
-    f"global_pixel_area_{PIXEL_AREA_DATE}.zarr",
-)
+PIXEL_AREA_ZARR_LABEL = cn.pixel_area_zarr_label
+PIXEL_AREA_ZARR = cn.pixel_area_zarr_path
+PIXEL_AREA_VAR_NAME = cn.pixel_area_zarr_var
 
-# Authoritative pixel-area GeoTIFF tiles (10×10°, 40000 px per 10°)
+# Deprecated pixel-area GeoTIFF tiles (10x10 deg, 40000 px per 10 deg).
+# Kept only for diagnostics; not used for production zarr rebuilds because
+# some source tiles are vertically flipped.
 PIXEL_AREA_GTIF_FOLDER = (
     "s3://gfw2-data/analyses/umd_area_2013__from_gfw-data-lake/"
     "v1.10/raster/epsg-4326/10/40000/area_m/gdal-geotiff/"
@@ -551,7 +548,7 @@ def validate_zarr_basic(zarr_path: str, *, logger: logging.Logger) -> xr.DataArr
 
 # -------------------------- contextual builders --------------------------
 def ensure_pixel_area_contextual_zarr(*, chunk_size: int, logger: logging.Logger) -> str:
-    """Ensure the global pixel-area contextual Zarr exists (build from GeoTIFFs if missing)."""
+    """Ensure the corrected global pixel-area contextual Zarr exists."""
     zarr_path = PIXEL_AREA_ZARR
     if zarr_exists(zarr_path):
         try:
@@ -559,34 +556,14 @@ def ensure_pixel_area_contextual_zarr(*, chunk_size: int, logger: logging.Logger
             logger.info("flm: Using existing pixel_area contextual Zarr: %s", zarr_path)
             return zarr_path
         except Exception as exc:
-            logger.warning("flm: pixel_area Zarr validation failed (%s); rebuilding.", exc)
-            try:
-                remove_store_recursively(zarr_path)
-            except Exception:
-                pass
+            logger.warning("flm: pixel_area Zarr validation failed (%s).", exc)
 
-    logger.info("flm: Building pixel_area contextual Zarr from GeoTIFF tiles.")
-    tiffs = list_folder_uris(PIXEL_AREA_GTIF_FOLDER)
-    if not tiffs:
-        raise FileNotFoundError(f"No GeoTIFFs found under {PIXEL_AREA_GTIF_FOLDER} for pixel_area")
-
-    da_in = make_xarray_chunks_from_tiffs(tiffs, chunk_size)
-    da_out = _dtype_cast(da_in, "float32").chunk({d: chunk_size for d in ("x", "y") if d in da_in.dims})
-    ds_out = xr.Dataset({"pixel_area": da_out})
-
-    try:
-        remove_store_recursively(zarr_path)
-    except Exception:
-        pass
-
-    with dask.annotate(label="to_zarr:pixel_area"):
-        ds_out.to_zarr(zarr_path, mode="w")
-    if Version(zarr.__version__).major < 3:
-        ensure_consolidated_v2(zarr_path)
-
-    validate_zarr_basic(zarr_path, logger=logger)
-    logger.info("flm: Built pixel_area contextual Zarr ✅ %s", zarr_path)
-    return zarr_path
+    raise FileNotFoundError(
+        "Corrected pixel_area contextual Zarr is missing or invalid: "
+        f"{zarr_path}. Refusing to rebuild from deprecated GeoTIFF source "
+        f"{PIXEL_AREA_GTIF_FOLDER} because that source has known vertically "
+        "flipped tiles."
+    )
 
 def ensure_adm0_contextual_zarr(
     *, ref: xr.DataArray, tol: float, chunk_size: int, logger: logging.Logger, date: str = ADM0_DATE
@@ -801,7 +778,7 @@ def run(args: argparse.Namespace) -> None:
 
     # 0) Ensure canonical reference grid exists, then open it
     ensure_pixel_area_contextual_zarr(chunk_size=args.chunk_size, logger=logger)
-    pixel_area_full = open_zarr_region(PIXEL_AREA_ZARR, None, args.chunk_size)
+    pixel_area_full = open_zarr_region(PIXEL_AREA_ZARR, None, args.chunk_size).rename("pixel_area")
     ref = pixel_area_full
     if args.bounding_box:
         west, south, east, north = [float(x) for x in args.bounding_box]

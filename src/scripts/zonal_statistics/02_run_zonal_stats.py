@@ -189,10 +189,9 @@ def adm0_zarr_path(date: str = ADM0_DATE) -> str:
     )
 
 PIXEL_AREA_DATASET = "pixel_area"
-PIXEL_AREA_DATE = "20250925"
-PIXEL_AREA_ZARR = posixpath.join(
-    CONTEXTUAL_ZARR_ROOT, PIXEL_AREA_DATASET, PIXEL_AREA_DATE, f"global_pixel_area_{PIXEL_AREA_DATE}.zarr",
-)
+PIXEL_AREA_ZARR_LABEL = cn.pixel_area_zarr_label
+PIXEL_AREA_ZARR = cn.pixel_area_zarr_path
+PIXEL_AREA_VAR_NAME = cn.pixel_area_zarr_var
 
 # ------------------------------ utils ----------------------------------
 def flox_sparse_reindex_kwargs(use_sparse: bool) -> dict:
@@ -1020,6 +1019,8 @@ def build_branch_manifest(
         "data_tile_filter_dropped_count": None,
         "adm0_zarr_path": adm0_zarr_path(),
         "pixel_area_zarr_path": PIXEL_AREA_ZARR,
+        "pixel_area_zarr_label": PIXEL_AREA_ZARR_LABEL,
+        "pixel_area_var_name": PIXEL_AREA_VAR_NAME,
         # Informational-only metadata (not used for skip equivalence checks):
         "diagnostics": args.diagnostics,
     }
@@ -1105,6 +1106,8 @@ def manifests_match(existing: Dict[str, Any], current: Dict[str, Any]) -> bool:
         "data_tile_filter_dropped_count",
         "adm0_zarr_path",
         "pixel_area_zarr_path",
+        "pixel_area_zarr_label",
+        "pixel_area_var_name",
     ]
     return all(existing.get(key) == current.get(key) for key in match_keys)
 
@@ -1507,7 +1510,7 @@ def run(args: argparse.Namespace) -> None:
                 logger.info("Mega-zarr open start: interval=%s year=%s path=%s", interval, interval_end_year, mega_zarr_path)
                 mega_ds = open_mega_zarr_region(mega_zarr_path, interval_end_year, bbox, args.chunk_size)
                 adm0 = open_zarr_region(adm0_zarr_path(), bbox, args.chunk_size).astype("uint32")
-                pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).astype("float32")
+                pixel_area = open_zarr_region(PIXEL_AREA_ZARR, bbox, args.chunk_size).astype("float32").rename("pixel_area")
                 logger.info("Pre-flight grid diagnostic: ref_shape=%s mega_xy=%s", tuple(pixel_area.shape), (mega_ds.sizes.get("y"), mega_ds.sizes.get("x")))
                 if abs(pixel_area.sizes.get("x", 0) - mega_ds.sizes.get("x", 0)) > 3 or abs(pixel_area.sizes.get("y", 0) - mega_ds.sizes.get("y", 0)) > 3:
                     logger.warning("HIGH-VISIBILITY WARNING: substantial ROI grid mismatch before reduction.")
@@ -1564,7 +1567,7 @@ def run(args: argparse.Namespace) -> None:
                     tile_bbox = list(uu.get_10x10_tile_bounds(tile_id))
                     mega_ds = open_mega_zarr_region(mega_zarr_path, interval_end_year, tile_bbox, args.chunk_size)
                     adm0 = open_zarr_region(adm0_zarr_path(), tile_bbox, args.chunk_size).astype("uint32")
-                    pixel_area = open_zarr_region(PIXEL_AREA_ZARR, tile_bbox, args.chunk_size).astype("float32")
+                    pixel_area = open_zarr_region(PIXEL_AREA_ZARR, tile_bbox, args.chunk_size).astype("float32").rename("pixel_area")
                     ref = pixel_area
                     tol = float(args.align_tolerance_fraction) * pixel_step(ref)
                     validate_selected_sources(mega_ds, selected_fluxes_ordered, mega_zarr_path=mega_zarr_path, interval=interval, logger=logger)

@@ -13,6 +13,9 @@ The current workflow is:
 `zonal_statistics/01_build_zarr_caches` is now mainly for contextual-layer prep
 (`pixel_area`, `adm0`, `ogh_unthresholded_probability`). Its legacy model-output
 cache path only runs when flux datasets are explicitly passed via `--datasets`.
+The active pixel-area source is the corrected global zarr at
+`s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20260531_fillValue_removed/global_pixel_area_20260531.zarr`;
+do not rebuild pixel area from the older data-lake GeoTIFF source.
 
 Default (contextual-only) run example:
 

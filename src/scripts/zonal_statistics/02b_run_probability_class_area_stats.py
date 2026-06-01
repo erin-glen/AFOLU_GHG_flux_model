@@ -14,11 +14,13 @@ The resulting class-area table can be post-processed into a threshold curve
 Examples:
 python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
   --contextual_date 20250925 \
-  --probability_date 20251105
+  --pixel_area_zarr s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20260531_fillValue_removed/global_pixel_area_20260531.zarr \
+  --probability_date 20260513
 
 python -m src.scripts.zonal_statistics.02b_run_probability_class_area_stats \
   --contextual_date 20250925 \
-  --probability_date 20251105 \
+  --pixel_area_zarr s3://gfw2-data/climate/AFOLU_flux_model/contextual_layer_global_zarr/pixel_area/20260531_fillValue_removed/global_pixel_area_20260531.zarr \
+  --probability_date 20260513 \
   --include_biome
 """
 
@@ -62,6 +64,9 @@ ADM0_FILENAME_TEMPLATE = "global_GADM41_adm0_{date}.zarr"
 
 PIXEL_AREA_DATASET = "pixel_area"
 PIXEL_AREA_FILENAME_TEMPLATE = "global_pixel_area_{date}.zarr"
+PIXEL_AREA_ZARR_LABEL = cn.pixel_area_zarr_label
+PIXEL_AREA_ZARR = cn.pixel_area_zarr_path
+PIXEL_AREA_VAR_NAME = cn.pixel_area_zarr_var
 
 ORGANIC_PROBABILITY_DATASET = "ogh_unthresholded_probability"
 ORGANIC_PROBABILITY_FILENAME_TEMPLATE = "global_ogh_unthresholded_probability_{date}.zarr"
@@ -86,12 +91,14 @@ def adm0_zarr_path(date: str) -> str:
     return posixpath.join(CONTEXTUAL_ZARR_ROOT, ADM0_DATASET, date, ADM0_FILENAME_TEMPLATE.format(date=date))
 
 
-def pixel_area_zarr_path(date: str) -> str:
+def pixel_area_zarr_path(label_or_date: str = PIXEL_AREA_ZARR_LABEL) -> str:
+    if label_or_date == PIXEL_AREA_ZARR_LABEL:
+        return PIXEL_AREA_ZARR
     return posixpath.join(
         CONTEXTUAL_ZARR_ROOT,
         PIXEL_AREA_DATASET,
-        date,
-        PIXEL_AREA_FILENAME_TEMPLATE.format(date=date),
+        label_or_date,
+        PIXEL_AREA_FILENAME_TEMPLATE.format(date=label_or_date),
     )
 
 
@@ -284,12 +291,12 @@ def run(args: argparse.Namespace) -> None:
         include_biome = bool(args.include_biome)
 
         adm0_path = adm0_zarr_path(args.contextual_date)
-        pixel_area_path = pixel_area_zarr_path(args.contextual_date)
+        pixel_area_path = args.pixel_area_zarr
         prob_path = organic_probability_zarr_path(args.probability_date)
 
         logger.info("Opening contextual layers: adm0=%s pixel_area=%s probability=%s", adm0_path, pixel_area_path, prob_path)
         adm0 = open_zarr_region(adm0_path, bbox, args.chunk_size).astype("uint32")
-        pixel_area = open_zarr_region(pixel_area_path, bbox, args.chunk_size).astype("float32")
+        pixel_area = open_zarr_region(pixel_area_path, bbox, args.chunk_size).astype("float32").rename("pixel_area")
         probability = open_zarr_region(prob_path, bbox, args.chunk_size).astype("uint8")
 
         ref = pixel_area
@@ -354,6 +361,10 @@ def run(args: argparse.Namespace) -> None:
         out_meta = {
             "contextual_date": args.contextual_date,
             "probability_date": args.probability_date,
+            "adm0_zarr_path": adm0_path,
+            "pixel_area_zarr_path": pixel_area_path,
+            "pixel_area_zarr_label": args.pixel_area_label,
+            "pixel_area_var_name": PIXEL_AREA_VAR_NAME,
             "probability_range_included": [1, 100],
             "excluded_probability_values": [0],
             "area_units": "ha",
@@ -417,7 +428,24 @@ def run(args: argparse.Namespace) -> None:
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description="Run organic probability class-area zonal statistics by adm0")
-    parser.add_argument("--contextual_date", default="20250925", help="Date tag for adm0/pixel_area contextual zarrs.")
+    parser.add_argument(
+        "--contextual_date",
+        default="20250925",
+        help=(
+            "Date tag for the adm0 contextual zarr. Pixel area uses "
+            "--pixel_area_zarr so it can point at the corrected 20260531 store."
+        ),
+    )
+    parser.add_argument(
+        "--pixel_area_zarr",
+        default=PIXEL_AREA_ZARR,
+        help=f"Pixel-area zarr path. Default: {PIXEL_AREA_ZARR}",
+    )
+    parser.add_argument(
+        "--pixel_area_label",
+        default=PIXEL_AREA_ZARR_LABEL,
+        help="Short label for the pixel-area source used in local staging and manifests.",
+    )
     parser.add_argument("--probability_date", default="20251105", help="Date tag for ogh_unthresholded_probability contextual zarr.")
     parser.add_argument("--chunk_size", type=int, default=10000)
     parser.add_argument(
@@ -426,7 +454,7 @@ def main(argv=None):
         help=(
             "Local staging directory. Defaults to "
             "AFOLU_LOCAL_OUTPUT_ROOT/staging/probability_area_stats/"
-            "<probability_date>/<contextual_date>."
+            "<probability_date>/<contextual_label>."
         ),
     )
     parser.add_argument("--keep_local", action="store_true")
@@ -469,7 +497,8 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     if args.local_output is None:
-        args.local_output = default_local_output(args.probability_date, args.contextual_date)
+        contextual_label = f"adm0_{args.contextual_date}__pixel_area_{args.pixel_area_label}"
+        args.local_output = default_local_output(args.probability_date, contextual_label)
     run(args)
 
 
