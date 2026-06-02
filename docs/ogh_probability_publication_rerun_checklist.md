@@ -636,6 +636,7 @@ python -m src.scripts.zonal_statistics.02_run_zonal_stats \
   --cluster_name drainage_cluster \
   --run_name {RUN_NAME} \
   --chunk_size 10000 \
+  --contextual_groupers all \
   --diagnostics off \
   --overwrite_existing
 ```
@@ -645,6 +646,10 @@ By default, zonal stats now discovers the 10x10 tiles with aggregated
 inventory period and only loops over those tiles. Use
 `--data_tile_filter off` only when intentionally processing the full
 canonical tile roster.
+
+`--contextual_groupers all` adds WDPA, Landmark, starting-composite
+primary forest, KBA, river basins/watersheds, and drivers of tree-cover
+loss to the default `adm0` and `combined_state` grouping axes.
 
 Optional combined-state QA for runs/intervals that need a publication gate:
 

@@ -184,9 +184,19 @@ def test_build_bbox_mask_clips_to_bbox_subset() -> None:
 
 def test_resolve_requested_contextual_groupers_canonical_deduped() -> None:
     resolved = organic_zonal.resolve_requested_contextual_groupers(
-        ["drivers_of_loss", "KBA", "wdpa", "kba", "WDPA"]
+        ["drivers_of_loss", "KBA", "wdpa", "kba", "WDPA", "landmark"]
     )
-    assert resolved == ["wdpa", "kba", "drivers_of_loss"]
+    assert resolved == ["wdpa", "landmark", "kba", "drivers_of_loss"]
+
+
+def test_resolve_requested_contextual_groupers_all_and_aliases() -> None:
+    assert organic_zonal.resolve_requested_contextual_groupers(["all"]) == list(
+        organic_zonal.CANONICAL_CONTEXTUAL_GROUPER_ORDER
+    )
+    assert organic_zonal.resolve_requested_contextual_groupers(
+        ["drivers", "watersheds", "starting_composite_primary_forests"]
+    ) == ["primary_forest", "river_basins", "drivers_of_loss"]
+    assert organic_zonal.resolve_requested_contextual_groupers(["none"]) == []
 
 
 def test_default_flux_selection_includes_offsite_and_total_co2_sums_sources() -> None:
@@ -225,7 +235,61 @@ def test_default_flux_selection_includes_offsite_and_total_co2_sums_sources() ->
     assert np.isclose(float(arr.values[0, 0]), 2.5)
 
 
-def test_drivers_of_loss_contextual_grouper_registry() -> None:
+def test_contextual_grouper_registry_for_requested_layers() -> None:
+    expected_keys = [
+        "wdpa",
+        "landmark",
+        "primary_forest",
+        "kba",
+        "river_basins",
+        "drivers_of_loss",
+    ]
+    assert list(organic_zonal.CANONICAL_CONTEXTUAL_GROUPER_ORDER) == expected_keys
+
+    wdpa = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["wdpa"]
+    assert wdpa["name"] == "wdpa"
+    assert wdpa["zarr_path"].endswith(
+        "/contextual_layer_global_zarr/WDPAv202511/"
+        "20251229_fillValue_removed/wdpa_20251229.zarr"
+    )
+    assert wdpa["dtype"] == np.uint8
+    assert wdpa["expected_groups"].tolist() == list(range(12))
+
+    landmark = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["landmark"]
+    assert landmark["name"] == "landmark"
+    assert landmark["zarr_path"].endswith(
+        "/contextual_layer_global_zarr/landmark/v20250909/"
+        "20260213_fillValue_removed/landmark_20260213.zarr"
+    )
+    assert landmark["expected_groups"].tolist() == [0, 1]
+
+    primary = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["primary_forest"]
+    assert primary["name"] == "primary_forest_2001"
+    assert primary["zarr_path"].endswith(
+        "/contextual_layer_global_zarr/IFL2000_tropical_primary_forest_2001/"
+        "20251114/ifl_primary_forest_merged_20251114.zarr"
+    )
+    assert primary["expected_groups"].tolist() == [0, 1]
+
+    kba = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["kba"]
+    assert kba["name"] == "kba"
+    assert kba["zarr_path"].endswith(
+        "/contextual_layer_global_zarr/KBA/v20240903/"
+        "20260213_fillValue_removed/KBA_20260213.zarr"
+    )
+    assert kba["expected_groups"].tolist() == [0, 1]
+
+    river_basins = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["river_basins"]
+    assert river_basins["name"] == "river_basins"
+    assert river_basins["zarr_path"].endswith(
+        "/contextual_layer_global_zarr/river_basins/v2018/"
+        "20260213_fillValue_removed/river_basins_20260213.zarr"
+    )
+    assert river_basins["dtype"] == np.uint16
+    assert river_basins["expected_groups"].dtype == np.uint16
+    assert river_basins["expected_groups"][0] == 0
+    assert river_basins["expected_groups"][-1] == 9999
+
     spec = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["drivers_of_loss"]
     assert spec["name"] == "drivers_of_TCL_1_km"
     assert spec["zarr_path"].endswith(
@@ -255,14 +319,22 @@ def test_finalize_interval_tile_outputs_preserves_optional_contextual_columns(tm
             "interval_end": [2024, 2024],
             "tile_id": ["00N_010E", "00N_020E"],
             "wdpa": [0, 0],
+            "landmark": [1, 1],
+            "primary_forest_2001": [0, 0],
             "kba": [1, 1],
+            "river_basins": [3005, 3005],
+            "drivers_of_TCL_1_km": [7, 7],
             "value": [1.0, 2.0],
         }
     )
     ds.write_dataset(pa.Table.from_pandas(frame, preserve_index=False), base_dir=str(tile_stage_dir), format="parquet")
     out = organic_zonal.finalize_interval_tile_outputs(tile_stage_dir)
     assert "wdpa" in out.columns
+    assert "landmark" in out.columns
+    assert "primary_forest_2001" in out.columns
     assert "kba" in out.columns
+    assert "river_basins" in out.columns
+    assert "drivers_of_TCL_1_km" in out.columns
     assert out.iloc[0]["value"] == 3.0
 
 

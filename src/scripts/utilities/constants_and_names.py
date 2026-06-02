@@ -153,22 +153,48 @@ pixel_area_zarr_path = (
 
 # Canonical global contextual zarrs (shared with vegetation/zonal workflows).
 contextual_layer_global_zarr_root = (
-    f"{full_bucket_prefix}/climate/AFOLU_flux_model/LULUCF/outputs/contextual_layer_global_zarr"
+    f"{full_bucket_prefix}/climate/AFOLU_flux_model/contextual_layer_global_zarr"
 )
 
 WDPA_pattern = "wdpa"
 WDPA_zarr_path = (
-    f"{contextual_layer_global_zarr_root}/wdpa/20260224/global_wdpa_20260224.zarr"
+    f"{contextual_layer_global_zarr_root}/WDPAv202511/"
+    "20251229_fillValue_removed/wdpa_20251229.zarr"
 )
-# WDPA classes are currently binary: 0=outside, 1=inside.
-WDPA_codes = np.array([0, 1], dtype=np.uint16)
+# WDPA stores IUCN category-style codes; 0 is outside/no data.
+WDPA_codes = np.arange(0, 12, dtype=np.uint8)
 
 KBA_pattern = "kba"
 KBA_zarr_path = (
-    f"{contextual_layer_global_zarr_root}/kba/20260224/global_kba_20260224.zarr"
+    f"{contextual_layer_global_zarr_root}/KBA/v20240903/"
+    "20260213_fillValue_removed/KBA_20260213.zarr"
 )
 # KBA classes are currently binary: 0=outside, 1=inside.
 KBA_codes = np.array([0, 1], dtype=np.uint16)
+
+landmark_pattern = "landmark"
+landmark_zarr_path = (
+    f"{contextual_layer_global_zarr_root}/landmark/v20250909/"
+    "20260213_fillValue_removed/landmark_20260213.zarr"
+)
+# Landmark classes are currently binary: 0=outside, 1=inside.
+landmark_codes = np.array([0, 1], dtype=np.uint8)
+
+primary_forest_pattern = "primary_forest_2001"
+primary_forest_zarr_path = (
+    f"{contextual_layer_global_zarr_root}/IFL2000_tropical_primary_forest_2001/"
+    "20251114/ifl_primary_forest_merged_20251114.zarr"
+)
+# Starting-composite primary forest classes are binary: 0=outside, 1=inside.
+primary_forest_codes = np.array([0, 1], dtype=np.uint8)
+
+river_basins_pattern = "river_basins"
+river_basins_zarr_path = (
+    f"{contextual_layer_global_zarr_root}/river_basins/v2018/"
+    "20260213_fillValue_removed/river_basins_20260213.zarr"
+)
+# River basins use 4-digit basin IDs in the global contextual zarr.
+river_basins_codes = np.arange(0, 10000, dtype=np.uint16)
 
 drivers_of_loss_pattern = "drivers_of_TCL_1_km"
 drivers_of_loss_zarr_path = (

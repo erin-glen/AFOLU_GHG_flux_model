@@ -125,7 +125,35 @@ FLUX_DATASET_ALIASES: Dict[str, str] = {
 }
 ALL_DATASETS: Dict[str, Dict[str, Any]] = {**STATE_DATASETS, **FLUX_DATASETS}
 
-CANONICAL_CONTEXTUAL_GROUPER_ORDER = ("wdpa", "kba", "drivers_of_loss")
+CANONICAL_CONTEXTUAL_GROUPER_ORDER = (
+    "wdpa",
+    "landmark",
+    "primary_forest",
+    "kba",
+    "river_basins",
+    "drivers_of_loss",
+)
+CONTEXTUAL_GROUPER_ALIASES = {
+    "drivers": "drivers_of_loss",
+    "driver": "drivers_of_loss",
+    "drivers_of_tcl": "drivers_of_loss",
+    "drivers_of_tcl_1_km": "drivers_of_loss",
+    "primary_forests": "primary_forest",
+    "starting_primary_forest": "primary_forest",
+    "starting_primary_forests": "primary_forest",
+    "starting_composite_primary_forest": "primary_forest",
+    "starting_composite_primary_forests": "primary_forest",
+    "watershed": "river_basins",
+    "watersheds": "river_basins",
+    "wastershed": "river_basins",
+    "wastersheds": "river_basins",
+}
+CONTEXTUAL_GROUPER_SPECIAL_TOKENS = ("all", "none")
+CONTEXTUAL_GROUPER_CHOICES = sorted(
+    set(CANONICAL_CONTEXTUAL_GROUPER_ORDER)
+    | set(CONTEXTUAL_GROUPER_ALIASES)
+    | set(CONTEXTUAL_GROUPER_SPECIAL_TOKENS)
+)
 
 
 def default_local_output(model_version: str, run_name: str, run_date: str) -> str:
@@ -147,9 +175,23 @@ OPTIONAL_CONTEXTUAL_GROUPERS: Dict[str, Dict[str, Any]] = {
     "wdpa": {
         "name": cn.WDPA_pattern,
         "zarr_path": cn.WDPA_zarr_path,
-        "expected_groups": _expected_groups_with_zero(cn.WDPA_codes, dtype=np.uint16),
-        "dtype": np.uint16,
+        "expected_groups": _expected_groups_with_zero(cn.WDPA_codes, dtype=np.uint8),
+        "dtype": np.uint8,
         "source_label": "WDPA",
+    },
+    "landmark": {
+        "name": cn.landmark_pattern,
+        "zarr_path": cn.landmark_zarr_path,
+        "expected_groups": _expected_groups_with_zero(cn.landmark_codes, dtype=np.uint8),
+        "dtype": np.uint8,
+        "source_label": "Landmark",
+    },
+    "primary_forest": {
+        "name": cn.primary_forest_pattern,
+        "zarr_path": cn.primary_forest_zarr_path,
+        "expected_groups": _expected_groups_with_zero(cn.primary_forest_codes, dtype=np.uint8),
+        "dtype": np.uint8,
+        "source_label": "IFL2000_tropical_primary_forest_2001",
     },
     "kba": {
         "name": cn.KBA_pattern,
@@ -157,6 +199,13 @@ OPTIONAL_CONTEXTUAL_GROUPERS: Dict[str, Dict[str, Any]] = {
         "expected_groups": _expected_groups_with_zero(cn.KBA_codes, dtype=np.uint16),
         "dtype": np.uint16,
         "source_label": "KBA",
+    },
+    "river_basins": {
+        "name": cn.river_basins_pattern,
+        "zarr_path": cn.river_basins_zarr_path,
+        "expected_groups": _expected_groups_with_zero(cn.river_basins_codes, dtype=np.uint16),
+        "dtype": np.uint16,
+        "source_label": "river_basins",
     },
     "drivers_of_loss": {
         "name": cn.drivers_of_loss_pattern,
@@ -767,7 +816,24 @@ def resolve_flux_selection(selected_names: List[str], logger: Optional[logging.L
 
 def resolve_requested_contextual_groupers(raw_values: Optional[List[str]]) -> List[str]:
     requested = [str(v).strip().lower() for v in (raw_values or []) if str(v).strip()]
-    requested_set = set(requested)
+    if not requested:
+        return []
+    if "none" in requested:
+        if len(requested) > 1:
+            raise ValueError("--contextual_groupers none cannot be combined with other contextual groupers.")
+        return []
+    requested_set = set()
+    for value in requested:
+        if value == "all":
+            requested_set.update(CANONICAL_CONTEXTUAL_GROUPER_ORDER)
+            continue
+        requested_set.add(CONTEXTUAL_GROUPER_ALIASES.get(value, value))
+    invalid = sorted(k for k in requested_set if k not in OPTIONAL_CONTEXTUAL_GROUPERS)
+    if invalid:
+        raise ValueError(
+            f"Unknown contextual groupers: {invalid}. "
+            f"Allowed values: {CONTEXTUAL_GROUPER_CHOICES}"
+        )
     return [k for k in CANONICAL_CONTEXTUAL_GROUPER_ORDER if k in requested_set]
 
 
@@ -792,7 +858,7 @@ def prepare_contextual_grouper(
     dtype: Any,
 ) -> xr.DataArray:
     out = align_auto(arr, ref, tol, force_align)
-    out = drop_scalar_year_coord(out).astype(dtype).rename(name)
+    out = drop_scalar_year_coord(out).fillna(0).astype(dtype).rename(name)
     return out
 
 
@@ -1675,9 +1741,13 @@ def main(argv=None):
     parser.add_argument(
         "--contextual_groupers",
         nargs="+",
-        choices=list(CANONICAL_CONTEXTUAL_GROUPER_ORDER),
+        choices=CONTEXTUAL_GROUPER_CHOICES,
         default=[],
-        help="Optional contextual grouping axes (default: none). Choices: wdpa kba drivers_of_loss",
+        help=(
+            "Optional contextual grouping axes beyond adm0 and combined_state "
+            "(default: none). Use 'all' for wdpa landmark primary_forest kba "
+            "river_basins drivers_of_loss, or 'none' to be explicit."
+        ),
     )
     parser.add_argument("--align_tolerance_fraction", type=float, default=0.49,
                         help="Fraction of one pixel for nearest reindex tolerance (default 0.49).")
