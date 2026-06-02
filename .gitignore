@@ -53,3 +53,9 @@ venv/
 
 # Threshold-curve CSVs accidentally written at the repo root
 /area_vs_threshold_*.csv
+
+# Local agent/assistant instructions
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+CODEX.md
