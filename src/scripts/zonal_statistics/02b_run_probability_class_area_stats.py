@@ -285,6 +285,8 @@ def run(args: argparse.Namespace) -> None:
             model_type="organic_soils",
             stage=stage,
         )
+        if client is not None and not run_local:
+            uu.patch_zarr_asyncarray_config_on_workers(client, logger)
         if args.debug:
             logger.setLevel(logging.DEBUG)
 

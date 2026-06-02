@@ -223,6 +223,58 @@ def upload_repo_source_to_dask(client: Client) -> None:
     print(f"Uploaded repo source to Dask workers: {zip_path}")
 
 
+def patch_zarr_asyncarray_config_on_workers(client: Client, logger) -> None:
+    """Patch older worker-side zarr for AsyncArray objects serialized by newer clients."""
+
+    def _patch() -> dict:
+        try:
+            import zarr
+            from zarr.core.array import AsyncArray, parse_array_config
+
+            if not hasattr(AsyncArray, "_config"):
+                AsyncArray._config = parse_array_config(None)
+            return {
+                "ok": True,
+                "zarr": getattr(zarr, "__version__", "unknown"),
+                "patched": hasattr(AsyncArray, "_config"),
+            }
+        except Exception as exc:  # pragma: no cover - defensive worker compatibility hook
+            return {"ok": False, "error": repr(exc)}
+
+    try:
+        from distributed.diagnostics.plugin import WorkerPlugin
+
+        class ZarrAsyncArrayConfigPlugin(WorkerPlugin):
+            def setup(self, worker) -> None:  # noqa: ANN001 - Dask plugin API
+                _ = worker
+                _patch()
+
+        plugin = ZarrAsyncArrayConfigPlugin()
+        try:
+            client.register_plugin(plugin, name="zarr-asyncarray-config")
+        except AttributeError:
+            client.register_worker_plugin(plugin, name="zarr-asyncarray-config")
+    except Exception as exc:
+        logger.warning("Unable to register worker zarr AsyncArray compatibility plugin: %s", exc)
+
+    try:
+        results = client.run(_patch)
+    except Exception as exc:
+        logger.warning("Unable to apply worker zarr AsyncArray compatibility patch: %s", exc)
+        return
+
+    failed = {worker: result for worker, result in results.items() if not result.get("ok")}
+    if failed:
+        logger.warning("Worker zarr AsyncArray compatibility patch failures: %s", failed)
+    else:
+        versions = sorted({result.get("zarr", "unknown") for result in results.values()})
+        logger.info(
+            "Worker zarr AsyncArray compatibility patch applied on %d workers; zarr_versions=%s",
+            len(results),
+            versions,
+        )
+
+
 # Connects to or creates a Coiled cluster unless running locally
 def connect_to_cluster(
     cluster_name: str = "afolu_cluster",

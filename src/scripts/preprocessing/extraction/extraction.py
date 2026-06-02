@@ -30,10 +30,115 @@ import argparse
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 EXTRACTION_RASTER_PATTERN = re.compile(r"([0-9]{2}[A-Z]_[0-9]{3}[A-Z])_extraction\.tif$")
+RUSSIA_ALLOCATED_MINERAL_RESERVE = "allocated_mineral_reserve"
+RUSSIA_PEAT_EXTRACTION_DATES = "peat_extraction_dates"
+RUSSIA_SOURCE_FIELD = "russia_source_dataset"
+RUSSIA_TYPE_LIC_FIELD = "Type_lic"
+RUSSIA_ALLOWED_TYPE_LIC_VALUES = {"extraction"}
+DEFAULT_RUSSIA_LICENSE_START_YEAR = 2021
+DEFAULT_RUSSIA_LICENSE_END_YEAR = 2024
+VECTOR_READ_ENCODINGS = (None, "UTF-8", "CP1251", "ISO-8859-1")
 
 # -------------------- Filtering Functions --------------------
 
-def filter_gdf_dataset(gdf_dataset, dataset):
+def _empty_like(gdf):
+    return gdf.iloc[0:0].copy()
+
+
+def _read_vector_with_encoding_fallback(path):
+    last_error = None
+    for encoding in VECTOR_READ_ENCODINGS:
+        try:
+            if encoding is None:
+                return gpd.read_file(path)
+            return gpd.read_file(path, encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            logging.warning(
+                "Failed reading %s with encoding %s: %s",
+                path,
+                encoding or "default",
+                exc,
+            )
+    raise last_error
+
+
+def _normalize_text_series(series):
+    return series.astype("string").str.strip().str.lower()
+
+
+def _require_columns(gdf, columns, label):
+    missing = [column for column in columns if column not in gdf.columns]
+    if missing:
+        raise ValueError(f"{label} is missing required column(s): {missing}")
+
+
+def _filter_russia_dataset(
+    gdf_dataset,
+    source_name,
+    license_start_year=DEFAULT_RUSSIA_LICENSE_START_YEAR,
+    license_end_year=DEFAULT_RUSSIA_LICENSE_END_YEAR,
+):
+    if source_name == RUSSIA_ALLOCATED_MINERAL_RESERVE:
+        logging.info(
+            "Excluding Russia %s from production extraction mask; it represents "
+            "allocated reserves without extraction license status.",
+            source_name,
+        )
+        return _empty_like(gdf_dataset)
+
+    if source_name != RUSSIA_PEAT_EXTRACTION_DATES:
+        raise ValueError(f"Unknown Russia extraction source dataset: {source_name}")
+
+    _require_columns(
+        gdf_dataset,
+        [RUSSIA_TYPE_LIC_FIELD, "lic_date", "lic_expire", "cancel_dat"],
+        source_name,
+    )
+
+    start = pd.Timestamp(year=int(license_start_year), month=1, day=1)
+    end = pd.Timestamp(year=int(license_end_year), month=12, day=31)
+    if start > end:
+        raise ValueError(
+            "Russia extraction license_start_year must be <= license_end_year."
+        )
+
+    license_type = _normalize_text_series(gdf_dataset[RUSSIA_TYPE_LIC_FIELD])
+    type_mask = license_type.isin(RUSSIA_ALLOWED_TYPE_LIC_VALUES)
+
+    lic_date = pd.to_datetime(gdf_dataset["lic_date"], errors="coerce")
+    lic_expire = pd.to_datetime(gdf_dataset["lic_expire"], errors="coerce")
+    cancel_dat = pd.to_datetime(gdf_dataset["cancel_dat"], errors="coerce")
+
+    date_mask = (
+        lic_date.notna()
+        & lic_expire.notna()
+        & (lic_date <= end)
+        & (lic_expire >= start)
+        & (cancel_dat.isna() | (cancel_dat >= start))
+    )
+
+    filtered = gdf_dataset[type_mask & date_mask].copy()
+    logging.info(
+        "Russia %s filter retained %d of %d features for license window %s-%s "
+        "(allowed %s only).",
+        source_name,
+        len(filtered),
+        len(gdf_dataset),
+        license_start_year,
+        license_end_year,
+        sorted(RUSSIA_ALLOWED_TYPE_LIC_VALUES),
+    )
+    return filtered
+
+
+def filter_gdf_dataset(
+    gdf_dataset,
+    dataset,
+    source_name=None,
+    russia_license_start_year=DEFAULT_RUSSIA_LICENSE_START_YEAR,
+    russia_license_end_year=DEFAULT_RUSSIA_LICENSE_END_YEAR,
+):
     """
     Apply attribute filtering to the GeoDataFrame based on the dataset.
 
@@ -49,15 +154,24 @@ def filter_gdf_dataset(gdf_dataset, dataset):
             gdf_dataset = gdf_dataset[gdf_dataset['luokka'] == 'turvetuotanto']
             logging.info("Filtering Finland features to luokka == 'turvetuotanto'.")
         elif dataset == 'russia':
-            logging.info(
-                "No Russia attribute filter applied; retaining all features from "
-                "allocated_mineral_reserve and peat_extraction_dates."
+            if source_name is None:
+                raise ValueError(
+                    "Russia extraction filtering requires a source_name so "
+                    "allocated reserves and extraction licenses are handled separately."
+                )
+            gdf_dataset = _filter_russia_dataset(
+                gdf_dataset,
+                source_name,
+                license_start_year=russia_license_start_year,
+                license_end_year=russia_license_end_year,
             )
         else:
             logging.info(f"No specific attribute filtering applied for dataset '{dataset}'.")
         return gdf_dataset
     except Exception as e:
         logging.error(f"Error filtering GeoDataFrame for dataset '{dataset}': {e}")
+        if dataset == "russia":
+            raise
         return gdf_dataset  # Return unfiltered GeoDataFrame in case of error
 
 def filter_raster_data(data, dataset):
@@ -178,15 +292,35 @@ def tile_id_from_extraction_key(key):
 
 def get_reference_profile(tile_id):
     s3_input_raster_path = f"/vsis3/{cn.s3_bucket_name}/{cn.peat_tiles_prefix}{tile_id}_peat_mask_processed.tif"
-    with rasterio.Env(AWS_SESSION=boto3.Session()):
-        with rasterio.open(s3_input_raster_path) as src:
-            return {
-                "crs": src.crs,
-                "transform": src.transform,
-                "width": src.width,
-                "height": src.height,
-                "bounds": src.bounds,
-            }
+    try:
+        with rasterio.Env(AWS_SESSION=boto3.Session()):
+            with rasterio.open(s3_input_raster_path) as src:
+                return {
+                    "crs": src.crs,
+                    "transform": src.transform,
+                    "width": src.width,
+                    "height": src.height,
+                    "bounds": src.bounds,
+                }
+    except Exception as exc:
+        bounds = uutil.get_10x10_tile_bounds(tile_id)
+        logging.warning(
+            "Reference peat tile unavailable for %s (%s); using synthetic "
+            "EPSG:4326 10x10 degree model grid.",
+            tile_id,
+            exc,
+        )
+        return {
+            "crs": rasterio.crs.CRS.from_epsg(4326),
+            "transform": rasterio.transform.from_bounds(
+                *bounds,
+                width=cn.full_raster_dims,
+                height=cn.full_raster_dims,
+            ),
+            "width": cn.full_raster_dims,
+            "height": cn.full_raster_dims,
+            "bounds": bounds,
+        }
 
 
 def raster_aligns_to_reference(src, reference):
@@ -390,7 +524,13 @@ def consolidate_extraction_outputs(tile_id=None, run_mode='default'):
     logging.info(f"Consolidated {len(qa_reports)} final extraction tiles.")
     return qa_reports
 
-def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
+def process_vector_dataset(
+    dataset,
+    tile_id=None,
+    run_mode='default',
+    russia_license_start_year=DEFAULT_RUSSIA_LICENSE_START_YEAR,
+    russia_license_end_year=DEFAULT_RUSSIA_LICENSE_END_YEAR,
+):
     """
     Process vector datasets (Finland and Russia).
 
@@ -422,10 +562,22 @@ def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
                     else:
                         logging.info(f"{shapefile_name} shapefile found locally at {shapefile_path}")
                     # Read the shapefile
-                    gdf_part = gpd.read_file(shapefile_path)
+                    gdf_part = _read_vector_with_encoding_fallback(shapefile_path)
+                    gdf_part[RUSSIA_SOURCE_FIELD] = shapefile_name
+                    gdf_part = filter_gdf_dataset(
+                        gdf_part,
+                        dataset,
+                        source_name=shapefile_name,
+                        russia_license_start_year=russia_license_start_year,
+                        russia_license_end_year=russia_license_end_year,
+                    )
                     # Append to the list
-                    gdf_list.append(gdf_part)
+                    if not gdf_part.empty:
+                        gdf_list.append(gdf_part)
                 # Merge the datasets
+                if not gdf_list:
+                    logging.warning("No Russia extraction features survived filtering. Exiting.")
+                    return
                 gdf_dataset = gpd.GeoDataFrame(pd.concat(gdf_list, ignore_index=True), crs=gdf_list[0].crs)
             else:
                 logging.error(f"Expected a list of S3 paths for Russia datasets in 's3_raw'.")
@@ -440,10 +592,11 @@ def process_vector_dataset(dataset, tile_id=None, run_mode='default'):
                 uutil.download_shapefile_from_s3(shapefile_s3_prefix, cn.local_temp_dir, cn.s3_bucket_name)
             else:
                 logging.info(f"{dataset.capitalize()} shapefile found locally at {shapefile_path}")
-            gdf_dataset = gpd.read_file(shapefile_path)
+            gdf_dataset = _read_vector_with_encoding_fallback(shapefile_path)
 
         # Apply attribute filtering
-        gdf_dataset = filter_gdf_dataset(gdf_dataset, dataset)
+        if dataset != "russia":
+            gdf_dataset = filter_gdf_dataset(gdf_dataset, dataset)
 
         # Ensure GeoDataFrame has valid geometries
         gdf_dataset['geometry'] = gdf_dataset['geometry'].buffer(0)
@@ -528,14 +681,12 @@ def process_vector_tile(dataset, tile_id, gdf_dataset, run_mode='default'):
 
     try:
         # Get tile bounds and CRS from the input raster tile
-        s3_input_raster_path = f"/vsis3/{cn.s3_bucket_name}/{cn.peat_tiles_prefix}{tile_id}_peat_mask_processed.tif"
-        with rasterio.Env(AWS_SESSION=boto3.Session()):
-            with rasterio.open(s3_input_raster_path) as src:
-                tile_bounds = src.bounds
-                tile_transform = src.transform
-                tile_width = src.width
-                tile_height = src.height
-                tile_crs = src.crs
+        reference = get_reference_profile(tile_id)
+        tile_bounds = reference["bounds"]
+        tile_transform = reference["transform"]
+        tile_width = reference["width"]
+        tile_height = reference["height"]
+        tile_crs = reference["crs"]
 
         # Reproject dataset to match the tile's CRS
         if gdf_dataset.crs != tile_crs:
@@ -803,7 +954,14 @@ def process_raster_tile(dataset, tile_id, local_raster_path, run_mode='default')
     except Exception as e:
         logging.error(f"Error processing tile {tile_id} for dataset {dataset}: {e}")
 
-def main(dataset='finland', tile_id=None, run_mode='default', consolidate=False):
+def main(
+    dataset='finland',
+    tile_id=None,
+    run_mode='default',
+    consolidate=False,
+    russia_license_start_year=DEFAULT_RUSSIA_LICENSE_START_YEAR,
+    russia_license_end_year=DEFAULT_RUSSIA_LICENSE_END_YEAR,
+):
     """
     Main function to orchestrate the processing based on provided arguments.
 
@@ -820,7 +978,13 @@ def main(dataset='finland', tile_id=None, run_mode='default', consolidate=False)
         logging.info(f"Starting main processing routine for {dataset} peat extraction dataset")
 
         if dataset in ['finland', 'russia']:
-            process_vector_dataset(dataset, tile_id, run_mode)
+            process_vector_dataset(
+                dataset,
+                tile_id,
+                run_mode,
+                russia_license_start_year=russia_license_start_year,
+                russia_license_end_year=russia_license_end_year,
+            )
         elif dataset == 'ireland':
             process_raster_dataset(dataset, tile_id, run_mode)
         else:
@@ -848,6 +1012,18 @@ if __name__ == "__main__":
                         help="After processing the selected source, rebuild the final binary union")
     parser.add_argument("--consolidate_only", action="store_true",
                         help="Only rebuild the final binary union from source-country outputs")
+    parser.add_argument(
+        "--russia_license_start_year",
+        type=int,
+        default=DEFAULT_RUSSIA_LICENSE_START_YEAR,
+        help="First inventory year for Russia license-overlap filtering",
+    )
+    parser.add_argument(
+        "--russia_license_end_year",
+        type=int,
+        default=DEFAULT_RUSSIA_LICENSE_END_YEAR,
+        help="Last inventory year for Russia license-overlap filtering",
+    )
     args = parser.parse_args()
 
     if args.consolidate_only:
@@ -860,6 +1036,8 @@ if __name__ == "__main__":
             tile_id=args.tile_id,
             run_mode=args.run_mode,
             consolidate=args.consolidate,
+            russia_license_start_year=args.russia_license_start_year,
+            russia_license_end_year=args.russia_license_end_year,
         )
 
 """

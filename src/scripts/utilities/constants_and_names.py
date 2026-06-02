@@ -237,7 +237,7 @@ dirs = {
     'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/distance/{full_raster_dims}_pixels/20260513'),
     'osm_canals': posixpath.join(full_bucket_prefix, processed_dir, f'osm_canals_density/distance/{full_raster_dims}_pixels/20260513'),
     'planted_forest_type': posixpath.join(full_bucket_prefix, processed_dir, f'sdpt/{full_raster_dims}_pixels/20250531'),
-    'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20241021'),
+    'extraction': posixpath.join(full_bucket_prefix, processed_dir, 'extraction/20260601'),
     'climate_domain': lulucf_climate_domain_dir,
     'descals_type': posixpath.join(full_bucket_prefix, processed_dir, 'descals_plantation/extent/20241105'),
     'mangrove_extent': posixpath.join(full_bucket_prefix, processed_dir, 'mangrove_extent/hansen/20251112'),
