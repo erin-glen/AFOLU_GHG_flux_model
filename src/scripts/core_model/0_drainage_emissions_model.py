@@ -59,9 +59,21 @@ VALID_BURNED_STATE_CODES = np.array(
 # preprocessing threshold previously applied during tiling.
 DEFAULT_OGH_THRESHOLD = 10.0
 DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M = 500.0
-# Engert remains a fixed presence-only regional layer (road density, no distance).
-# Dadap is no longer here: it is now a distance-to-canal surface that responds to
-# --drainage_distance_threshold_m, so it stays in during distance-sensitivity runs.
+# Engert is a road-density surface, not a distance raster, so it cannot use the
+# distance threshold directly. The processed model input is in km of road per km2
+# (the raw m/km2 product is divided by 1000 during preprocessing; verified ratio).
+# To make Engert respond to the same drainage-distance sweep we convert the
+# distance threshold T (m) into an analogous density cutoff via a parallel-road
+# approximation: for density rho (km/km2) the mean road spacing is s = 1000 / rho
+# (m) and the mean distance to the nearest road is s / 4 = 250 / rho (m). A cell is
+# road-drained when that implied distance is within T, i.e. when
+#     rho >= 250 / T = ENGERT_DENSITY_DISTANCE_CONSTANT_KM_KM2 / T.
+# Approximate (1 km granularity; assumes processed Engert units are km road per
+# km2). Revisit the constant if the Engert units ever change.
+ENGERT_DENSITY_DISTANCE_CONSTANT_KM_KM2 = 250.0
+# Engert stays in the regional set so --exclude_regional_linear_features can still
+# drop it. Dadap is no longer here: it is now a distance-to-canal surface that
+# responds to --drainage_distance_threshold_m directly.
 REGIONAL_LINEAR_FEATURE_LAYERS = ("engert",)
 PEAT_THRESHOLD_SCENARIO_ALIASES = {
     "baseline": "baseline",
@@ -181,7 +193,7 @@ def _calculate_drainage_and_emissions_numba(
     dadap_block = in_dict_float32["dadap"]  # distance-to-canal in metres (0 = nodata)
     osm_roads_block = in_dict_float32["osm_roads"]
     osm_canals_block = in_dict_float32["osm_canals"]
-    engert_block = in_dict_float32["engert"]
+    engert_block = in_dict_float32["engert"]  # road density in km of road per km2
     grip_block = in_dict_float32["grip"]
     extraction_block = in_dict_uint8["extraction"]
     ecozone_block = in_dict_int16["climate_domain"]
@@ -215,6 +227,13 @@ def _calculate_drainage_and_emissions_numba(
     burned_ch4_out = np.zeros((rows, cols), dtype=np.float32)
     burned_total_co2e_out = np.zeros((rows, cols), dtype=np.float32)
     burned_years_count_out = np.zeros((rows, cols), dtype=np.uint32)
+
+    # Engert road-density cutoff analogous to the distance threshold (see
+    # ENGERT_DENSITY_DISTANCE_CONSTANT_KM_KM2): density >= 250/T (km/km2) means the
+    # implied mean distance to the nearest road is within the distance threshold.
+    engert_density_threshold = (
+        ENGERT_DENSITY_DISTANCE_CONSTANT_KM_KM2 / drainage_distance_threshold_m
+    )
 
     # main pixel loop --------------------------------------------------
     for row in range(rows):
@@ -279,7 +298,7 @@ def _calculate_drainage_and_emissions_numba(
                     node = nu.accrete_node(node, 1)
                     drained = True
                 elif (
-                    (engert > 0)
+                    (engert >= engert_density_threshold)
                     or (grip > 0 and grip <= drainage_distance_threshold_m)
                     or (osm_roads > 0 and osm_roads <= drainage_distance_threshold_m)
                 ):
