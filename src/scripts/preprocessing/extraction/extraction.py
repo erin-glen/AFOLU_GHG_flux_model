@@ -882,14 +882,12 @@ def process_raster_tile(dataset, tile_id, local_raster_path, run_mode='default')
                 return
 
         # Get tile properties from the peat tile (EPSG:4326)
-        s3_input_raster_path = f"/vsis3/{cn.s3_bucket_name}/{cn.peat_tiles_prefix}{tile_id}_peat_mask_processed.tif"
-        with rasterio.Env(AWS_SESSION=boto3.Session()):
-            with rasterio.open(s3_input_raster_path) as peat_tile:
-                tile_bounds = peat_tile.bounds
-                tile_crs = peat_tile.crs
-                tile_transform = peat_tile.transform
-                tile_width = peat_tile.width
-                tile_height = peat_tile.height
+        reference = get_reference_profile(tile_id)
+        tile_bounds = reference["bounds"]
+        tile_crs = reference["crs"]
+        tile_transform = reference["transform"]
+        tile_width = reference["width"]
+        tile_height = reference["height"]
 
         logging.info(f"Tile CRS: {tile_crs}")
 
