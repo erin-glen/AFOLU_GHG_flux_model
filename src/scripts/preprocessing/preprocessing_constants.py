@@ -113,11 +113,18 @@ datasets = {
     'dadap': {
         's3_raw': pp.join(raw_dir, 'canals', 'Dadap_SEA_Drainage',
                           'canal_length_data', 'canal_length_1km_resample_30m.tif'),
+        # Original Dadap et al. (2021) 5 m binary canal mask (Stanford SDR
+        # DOI 10.25740/yj761xk5815, CC-BY-ND), staged as a VRT/mosaic of the
+        # 1664 zoom-15 tiles. Source for the distance-to-canal product below.
+        's3_raw_canals_5m': pp.join(raw_dir, 'canals', 'Dadap_SEA_Drainage',
+                                    'canals_5m', 'dadap_canals_5m.vrt'),
         's3_processed_base': pp.join(processed_dir, 'dadap_density', '30m'),
         's3_processed': pp.join(processed_dir, 'dadap_density', '30m', today_date),
         'local_processed': pp.join(local_temp_dir, 'dadap_density', today_date),
-        'working_version': pp.join(processed_dir, 'dadap_density', '30m', '20240925')
-
+        'working_version': pp.join(processed_dir, 'dadap_density', '30m', '20240925'),
+        # Distance-to-canal product (metres, model-facing). Built by
+        # dadap_canal_distance.py; consumed by the drainage model like osm_canals.
+        's3_distance_base': pp.join(processed_dir, 'dadap_density', 'distance'),
     },
     'planted_forest_type': {
         's3_processed_base': pp.join('climate', 'carbon_model', 'other_emissions_inputs',

@@ -230,7 +230,7 @@ m2_to_ha = 1e-4
 patterns = {
     'land_cover': "{tile_id}__lc_ipcc.tif",
     'peat': "{tile_id}.tif",
-    'dadap': "dadap_{tile_id}.tif",
+    'dadap': "{tile_id}__dadap_canals_distance.tif",
     'engert': "engert_{tile_id}.tif",
     'grip': "{tile_id}__grip_roads_distance.tif",
     'osm_roads': "{tile_id}__osm_roads_distance.tif",
@@ -257,7 +257,10 @@ dirs = {
         'raw'
     ),
     'peat': posixpath.join(full_bucket_prefix, raw_dir, 'soils/GFW_Global_Peatlands'),
-    'dadap': posixpath.join(full_bucket_prefix, processed_dir, 'dadap_density/30m/20240925'),
+    # Dadap canals are now consumed as a distance-to-canal surface (metres),
+    # built by dadap_canal_distance.py, so the model treats Dadap like osm_canals
+    # and the drainage-distance sensitivity sweep applies in SE Asia.
+    'dadap': posixpath.join(full_bucket_prefix, processed_dir, 'dadap_density/distance/40000_pixels/20260602'),
     'engert': posixpath.join(full_bucket_prefix, processed_dir, 'engert_density/30m/20240925'),
     'grip': posixpath.join(full_bucket_prefix, processed_dir, f'grip_density/distance/{full_raster_dims}_pixels/20260513'),
     'osm_roads': posixpath.join(full_bucket_prefix, processed_dir, f'osm_roads_density/distance/{full_raster_dims}_pixels/20260513'),

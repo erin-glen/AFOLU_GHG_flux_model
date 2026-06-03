@@ -73,7 +73,7 @@ PEAT_THRESHOLD_SCENARIO_ALIASES = {
 
 
 def validate_drainage_distance_threshold_m(value: float) -> float:
-    """Validate the distance threshold for OSM/GRIP drainage rasters."""
+    """Validate the distance threshold for Dadap/OSM/GRIP drainage rasters."""
     try:
         threshold = float(value)
     except (TypeError, ValueError) as exc:
@@ -164,7 +164,7 @@ def _calculate_drainage_and_emissions_numba(
     peat_block = in_dict_uint8["peat"]
     land_cover_block = in_dict_uint8["land_cover"]
     planted_forest_type_block = in_dict_uint8["planted_forest_type"]
-    dadap_block = in_dict_float32["dadap"]
+    dadap_block = in_dict_float32["dadap"]  # distance-to-canal in metres (0 = nodata)
     osm_roads_block = in_dict_float32["osm_roads"]
     osm_canals_block = in_dict_float32["osm_canals"]
     engert_block = in_dict_float32["engert"]
@@ -257,7 +257,9 @@ def _calculate_drainage_and_emissions_numba(
             # A) Drainage classification ----------------------------------
             if peat > 0:
                 node = nu.accrete_node(node, 1)
-                if (dadap > 0) or (
+                if (
+                    dadap > 0 and dadap <= drainage_distance_threshold_m
+                ) or (
                     osm_canals > 0 and osm_canals <= drainage_distance_threshold_m
                 ):
                     node = nu.accrete_node(node, 1)
@@ -736,8 +738,8 @@ def calculate_and_upload_drainage(
         Date string (YYYYMMDD) used in raster output paths. When ``None``,
         falls back to ``cn.today_date``.
     drainage_distance_threshold_m : float, optional
-        Distance threshold, in meters, for OSM canals, OSM roads, and GRIP
-        roads. Must be positive and less than 1000 m for the current
+        Distance threshold, in meters, for Dadap canals, OSM canals, OSM roads,
+        and GRIP roads. Must be positive and less than 1000 m for the current
         distance-raster preprocessing.
     """
 
@@ -1423,7 +1425,7 @@ def run_drainage_model(
         threshold_msg,
     )
     main_logger.info(
-        "Drainage distance threshold for OSM canals, OSM roads, and GRIP roads: %s m",
+        "Drainage distance threshold for Dadap canals, OSM canals, OSM roads, and GRIP roads: %s m",
         drainage_distance_threshold_m,
     )
 
@@ -1709,8 +1711,8 @@ def main(argv=None):
         type=float,
         default=DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
         help=(
-            "Distance threshold, in meters, for OSM canals, OSM roads, and "
-            "GRIP roads."
+            "Distance threshold, in meters, for Dadap canals, OSM canals, "
+            "OSM roads, and GRIP roads."
         ),
     )
     p.add_argument(
