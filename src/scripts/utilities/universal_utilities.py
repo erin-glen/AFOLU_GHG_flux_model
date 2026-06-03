@@ -1439,6 +1439,7 @@ def compile_1x1_chunk_stats(
     no_upload,
     main_logger,
     run_name="standard_model",
+    run_date=None,
 ):
     """Aggregate per-chunk statistics into structured categories and upload to S3.
 
@@ -1447,6 +1448,9 @@ def compile_1x1_chunk_stats(
     run_name : str, optional
         Model run identifier used to label output paths. Defaults to
         ``"standard_model"`` for backward compatibility.
+    run_date : str, optional
+        Date string used to mirror model output paths. Defaults to
+        ``today_date`` for backward compatibility.
     """
 
     import boto3
@@ -1523,12 +1527,13 @@ def compile_1x1_chunk_stats(
     out_spreadsheet = f"{stage}_1x1_chunk_statistics_{timestr()}.xlsx"
 
     # Build informative local and S3 directories mirroring raster outputs
-    local_dir = os.path.join(local_chunk_stats_path, run_name, today_date)
+    stats_date = run_date or today_date
+    local_dir = os.path.join(local_chunk_stats_path, run_name, stats_date)
     s3_dir = posixpath.join(
         outputs_path.removeprefix("s3://gfw2-data/"),
         "chunk_stats",
         run_name,
-        today_date,
+        stats_date,
     )
 
     os.makedirs(local_dir, exist_ok=True)
@@ -1563,7 +1568,14 @@ def compile_1x1_chunk_stats(
         )
 
 
-def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
+def aggregate_10x10_chunk_stats(
+    all_10x10_stats,
+    stage,
+    no_upload,
+    main_logger,
+    run_name="standard_model",
+    run_date=None,
+):
     """Write aggregated 10x10 pixel counts to an Excel spreadsheet."""
 
     s3_client = boto3.client("s3")
@@ -1572,7 +1584,16 @@ def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
     df_all_10x10_stats = pd.DataFrame(all_10x10_stats)
 
     out_spreadsheet = f"{stage}_10x10_chunk_statistics_{timestr()}.xlsx"
-    local_spreadsheet = f"{cn.local_chunk_stats_path}{out_spreadsheet}"
+    stats_date = run_date or cn.today_date
+    local_dir = os.path.join(cn.local_chunk_stats_path, f"{run_name}_10", stats_date)
+    s3_dir = posixpath.join(
+        cn.outputs_path.removeprefix("s3://gfw2-data/"),
+        "chunk_stats",
+        f"{run_name}_10",
+        stats_date,
+    )
+    os.makedirs(local_dir, exist_ok=True)
+    local_spreadsheet = os.path.join(local_dir, out_spreadsheet)
 
     main_logger.info(f"Writing tile stats to spreadsheet: {timestr()}")
     with pd.ExcelWriter(local_spreadsheet) as writer:
@@ -1584,10 +1605,10 @@ def aggregate_10x10_chunk_stats(all_10x10_stats, stage, no_upload, main_logger):
         s3_client.upload_file(
             local_spreadsheet,
             cn.short_bucket_prefix,
-            Key=f"{cn.s3_chunk_stats_path}{out_spreadsheet}",
+            Key=posixpath.join(s3_dir, out_spreadsheet),
         )
         main_logger.info(
-            f"Uploaded to {cn.full_bucket_prefix}/{cn.s3_chunk_stats_path}{out_spreadsheet}: {timestr()}"
+            f"Uploaded to {cn.full_bucket_prefix}/{posixpath.join(s3_dir, out_spreadsheet)}: {timestr()}"
         )
 
 

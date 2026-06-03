@@ -418,7 +418,14 @@ def main(
             )
 
     if success_count > 0:
-        uu.aggregate_10x10_chunk_stats(all_stats, stage, no_upload, logger)
+        uu.aggregate_10x10_chunk_stats(
+            all_stats,
+            stage,
+            no_upload,
+            logger,
+            run_name=run_name,
+            run_date=output_date,
+        )
 
     end_time = uu.timestr()
     lu.print_and_log(f"Stage {stage} ended at: {end_time}", is_final, logger)

@@ -59,6 +59,10 @@ VALID_BURNED_STATE_CODES = np.array(
 # preprocessing threshold previously applied during tiling.
 DEFAULT_OGH_THRESHOLD = 10.0
 DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M = 500.0
+# Engert remains a fixed presence-only regional layer (road density, no distance).
+# Dadap is no longer here: it is now a distance-to-canal surface that responds to
+# --drainage_distance_threshold_m, so it stays in during distance-sensitivity runs.
+REGIONAL_LINEAR_FEATURE_LAYERS = ("engert",)
 PEAT_THRESHOLD_SCENARIO_ALIASES = {
     "baseline": "baseline",
     "base": "baseline",
@@ -70,6 +74,16 @@ PEAT_THRESHOLD_SCENARIO_ALIASES = {
     "high_area": "high_area",
     "high-area": "high_area",
 }
+
+
+def exclude_regional_linear_feature_layers(download_dict: dict) -> dict:
+    """Return *download_dict* without fixed regional linear-feature inputs."""
+
+    return {
+        key: value
+        for key, value in download_dict.items()
+        if key not in REGIONAL_LINEAR_FEATURE_LAYERS
+    }
 
 
 def validate_drainage_distance_threshold_m(value: float) -> float:
@@ -1346,8 +1360,10 @@ def run_drainage_model(
     outputs_to_zarr: Optional[list[str]] = None,
     include_legacy_state_rasters: bool = False,
     create_zarr: bool = False,
+    update_existing_zarr: bool = False,
     run_date: Optional[str] = None,
     drainage_distance_threshold_m: float = DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
+    exclude_regional_linear_features: bool = False,
 ):
 
     drainage_distance_threshold_m = validate_drainage_distance_threshold_m(
@@ -1428,6 +1444,11 @@ def run_drainage_model(
         "Drainage distance threshold for Dadap canals, OSM canals, OSM roads, and GRIP roads: %s m",
         drainage_distance_threshold_m,
     )
+    if exclude_regional_linear_features:
+        main_logger.info(
+            "Excluding fixed regional linear-feature inputs from drainage classification: %s",
+            ", ".join(REGIONAL_LINEAR_FEATURE_LAYERS),
+        )
 
     if chunk_shapefile_uri:
         if shapefile_provided:
@@ -1464,10 +1485,26 @@ def run_drainage_model(
     if not run_date:
         run_date = datetime.utcnow().strftime("%Y%m%d")
 
-    # Whenever the run is large-scale (final), force zarr creation
-    if is_final:
+    if create_zarr and update_existing_zarr:
+        raise ValueError(
+            "--create_zarr and --update_existing_zarr are mutually exclusive. "
+            "Use --create_zarr only for new global stores, and "
+            "--update_existing_zarr for partial repairs."
+        )
+    if mega_zarr_path and create_zarr:
+        raise ValueError(
+            "--mega_zarr_path cannot be combined with --create_zarr because "
+            "creating a zarr initializes the store with mode='w'."
+        )
+    if mega_zarr_path:
+        update_existing_zarr = True
+
+    # Whenever the run is large-scale (final), force zarr creation unless this
+    # is an explicit repair of an already initialized store.
+    if is_final and not update_existing_zarr:
         create_zarr = True
     main_logger.info("Create and populate global mega-zarr: %s", create_zarr)
+    main_logger.info("Update existing mega-zarr in place: %s", update_existing_zarr)
 
     # Normalize interval settings and compute interval list
     intervals, start_year, end_year, interval_type = compute_intervals(
@@ -1526,6 +1563,47 @@ def run_drainage_model(
         main_logger.info(
             "mega-zarr chunk size (years, y, x): %s", ds.chunksizes
         )
+    elif update_existing_zarr:
+        if not chunks:
+            raise ValueError("No chunks available to determine zarr chunk size.")
+        chunk_size_pixels = uu.calc_chunk_length_pixels(chunks[0])
+        if mega_zarr_path is None:
+            mega_zarr_path = zu.create_mega_zarr_path(
+                cn.drainage_outputs_path_mega_zarr,
+                chunk_size_pixels,
+                interval_type,
+                run_name,
+                run_date,
+                main_logger,
+            )
+        if outputs_to_zarr is None:
+            outputs_to_zarr = list(cn.drainage_outputs_to_zarr)
+            if include_legacy_state_rasters:
+                outputs_to_zarr.extend(cn.drainage_optional_state_outputs)
+        outputs_to_zarr = list(dict.fromkeys(outputs_to_zarr))
+        ds = zu.open_mega_zarr_dataset(mega_zarr_path)
+        zarr_year_index = [int(year) for year in ds.year.values]
+        missing_outputs = [
+            output_name
+            for output_name in outputs_to_zarr
+            if output_name not in ds.data_vars
+        ]
+        if missing_outputs:
+            raise ValueError(
+                "Requested outputs are missing from existing mega-zarr "
+                f"{mega_zarr_path}: {missing_outputs}"
+            )
+        main_logger.info("Updating existing mega-zarr path: %s", mega_zarr_path)
+        main_logger.info(
+            "Existing mega-zarr year index (%s): %s",
+            interval_type,
+            zarr_year_index,
+        )
+        main_logger.info(
+            "Mega-zarr output datasets (%d): %s",
+            len(outputs_to_zarr),
+            outputs_to_zarr,
+        )
 
     # build task list & run with dask.bag
     bag_items = [(bds, iv[0], iv[1]) for iv in intervals for bds in chunks]
@@ -1549,6 +1627,8 @@ def run_drainage_model(
                 closing_year,
                 peat_dataset=peat_dataset,
             )
+            if exclude_regional_linear_features:
+                download_dict = exclude_regional_linear_feature_layers(download_dict)
             first_tiles = uu.first_file_name_in_s3_folder(download_dict)
             typed_dict_cache[key] = uu.add_file_type_to_dict(first_tiles)
 
@@ -1590,6 +1670,7 @@ def run_drainage_model(
             no_upload,
             main_logger,
             run_name=run_name,
+            run_date=run_date,
         )
 
 
@@ -1716,6 +1797,17 @@ def main(argv=None):
         ),
     )
     p.add_argument(
+        "--exclude_regional_linear_features",
+        action="store_true",
+        help=(
+            "Exclude fixed presence-only regional linear-feature drainage inputs "
+            "(Engert roads) so drainage-distance sensitivity runs depend only on "
+            "the distance rasters (Dadap canals, OSM canals/roads, GRIP roads). "
+            "Dadap is now distance-based and responds to the sweep, so it is no "
+            "longer excluded."
+        ),
+    )
+    p.add_argument(
         "--peat_threshold_by_biome",
         type=str,
         default=None,
@@ -1784,6 +1876,21 @@ def main(argv=None):
         help="Create and populate global mega-zarr with model outputs",
     )
     p.add_argument(
+        "--update_existing_zarr",
+        action="store_true",
+        help=(
+            "Populate an existing mega-zarr in place without reinitializing it. "
+            "Use this for tile-level repairs."
+        ),
+    )
+    p.add_argument(
+        "--mega_zarr_path",
+        help=(
+            "Existing mega-zarr path to update. Supplying this implies "
+            "--update_existing_zarr and cannot be combined with --create_zarr."
+        ),
+    )
+    p.add_argument(
         "--include_legacy_state_rasters",
         action="store_true",
         help="Also write legacy drained_state and burned_state rasters (default: omit from standard runs).",
@@ -1830,9 +1937,12 @@ def main(argv=None):
         count_burned_years=args.count_burned_years,
         emission_factor_variant=args.emission_factor_variant,
         create_zarr=args.create_zarr,
+        update_existing_zarr=args.update_existing_zarr,
+        mega_zarr_path=args.mega_zarr_path,
         include_legacy_state_rasters=args.include_legacy_state_rasters,
         run_date=args.run_date,
         drainage_distance_threshold_m=args.drainage_distance_threshold_m,
+        exclude_regional_linear_features=args.exclude_regional_linear_features,
     )
 
 
