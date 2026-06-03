@@ -85,6 +85,7 @@ from src.scripts.postprocessing.visualization.create_global_map_common import (
 COMBINED_STATE_RECLASS_DATASET = "combined_state_reclassified"
 COMBINED_STATE_CLASS_FRACTION_DATASET = "combined_state_class_fraction"
 COMBINED_STATE_PRESENCE_RECLASS_DATASET = "combined_state_presence_reclassified"
+COMBINED_STATE_EMISSION_EXTENT_DATASET = "combined_state_emission_extent"
 COMBINED_STATE_RECLASS_NODATA = np.uint8(255)
 COMBINED_STATE_RECLASS_UNDRAINED = np.uint8(1)
 COMBINED_STATE_RECLASS_DRAINED_ONLY = np.uint8(2)
@@ -119,6 +120,15 @@ COMBINED_STATE_CLASS_FRACTION_TAGS = {
 COMBINED_STATE_PRESENCE_RECLASS_TAGS = {
     **COMBINED_STATE_RECLASS_TAGS,
     "aggregation": "presence from combined_state_class_fraction",
+}
+
+COMBINED_STATE_EMISSION_EXTENT_TAGS = {
+    **COMBINED_STATE_RECLASS_TAGS,
+    "aggregation": (
+        "organic-soil presence backdrop (class 1) overlaid with drained/burned/both "
+        "classes thresholded from the coarse drained_total and burned_total emission "
+        "rasters; constructed to agree with the emission maps when shown side by side"
+    ),
 }
 
 
@@ -553,6 +563,18 @@ def _combined_state_presence_reclass_output(
     )
 
 
+def _combined_state_emission_extent_output(
+    global_output_path: str,
+    global_outfile: str,
+) -> Tuple[str, str]:
+    """Return output directory and filename for the emission-extent class raster."""
+    return _combined_state_companion_output(
+        global_output_path,
+        global_outfile,
+        COMBINED_STATE_EMISSION_EXTENT_DATASET,
+    )
+
+
 def _per_pixel_tile_path(items: dict, tile_id: str) -> str:
     pp_dir = items.get("per_pixel_dir")
     pp_pat = items.get("per_pixel_pattern")
@@ -771,6 +793,125 @@ def _write_combined_state_fraction_outputs(
             pass
 
     return fraction_path, presence_output_path
+
+
+def _classify_emission_extent(
+    presence_reclass: np.ndarray,
+    drained_em: np.ndarray,
+    burned_em: np.ndarray,
+    threshold: float,
+) -> np.ndarray:
+    """
+    Combine an organic-soil presence backdrop with emission-thresholded classes.
+
+    Per coarse cell:
+        1 (undrained): organic soil present (any class) in the state layer.
+        2 (drained only): coarse drained emission strictly above ``threshold``.
+        3 (burned only): coarse burned emission strictly above ``threshold``.
+        4 (drained+burned): both emission rasters strictly above ``threshold``.
+        255 (nodata): no organic soil and no emission above ``threshold``.
+
+    The drained/burned/both classes are assigned after the organic backdrop and are
+    unconditional on the organic flag, so every cell with emission above ``threshold``
+    is represented -- this is what makes the layer agree with the emission maps. NaN
+    emission compares False against any threshold and is treated as no emission.
+    """
+    organic = presence_reclass != COMBINED_STATE_RECLASS_NODATA
+    has_drained = drained_em > threshold
+    has_burned = burned_em > threshold
+
+    out = np.full(presence_reclass.shape, COMBINED_STATE_RECLASS_NODATA, dtype=np.uint8)
+    out[organic] = COMBINED_STATE_RECLASS_UNDRAINED
+    out[has_drained & ~has_burned] = COMBINED_STATE_RECLASS_DRAINED_ONLY
+    out[~has_drained & has_burned] = COMBINED_STATE_RECLASS_BURNED_ONLY
+    out[has_drained & has_burned] = COMBINED_STATE_RECLASS_DRAINED_BURNED
+    return out
+
+
+def _build_emission_extent_raster(
+    *,
+    presence_path: str,
+    drained_path: str,
+    burned_path: str,
+    dst_base: str,
+    dst_name: str,
+    threshold: float,
+    logger,
+    spool_dir: Optional[str] = None,
+    block_rows: int = 1024,
+) -> str:
+    """
+    Build the combined_state emission-extent raster from already-written global mosaics.
+
+    Reads the coarse combined_state presence raster (organic backdrop) and the coarse
+    drained/burned emission rasters in row blocks, classifies per
+    :func:`_classify_emission_extent`, and writes a UInt8 GeoTIFF that shares the input
+    grid. All three inputs must already exist on the same global grid.
+    """
+    dst_path = _join_output_path(dst_base, dst_name)
+    vsi_dst = _to_vsipath_if_s3(dst_path)
+
+    env_kwargs = {}
+    if dst_path.startswith("s3://"):
+        env_kwargs["CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE"] = "YES"
+        if spool_dir:
+            env_kwargs["CPL_TMPDIR"] = spool_dir
+
+    tags = dict(COMBINED_STATE_EMISSION_EXTENT_TAGS)
+    tags["emission_threshold"] = repr(float(threshold))
+
+    with rasterio.Env(**env_kwargs):
+        with rasterio.open(presence_path) as p_src, \
+                rasterio.open(drained_path) as d_src, \
+                rasterio.open(burned_path) as b_src:
+            rows, cols = p_src.height, p_src.width
+            for name, other in (("drained", d_src), ("burned", b_src)):
+                if (other.height, other.width) != (rows, cols):
+                    raise ValueError(
+                        f"{name} emission grid {(other.height, other.width)} does not match "
+                        f"combined_state presence grid {(rows, cols)} for the emission-extent build."
+                    )
+
+            profile = dict(
+                driver="GTiff",
+                width=cols,
+                height=rows,
+                count=1,
+                dtype="uint8",
+                crs=p_src.crs,
+                transform=p_src.transform,
+                nodata=int(COMBINED_STATE_RECLASS_NODATA),
+                bigtiff="YES",
+                tiled=True,
+                blockxsize=512,
+                blockysize=512,
+                compress="DEFLATE",
+                predictor=1,
+                num_threads="ALL_CPUS",
+            )
+
+            logger.info(
+                "Building %s (size %d×%d, threshold=%s) ...",
+                dst_path,
+                cols,
+                rows,
+                threshold,
+            )
+            with rasterio.open(vsi_dst, "w", **profile) as dst:
+                for row0 in range(0, rows, block_rows):
+                    height = min(block_rows, rows - row0)
+                    window = Window(0, row0, cols, height)
+                    presence = p_src.read(1, window=window)
+                    drained = d_src.read(1, window=window, out_dtype="float32")
+                    burned = b_src.read(1, window=window, out_dtype="float32")
+                    classified = _classify_emission_extent(
+                        presence, drained, burned, float(threshold)
+                    )
+                    dst.write(classified, 1, window=window)
+                dst.update_tags(**tags)
+
+    logger.info("Saved combined_state emission-extent → %s", dst_path)
+    return dst_path
 
 
 # --------------------------------------------------------------------
@@ -1388,6 +1529,7 @@ def aggregate_main(
     data_types: Optional[List[str]] = None,
     inventory_periods: Optional[List[str]] = None,
     tile_ids: Optional[List[str]] = None,
+    emission_extent_threshold: float = 0.0,
 ) -> None:
     assert_grid_divides_world(target_deg)
 
@@ -1429,12 +1571,18 @@ def aggregate_main(
         from src.scripts.postprocessing.visualization import create_global_raster as cgr_module
         tile_agg_func = cgr_module.agg_tile_to_target
 
+    # Collect the global outputs needed to synthesize the emission-extent layer
+    # (organic backdrop from combined_state presence + drained/burned emissions),
+    # keyed by inventory interval and built after all datasets are written.
+    emission_extent_inputs: dict[str, dict[str, Tuple[str, str]]] = {}
+
     for key, items in download_upload_dictionary.items():
         bounds_list: List[Tuple[float, float, float, float]] = []
         delayed_results: List = []
         tile_ids_for_key: List[str] = []
 
         dataset_name = items["dataset"]
+        interval = items["interval"]
         is_combined = (dataset_name == "combined_state")
 
         stage = f"aggregate tiles to {res_label} for {key}"
@@ -1544,6 +1692,65 @@ def aggregate_main(
             logger,
         )
 
+        # Register inputs for the per-interval emission-extent synthesis below.
+        entry = emission_extent_inputs.setdefault(interval, {})
+        if is_combined:
+            entry["presence"] = _combined_state_presence_reclass_output(
+                global_output_path, global_outfile
+            )
+            entry["combined_global"] = (global_output_path, global_outfile)
+        elif "drained_total" in dataset_name:
+            entry["drained"] = (global_output_path, global_outfile)
+        elif "burned_total" in dataset_name:
+            entry["burned"] = (global_output_path, global_outfile)
+
+    # Synthesize the combined_state emission-extent raster for each interval that has
+    # all three required inputs. This is a cheap downstream combine of the already-
+    # written coarse mosaics, so the classes line up with the emission maps exactly.
+    required_inputs = ("presence", "combined_global", "drained", "burned")
+    for interval, parts in emission_extent_inputs.items():
+        missing = [name for name in required_inputs if name not in parts]
+        if missing:
+            lu.print_and_log(
+                f"Skipping {res_label} combined_state emission-extent for interval "
+                f"{interval}; missing inputs: {missing}",
+                is_final,
+                logger,
+            )
+            continue
+
+        pres_dir, pres_name = parts["presence"]
+        dr_dir, dr_name = parts["drained"]
+        bu_dir, bu_name = parts["burned"]
+        comb_dir, comb_name = parts["combined_global"]
+        out_dir, out_name = _combined_state_emission_extent_output(comb_dir, comb_name)
+
+        stage = f"build {res_label} combined_state emission-extent for {interval}"
+        lu.print_and_log(f"Stage {stage} started at: {uu.timestr()}", is_final, logger)
+        try:
+            _build_emission_extent_raster(
+                presence_path=_to_vsipath_if_s3(_join_output_path(pres_dir, pres_name)),
+                drained_path=_to_vsipath_if_s3(_join_output_path(dr_dir, dr_name)),
+                burned_path=_to_vsipath_if_s3(_join_output_path(bu_dir, bu_name)),
+                dst_base=out_dir,
+                dst_name=out_name,
+                threshold=emission_extent_threshold,
+                logger=logger,
+                spool_dir=tempfile.gettempdir(),
+            )
+            lu.print_and_log(
+                f"Emission-extent raster saved to {_join_output_path(out_dir, out_name)}",
+                is_final,
+                logger,
+            )
+        except Exception as exc:
+            lu.print_and_log(
+                f"WARNING: combined_state emission-extent build failed for interval "
+                f"{interval} ({exc})",
+                is_final,
+                logger,
+            )
+
     if client is not None:
         client.close()
     if cluster is not None:
@@ -1601,6 +1808,17 @@ def main() -> None:
         help="Optional subset of inventory periods, e.g. 2021_2024.",
     )
     parser.add_argument(
+        "--emission_extent_threshold",
+        type=float,
+        default=0.0,
+        help=(
+            "Coarse-cell emission threshold (data units, e.g. Mg CO2e yr^-1) above which "
+            "the combined_state emission-extent layer marks a cell drained/burned. Default "
+            "0.0 makes the layer's extent identical to where the emission maps show any "
+            "positive value."
+        ),
+    )
+    parser.add_argument(
         "--tile_ids",
         nargs="+",
         default=None,
@@ -1624,6 +1842,7 @@ def main() -> None:
         data_types=_split_cli_items(args.data_types),
         inventory_periods=_split_cli_items(args.inventory_periods),
         tile_ids=_split_cli_items(args.tile_ids),
+        emission_extent_threshold=args.emission_extent_threshold,
     )
 
 
