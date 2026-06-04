@@ -482,16 +482,16 @@ python -m src.scripts.utilities.create_cluster \
   -n 100 \
   -m 32 \
   -cn organic_soil_sensitivities \
-  --idle-timeout "6 hours" \
+  --idle-timeout "1 hour" \
   --spot-policy on-demand
 
 python -m src.scripts.core_model.sequence_runs.run_ogh_20260513_sensitivity_matrix \
   --cluster-name organic_soil_sensitivities
 ```
 
-Use an explicit long idle timeout for this matrix. A default 32 GiB cluster has
-a short worker idle timeout, and early sensitivity attempts failed after Coiled
-started retiring workers during the first model scenario.
+Use an explicit one-hour idle timeout for this matrix. A default 32 GiB cluster
+has a short worker idle timeout, and early sensitivity attempts failed after
+Coiled started retiring workers during the first model scenario.
 
 To also run the 2024 10x10 aggregation and zonal statistics after all model
 scenarios finish, add `--phases model aggregate zonal`.

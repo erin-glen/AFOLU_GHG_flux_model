@@ -183,7 +183,7 @@ if __name__ == "__main__":
         "--idle-timeout",
         default=None,
         help=(
-            "Optional Coiled idle timeout, e.g. '6 hours'. Defaults to the "
+            "Optional Coiled idle timeout, e.g. '1 hour'. Defaults to the "
             "repo's memory-tier timeout."
         ),
     )
