@@ -6,11 +6,12 @@ publication outputs.
 
 Use placeholders consistently:
 
-- `{RUN_DATE}`: production run date tag, `YYYYMMDD`.
+- `{RUN_DATE}`: production run date tag, `YYYYMMDD`. Current baseline run date:
+  `20260525`.
 - `{OGH_PROB_DATE}`: processed OGH unthresholded probability tile date tag.
 - `{OGH_SOURCE_TIF_URL}`: HTTPS URL for the delivered OpenGeoHub probability
   GeoTIFF/COG.
-- `{MODEL_VERSION}`: underscore model version, for example `0_1_4`.
+- `{MODEL_VERSION}`: underscore model version. Current rerun version: `1_0_1`.
 - `{THRESHOLD_DIR}`: local directory containing threshold diagnostics.
 - `{BASELINE_BIOME_THRESHOLDS}`: CSV or equivalent JSON thresholds for the
   production baseline option.
@@ -18,7 +19,17 @@ Use placeholders consistently:
   `low_area_threshold`, and `high_area_threshold` columns for uncertainty
   envelopes.
 
-## Current 2026-05 Rerun Status
+Current concrete values for the `1_0_1` OGH rerun:
+
+```bash
+export MODEL_VERSION=1_0_1
+export RUN_DATE=20260525
+export OGH_PROB_DATE=20260513
+export OGH_MIXED_THRESHOLDS=docs/organic_soil_threshold_profiles/20260513_mixed_boreal_f1_temperate_f1_5_tropical_f2.csv
+export OGH_MIXED_RUN=ogh_mixed_f1_f15_f2_20260513
+```
+
+## Current 2026-06 Rerun Status
 
 - OGH unthresholded probability tiles are using date tag `20260513`.
 - The selected production threshold profile is
@@ -29,21 +40,26 @@ Use placeholders consistently:
 - The refreshed 30 m peat union mask is using date tag `20260513`, built from
   `gfw`, `gpd`, and `ogh=20260513`; `peatmap` and `peatml` were intentionally
   left out.
-- Roads/canals were previously rerun from the refreshed 20260508 peat union
-  mask, without reprojecting source road/canal vectors, and the aggregated
-  distance products are using date tag `20260509`. The 20260513 threshold
-  update has not yet rerun roads/canals.
+- Roads/canals have been refreshed against the `20260513` peat union mask,
+  without reprojecting source road/canal vectors.
 - `dirs["osm_roads"]`, `dirs["osm_canals"]`, and `dirs["grip"]` now point to
-  the `distance/40000_pixels/20260509` folders.
-- Before launching the full all-period production run and sensitivity matrix,
-  run one global OGH baseline gate for `2021_2024` and carry that single run
-  through aggregation, zonal statistics, publication QA/comparison scripts, and
-  global map aggregation.
-- The `20260510` OGH baseline gate completed through 0.01-degree global raster
-  aggregation for `2021_2024`; display rendering was intentionally skipped for
-  this gate.
-- The gate also produced the 0.01-degree `combined_state_reclassified` raster
-  with four organic-state map classes.
+  the `distance/40000_pixels/20260513` folders.
+- The full baseline model has been run for all five inventory periods under
+  model version `1_0_1`, run name `ogh_mixed_f1_f15_f2_20260513`, and run date
+  `20260525`.
+- Baseline 10x10 degree outputs and zonal statistics have been produced for
+  `2001_2005`, `2006_2010`, `2011_2015`, `2016_2020`, and `2021_2024`.
+- Baseline global raster aggregation has been produced for `2021_2024`
+  under the `0_005deg_output_aggregation` and `0_01deg_output_aggregation`
+  prefixes, including `combined_state_reclassified`,
+  `combined_state_class_fraction`, and the total drained/burned emissions
+  rasters.
+- The remaining model work is the 2021-2024 sensitivity matrix: inventory
+  source comparisons, drainage-distance comparisons, and low/high
+  threshold-plus-emission-factor envelopes.
+- Uncertainty to resolve: confirm whether global rasters are required for
+  earlier baseline inventory periods, or whether the publication maps remain
+  latest-period-only.
 
 ## Critical Findings
 
@@ -98,8 +114,8 @@ Use placeholders consistently:
      unintended nested date prefix. Both combine configured S3 prefixes with a
      runtime date in some paths.
 
-2. Choose canonical run names before launching the model.
-   - Baseline all periods: `ogh_biome_thresholds`.
+2. Choose canonical run names before launching sensitivity runs.
+   - Completed baseline all periods: `ogh_mixed_f1_f15_f2_20260513`.
    - Inventory-source sensitivities: `gfw_standard_model_500m`,
      `gpd_standard_model_500m`.
    - Drainage-distance sensitivities, if using existing pub comparison defaults:
@@ -107,11 +123,17 @@ Use placeholders consistently:
    - Threshold plus emission-factor envelope: `ogh_sensitivity_low`,
      `ogh_sensitivity_high`.
 
-3. Decide whether to run an OGH 500 m baseline alias.
+3. Decide how to handle OGH baseline aliases before final publication
+   comparisons.
    - `pub_compare_runs.py` currently uses `ogh_biome_thresholds` for inventory
      source comparison, but `ogh_sensitivity_500m` for distance and high/low
-     comparisons. Either run a 2021-2024 baseline alias as `ogh_sensitivity_500m`
-     or edit `COMPARISONS` in `pub_compare_runs.py` to use one baseline name.
+     comparisons.
+   - Recommended for the sensitivity phase: run the 2021-2024 OGH 500 m
+     baseline alias as `ogh_sensitivity_500m` so the distance and high/low
+     comparisons work without code changes.
+   - Still unresolved: either update `COMPARISONS` so inventory-source
+     comparison uses `ogh_sensitivity_500m` or `ogh_mixed_f1_f15_f2_20260513`,
+     or run one additional 2021-2024 alias named `ogh_biome_thresholds`.
 
 ## Stage 1: Process Updated OGH Probability Tiles
 
@@ -354,9 +376,9 @@ roads/canals folder from old unchanged chunks plus newly rerun changed chunks.
 ```bash
 python -m src.scripts.preprocessing.roads_canals.global_datasets.04_changed_peat_chunks \
   --old_union_date 20251110 \
-  --new_union_date 20260508 \
-  --output logs/roads_canals_delta/20251110_to_20260508/changed_peat_chunks_20251110_to_20260508.csv \
-  --distance_output logs/roads_canals_delta/20251110_to_20260508/distance_affected_peat_chunks_20251110_to_20260508.csv
+  --new_union_date 20260513 \
+  --output logs/roads_canals_delta/20251110_to_20260513/changed_peat_chunks_20251110_to_20260513.csv \
+  --distance_output logs/roads_canals_delta/20251110_to_20260513/distance_affected_peat_chunks_20251110_to_20260513.csv
 ```
 
 The `changed_peat_chunks` manifest is used for presence. The
@@ -368,10 +390,10 @@ cross chunk boundaries.
 
 ```bash
 python -m src.scripts.preprocessing.roads_canals.global_datasets.05_assemble_delta_roads_canals \
-  --changed_manifest logs/roads_canals_delta/20251110_to_20260508/changed_peat_chunks_20251110_to_20260508.csv \
+  --changed_manifest logs/roads_canals_delta/20251110_to_20260513/changed_peat_chunks_20251110_to_20260513.csv \
   --target_date {ROADS_DELTA_DATE} \
   --products presence \
-  --summary_output logs/roads_canals_delta/20251110_to_20260508/assemble_presence_{ROADS_DELTA_DATE}.json \
+  --summary_output logs/roads_canals_delta/20251110_to_20260513/assemble_presence_{ROADS_DELTA_DATE}.json \
   --apply
 ```
 
@@ -383,7 +405,7 @@ python -m src.scripts.preprocessing.roads_canals.global_datasets.1_1_binary_road
   --client coiled \
   --resolution 30m \
   --product presence \
-  --chunk_manifest logs/roads_canals_delta/20251110_to_20260508/changed_peat_chunks_20251110_to_20260508.csv \
+  --chunk_manifest logs/roads_canals_delta/20251110_to_20260513/changed_peat_chunks_20251110_to_20260513.csv \
   --batch_size 20 \
   --date {ROADS_DELTA_DATE}
 ```
@@ -395,10 +417,10 @@ Repeat for `osm_canals` and `grip_roads`.
 
 ```bash
 python -m src.scripts.preprocessing.roads_canals.global_datasets.05_assemble_delta_roads_canals \
-  --changed_manifest logs/roads_canals_delta/20251110_to_20260508/distance_affected_peat_chunks_20251110_to_20260508.csv \
+  --changed_manifest logs/roads_canals_delta/20251110_to_20260513/distance_affected_peat_chunks_20251110_to_20260513.csv \
   --target_date {ROADS_DELTA_DATE} \
   --products distance \
-  --summary_output logs/roads_canals_delta/20251110_to_20260508/assemble_distance_{ROADS_DELTA_DATE}.json \
+  --summary_output logs/roads_canals_delta/20251110_to_20260513/assemble_distance_{ROADS_DELTA_DATE}.json \
   --apply
 ```
 
@@ -410,7 +432,7 @@ python -m src.scripts.preprocessing.roads_canals.global_datasets.1_2_distance_fr
   --feature_type osm_roads \
   --client coiled \
   --date {ROADS_DELTA_DATE} \
-  --chunk_manifest logs/roads_canals_delta/20251110_to_20260508/distance_affected_peat_chunks_20251110_to_20260508.csv \
+  --chunk_manifest logs/roads_canals_delta/20251110_to_20260513/distance_affected_peat_chunks_20251110_to_20260513.csv \
   --halo_m 1000 \
   --maxdist 1000 \
   --batch_size 20
@@ -442,6 +464,7 @@ Current 20260513 production OGH threshold settings:
 ```bash
 export OGH_MIXED_THRESHOLDS=docs/organic_soil_threshold_profiles/20260513_mixed_boreal_f1_temperate_f1_5_tropical_f2.csv
 export OGH_MIXED_RUN=ogh_mixed_f1_f15_f2_20260513
+export OGH_COMPARE_BASELINE=ogh_sensitivity_500m
 ```
 
 - Baseline profile: boreal F1 `0.30`, temperate F1.5 `0.27`, tropical F2
@@ -450,36 +473,14 @@ export OGH_MIXED_RUN=ogh_mixed_f1_f15_f2_20260513
   `0.20`, unknown fallback `0.27`.
 - High-area threshold scenario: boreal `0.26`, temperate `0.21`, tropical
   `0.15`, unknown fallback `0.27`.
-- Roads/canals distance inputs remain on the existing `20260509` distance
-  products until the separate roads/canals refresh is run.
+- Roads/canals distance inputs are configured to the refreshed `20260513`
+  distance products.
 
-Single-period global gate before the full matrix:
+The single-period gate and full all-period baseline are complete for
+`ogh_mixed_f1_f15_f2_20260513` / `20260525`. Keep the command pattern below for
+provenance or reruns, but the next production work is the sensitivity matrix.
 
-```bash
-python -m src.scripts.core_model.0_drainage_emissions_model \
-  --cluster_name drainage_cluster \
-  --full_model \
-  --chunk_size 1 \
-  --start_year 2021 \
-  --end_year 2024 \
-  --interval_type five_year \
-  --count_burned_years \
-  --peat_dataset ogh \
-  --peat_threshold 0.27 \
-  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
-  --fscore_metric mixed \
-  --peat_threshold_scenario baseline \
-  --drainage_distance_threshold_m 500 \
-  --emission_factor_variant default \
-  --create_zarr \
-  --run_date {RUN_DATE} \
-  --run_name ${OGH_MIXED_RUN}_gate
-```
-
-Run the gate for `2021_2024` through Stages 7-10 before starting the full
-matrix.
-
-Baseline, all inventory periods:
+Completed baseline, all inventory periods:
 
 ```bash
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -496,7 +497,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant default \
   --create_zarr \
-  --run_date {RUN_DATE} \
+  --run_date ${RUN_DATE} \
   --run_name ${OGH_MIXED_RUN}
 ```
 
@@ -505,24 +506,40 @@ Sensitivities, 2021-2024 only:
 ```bash
 # GFW inventory source
 python -m src.scripts.core_model.0_drainage_emissions_model \
-  --cluster_name drainage_cluster --full_model --chunk_size 1 \
-  --start_year 2021 --end_year 2024 --interval_type five_year \
-  --count_burned_years --peat_dataset gfw \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2021 \
+  --end_year 2024 \
+  --interval_type five_year \
+  --count_burned_years \
+  --peat_dataset gfw \
   --drainage_distance_threshold_m 500 \
-  --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name gfw_standard_model_500m
+  --emission_factor_variant default \
+  --create_zarr \
+  --run_date ${RUN_DATE} \
+  --run_name gfw_standard_model_500m
 
 # GPD inventory source
 python -m src.scripts.core_model.0_drainage_emissions_model \
-  --cluster_name drainage_cluster --full_model --chunk_size 1 \
-  --start_year 2021 --end_year 2024 --interval_type five_year \
-  --count_burned_years --peat_dataset gpd \
+  --cluster_name drainage_cluster \
+  --full_model \
+  --chunk_size 1 \
+  --start_year 2021 \
+  --end_year 2024 \
+  --interval_type five_year \
+  --count_burned_years \
+  --peat_dataset gpd \
   --drainage_distance_threshold_m 500 \
-  --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name gpd_standard_model_500m
+  --emission_factor_variant default \
+  --create_zarr \
+  --run_date ${RUN_DATE} \
+  --run_name gpd_standard_model_500m
 ```
 
-Use the OGH baseline threshold configuration for low/high drainage distance:
+Use the OGH baseline threshold configuration for drainage-distance sensitivity.
+The 500 m command creates the OGH baseline alias expected by the current
+distance and high/low comparison definitions:
 
 ```bash
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -533,27 +550,10 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
   --fscore_metric mixed \
   --peat_threshold_scenario baseline \
-  --drainage_distance_threshold_m {LOW_DRAINAGE_THRESHOLD_M} \
+  --drainage_distance_threshold_m 250 \
   --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_250m
+  --run_date ${RUN_DATE} --run_name ogh_sensitivity_250m
 
-python -m src.scripts.core_model.0_drainage_emissions_model \
-  --cluster_name drainage_cluster --full_model --chunk_size 1 \
-  --start_year 2021 --end_year 2024 --interval_type five_year \
-  --count_burned_years --peat_dataset ogh \
-  --peat_threshold 0.27 \
-  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
-  --fscore_metric mixed \
-  --peat_threshold_scenario baseline \
-  --drainage_distance_threshold_m {HIGH_DRAINAGE_THRESHOLD_M} \
-  --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_750m
-```
-
-Run a 2021-2024 OGH baseline alias only if needed for existing pub comparison
-defaults:
-
-```bash
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
   --start_year 2021 --end_year 2024 --interval_type five_year \
@@ -564,7 +564,19 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold_scenario baseline \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant default --create_zarr \
-  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_500m
+  --run_date ${RUN_DATE} --run_name ${OGH_COMPARE_BASELINE}
+
+python -m src.scripts.core_model.0_drainage_emissions_model \
+  --cluster_name drainage_cluster --full_model --chunk_size 1 \
+  --start_year 2021 --end_year 2024 --interval_type five_year \
+  --count_burned_years --peat_dataset ogh \
+  --peat_threshold 0.27 \
+  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
+  --fscore_metric mixed \
+  --peat_threshold_scenario baseline \
+  --drainage_distance_threshold_m 750 \
+  --emission_factor_variant default --create_zarr \
+  --run_date ${RUN_DATE} --run_name ogh_sensitivity_750m
 ```
 
 Run low/high area plus emission-factor envelopes:
@@ -581,7 +593,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold_scenario low_area \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant low --create_zarr \
-  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_low
+  --run_date ${RUN_DATE} --run_name ogh_sensitivity_low
 
 # Upper-bound envelope: low threshold, high emission factors
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -594,7 +606,7 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --peat_threshold_scenario high_area \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant high --create_zarr \
-  --run_date {RUN_DATE} --run_name ${OGH_MIXED_RUN}_high
+  --run_date ${RUN_DATE} --run_name ogh_sensitivity_high
 ```
 
 ## Stage 7: Aggregate 10x10 Degree Tiles
@@ -603,7 +615,9 @@ Primary script:
 
 - `src/scripts/core_model/02_aggregate_soils_outputs.py`
 
-Run for every completed model run:
+The baseline `ogh_mixed_f1_f15_f2_20260513` 10x10 degree aggregation is
+complete for all inventory periods. For the sensitivity phase, run aggregation
+after each completed 2021-2024 sensitivity model run:
 
 ```bash
 python -m src.scripts.core_model.02_aggregate_soils_outputs \
@@ -625,7 +639,9 @@ Primary scripts:
 - `src/scripts/zonal_statistics/02_run_zonal_stats.py`
 - `src/scripts/zonal_statistics/03_qaqc_combined_state_alignment.py`
 
-Run zonal stats for every completed model run:
+Baseline zonal statistics are complete for all inventory periods under
+`ogh_mixed_f1_f15_f2_20260513` / `20260525`. For the sensitivity phase, run
+zonal statistics after each sensitivity 10x10 aggregation:
 
 ```bash
 python -m src.scripts.zonal_statistics.02_run_zonal_stats \
@@ -696,17 +712,24 @@ python -m src.scripts.zonal_statistics.pub_scripts.pub_master \
 
 Run cross-run comparisons:
 
+`pub_compare_runs.py` has hard-coded comparison groups. The command below
+assumes those defaults are preserved, which means `ogh_sensitivity_500m` must
+exist for the distance and high/low comparisons, and `ogh_biome_thresholds`
+must exist for the inventory-source comparison. If the inventory comparison
+should use `ogh_mixed_f1_f15_f2_20260513` or `ogh_sensitivity_500m` instead,
+update `COMPARISONS` in `pub_compare_runs.py` before running this command.
+
 ```bash
 python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
   --years 2024 \
-  --run "ogh_biome_thresholds={MODEL_VERSION}:{RUN_DATE}|OGH" \
-  --run "gfw_standard_model_500m={MODEL_VERSION}:{RUN_DATE}|GFW" \
-  --run "gpd_standard_model_500m={MODEL_VERSION}:{RUN_DATE}|GPD" \
-  --run "ogh_sensitivity_250m={MODEL_VERSION}:{RUN_DATE}|Low drainage" \
-  --run "ogh_sensitivity_500m={MODEL_VERSION}:{RUN_DATE}|Baseline drainage" \
-  --run "ogh_sensitivity_750m={MODEL_VERSION}:{RUN_DATE}|High drainage" \
-  --run "ogh_sensitivity_low={MODEL_VERSION}:{RUN_DATE}|Low envelope" \
-  --run "ogh_sensitivity_high={MODEL_VERSION}:{RUN_DATE}|High envelope"
+  --run "ogh_biome_thresholds=${MODEL_VERSION}:${RUN_DATE}|OGH" \
+  --run "gfw_standard_model_500m=${MODEL_VERSION}:${RUN_DATE}|GFW" \
+  --run "gpd_standard_model_500m=${MODEL_VERSION}:${RUN_DATE}|GPD" \
+  --run "ogh_sensitivity_250m=${MODEL_VERSION}:${RUN_DATE}|Low drainage" \
+  --run "ogh_sensitivity_500m=${MODEL_VERSION}:${RUN_DATE}|Baseline drainage" \
+  --run "ogh_sensitivity_750m=${MODEL_VERSION}:${RUN_DATE}|High drainage" \
+  --run "ogh_sensitivity_low=${MODEL_VERSION}:${RUN_DATE}|Low envelope" \
+  --run "ogh_sensitivity_high=${MODEL_VERSION}:${RUN_DATE}|High envelope"
 ```
 
 Run FAOSTAT comparison:
@@ -714,9 +737,9 @@ Run FAOSTAT comparison:
 ```bash
 python -m src.scripts.zonal_statistics.pub_scripts.pub_fao \
   --years 2024 \
-  --run "ogh_biome_thresholds={MODEL_VERSION}:{RUN_DATE}|OGH" \
-  --run "gfw_standard_model_500m={MODEL_VERSION}:{RUN_DATE}|GFW" \
-  --run "gpd_standard_model_500m={MODEL_VERSION}:{RUN_DATE}|GPD"
+  --run "${OGH_MIXED_RUN}=${MODEL_VERSION}:${RUN_DATE}|OGH" \
+  --run "gfw_standard_model_500m=${MODEL_VERSION}:${RUN_DATE}|GFW" \
+  --run "gpd_standard_model_500m=${MODEL_VERSION}:${RUN_DATE}|GPD"
 ```
 
 Run NGHGI comparison:
@@ -724,7 +747,7 @@ Run NGHGI comparison:
 ```bash
 python -m src.scripts.zonal_statistics.pub_scripts.pub_nghgi \
   --years 2005 2010 2015 2020 2024 \
-  --run "ogh_biome_thresholds={MODEL_VERSION}:{RUN_DATE}|OGH"
+  --run "${OGH_MIXED_RUN}=${MODEL_VERSION}:${RUN_DATE}|OGH"
 ```
 
 Recommended NGHGI preflight:
@@ -741,7 +764,10 @@ Primary scripts:
 - `src/scripts/postprocessing/visualization/create_global_raster.py`
 - `src/scripts/postprocessing/visualization/build_drained_binary_raster.py`
 
-Aggregate 0.01-degree global rasters for the three inventory source versions at minimum:
+The baseline global raster aggregation has been produced for `2021_2024` at
+0.005 degree and 0.01 degree. If publication maps are needed for sensitivity
+or inventory-source comparison runs, aggregate 0.01-degree global rasters for
+those completed 2021-2024 runs:
 
 ```bash
 python -m src.scripts.postprocessing.visualization.create_global_raster \
@@ -758,16 +784,53 @@ When `combined_state` is included, this command also writes a companion
 `1=undrained organic soil`, `2=drained only`, `3=burned only`,
 `4=drained+burned`, and `255=nodata/non-organic`.
 
-Do not render display assets for this rerun gate; the 0.01-degree aggregated
-rasters are the required map artifacts.
+Do not render display assets unless the publication specifically needs them;
+the 0.01-degree aggregated rasters are the required map artifacts.
 
-Run at least for:
+Run at least for any comparison runs that need map products:
 
-- `ogh_biome_thresholds`
 - `gfw_standard_model_500m`
 - `gpd_standard_model_500m`
+- `ogh_sensitivity_250m`
+- `ogh_sensitivity_500m`
+- `ogh_sensitivity_750m`
+- `ogh_sensitivity_low`
+- `ogh_sensitivity_high`
 
 Add sensitivity maps only if the publication needs maps for those scenarios.
+
+## Immediate Next Steps
+
+1. Confirm the sensitivity run date policy. Recommended: use `RUN_DATE=20260525`
+   for all `1_0_1` rerun outputs unless the sensitivity runs need a distinct
+   provenance date.
+2. Launch or reuse a WSL-launched Coiled cluster sized for model runs. Use
+   `-n 150 -m 64 --spot-policy on-demand` for a full sensitivity batch unless
+   running scenarios one at a time.
+3. Run the 2021-2024 sensitivity model matrix from Stage 6:
+   `gfw_standard_model_500m`, `gpd_standard_model_500m`,
+   `ogh_sensitivity_250m`, `ogh_sensitivity_500m`,
+   `ogh_sensitivity_750m`, `ogh_sensitivity_low`, and
+   `ogh_sensitivity_high`.
+4. For each completed sensitivity run, aggregate 10x10 degree tiles for
+   `--interval_end_years 2024`, then run zonal statistics for `2024`.
+5. Run per-run publication assets for the sensitivity outputs, then run
+   `pub_compare_runs.py` after resolving the OGH baseline alias decision.
+6. Run FAOSTAT and NGHGI comparisons using the completed all-period baseline
+   `ogh_mixed_f1_f15_f2_20260513`.
+7. Produce global map rasters for sensitivity or inventory-source runs only if
+   the publication needs maps beyond the already completed baseline latest-year
+   rasters.
+
+## Open Uncertainties
+
+- Whether to update `pub_compare_runs.py` to use the current baseline run name
+  or to run a 2021-2024 `ogh_biome_thresholds` alias for inventory-source
+  comparisons.
+- Whether the sensitivity scenarios should reuse `RUN_DATE=20260525` or use a
+  new sensitivity-specific date tag.
+- Whether global rasters are needed for earlier baseline inventory periods or
+  only for `2021_2024`.
 
 ## Final QA Checklist
 
