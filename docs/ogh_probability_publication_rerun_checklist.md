@@ -118,22 +118,18 @@ export OGH_MIXED_RUN=ogh_mixed_f1_f15_f2_20260513
    - Completed baseline all periods: `ogh_mixed_f1_f15_f2_20260513`.
    - Inventory-source sensitivities: `gfw_standard_model_500m`,
      `gpd_standard_model_500m`.
-   - Drainage-distance sensitivities, if using existing pub comparison defaults:
-     `ogh_sensitivity_250m`, `ogh_sensitivity_500m`, `ogh_sensitivity_750m`.
+   - Drainage-distance sensitivities: `ogh_sensitivity_250m` and
+     `ogh_sensitivity_750m`; use the completed baseline
+     `ogh_mixed_f1_f15_f2_20260513` as the 500 m middle point.
    - Threshold plus emission-factor envelope: `ogh_sensitivity_low`,
      `ogh_sensitivity_high`.
 
-3. Decide how to handle OGH baseline aliases before final publication
-   comparisons.
-   - `pub_compare_runs.py` currently uses `ogh_biome_thresholds` for inventory
-     source comparison, but `ogh_sensitivity_500m` for distance and high/low
-     comparisons.
-   - Recommended for the sensitivity phase: run the 2021-2024 OGH 500 m
-     baseline alias as `ogh_sensitivity_500m` so the distance and high/low
-     comparisons work without code changes.
-   - Still unresolved: either update `COMPARISONS` so inventory-source
-     comparison uses `ogh_sensitivity_500m` or `ogh_mixed_f1_f15_f2_20260513`,
-     or run one additional 2021-2024 alias named `ogh_biome_thresholds`.
+3. Use the completed OGH baseline directly in final publication comparisons.
+   `pub_compare_runs.py` now uses `ogh_mixed_f1_f15_f2_20260513` for the
+   inventory-source comparison, the 500 m drainage midpoint, and the baseline
+   point in the high/low envelope comparison. Do not run an
+   `ogh_sensitivity_500m` alias unless a separate compatibility artifact is
+   explicitly needed.
 
 ## Stage 1: Process Updated OGH Probability Tiles
 
@@ -464,7 +460,6 @@ Current 20260513 production OGH threshold settings:
 ```bash
 export OGH_MIXED_THRESHOLDS=docs/organic_soil_threshold_profiles/20260513_mixed_boreal_f1_temperate_f1_5_tropical_f2.csv
 export OGH_MIXED_RUN=ogh_mixed_f1_f15_f2_20260513
-export OGH_COMPARE_BASELINE=ogh_sensitivity_500m
 ```
 
 - Baseline profile: boreal F1 `0.30`, temperate F1.5 `0.27`, tropical F2
@@ -479,6 +474,22 @@ export OGH_COMPARE_BASELINE=ogh_sensitivity_500m
 The single-period gate and full all-period baseline are complete for
 `ogh_mixed_f1_f15_f2_20260513` / `20260525`. Keep the command pattern below for
 provenance or reruns, but the next production work is the sensitivity matrix.
+
+Recommended one-cluster launcher for the model sensitivity matrix:
+
+```bash
+python -m src.scripts.utilities.create_cluster \
+  -n 150 \
+  -m 64 \
+  -cn organic_soil_sensitivities \
+  --spot-policy on-demand
+
+python -m src.scripts.core_model.sequence_runs.run_ogh_20260513_sensitivity_matrix \
+  --cluster-name organic_soil_sensitivities
+```
+
+To also run the 2024 10x10 aggregation and zonal statistics after all model
+scenarios finish, add `--phases model aggregate zonal`.
 
 Completed baseline, all inventory periods:
 
@@ -538,8 +549,8 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
 ```
 
 Use the OGH baseline threshold configuration for drainage-distance sensitivity.
-The 500 m command creates the OGH baseline alias expected by the current
-distance and high/low comparison definitions:
+Do not rerun 500 m as a sensitivity; the completed baseline
+`ogh_mixed_f1_f15_f2_20260513` is the 500 m midpoint for comparisons:
 
 ```bash
 python -m src.scripts.core_model.0_drainage_emissions_model \
@@ -553,18 +564,6 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --drainage_distance_threshold_m 250 \
   --emission_factor_variant default --create_zarr \
   --run_date ${RUN_DATE} --run_name ogh_sensitivity_250m
-
-python -m src.scripts.core_model.0_drainage_emissions_model \
-  --cluster_name drainage_cluster --full_model --chunk_size 1 \
-  --start_year 2021 --end_year 2024 --interval_type five_year \
-  --count_burned_years --peat_dataset ogh \
-  --peat_threshold 0.27 \
-  --peat_threshold_by_biome ${OGH_MIXED_THRESHOLDS} \
-  --fscore_metric mixed \
-  --peat_threshold_scenario baseline \
-  --drainage_distance_threshold_m 500 \
-  --emission_factor_variant default --create_zarr \
-  --run_date ${RUN_DATE} --run_name ${OGH_COMPARE_BASELINE}
 
 python -m src.scripts.core_model.0_drainage_emissions_model \
   --cluster_name drainage_cluster --full_model --chunk_size 1 \
@@ -607,6 +606,26 @@ python -m src.scripts.core_model.0_drainage_emissions_model \
   --drainage_distance_threshold_m 500 \
   --emission_factor_variant high --create_zarr \
   --run_date ${RUN_DATE} --run_name ogh_sensitivity_high
+```
+
+Run decomposition variants to isolate mapped-area effects from emission-factor
+effects:
+
+- `ogh_sensitivity_area_low`: low-area threshold scenario, default emission
+  factors.
+- `ogh_sensitivity_area_high`: high-area threshold scenario, default emission
+  factors.
+- `ogh_sensitivity_ef_low`: baseline threshold scenario, low emission factors.
+- `ogh_sensitivity_ef_high`: baseline threshold scenario, high emission
+  factors.
+
+If an older core launcher is already running, let it finish and then run only
+these additions on the same cluster:
+
+```bash
+python -m src.scripts.core_model.sequence_runs.run_ogh_20260513_sensitivity_matrix \
+  --cluster-name sensitivity_runs \
+  --scenario decomposition
 ```
 
 ## Stage 7: Aggregate 10x10 Degree Tiles
@@ -713,24 +732,39 @@ python -m src.scripts.zonal_statistics.pub_scripts.pub_master \
 Run cross-run comparisons:
 
 `pub_compare_runs.py` has hard-coded comparison groups. The command below
-assumes those defaults are preserved, which means `ogh_sensitivity_500m` must
-exist for the distance and high/low comparisons, and `ogh_biome_thresholds`
-must exist for the inventory-source comparison. If the inventory comparison
-should use `ogh_mixed_f1_f15_f2_20260513` or `ogh_sensitivity_500m` instead,
-update `COMPARISONS` in `pub_compare_runs.py` before running this command.
+uses the completed OGH baseline directly for the inventory-source comparison,
+the 500 m drainage midpoint, the baseline point in the high/low envelope, and
+the midpoint in the area-only and emission-factor-only decompositions.
 
 ```bash
 python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
   --years 2024 \
-  --run "ogh_biome_thresholds=${MODEL_VERSION}:${RUN_DATE}|OGH" \
+  --run "${OGH_MIXED_RUN}=${MODEL_VERSION}:${RUN_DATE}|OGH baseline" \
   --run "gfw_standard_model_500m=${MODEL_VERSION}:${RUN_DATE}|GFW" \
   --run "gpd_standard_model_500m=${MODEL_VERSION}:${RUN_DATE}|GPD" \
   --run "ogh_sensitivity_250m=${MODEL_VERSION}:${RUN_DATE}|Low drainage" \
-  --run "ogh_sensitivity_500m=${MODEL_VERSION}:${RUN_DATE}|Baseline drainage" \
   --run "ogh_sensitivity_750m=${MODEL_VERSION}:${RUN_DATE}|High drainage" \
   --run "ogh_sensitivity_low=${MODEL_VERSION}:${RUN_DATE}|Low envelope" \
-  --run "ogh_sensitivity_high=${MODEL_VERSION}:${RUN_DATE}|High envelope"
+  --run "ogh_sensitivity_high=${MODEL_VERSION}:${RUN_DATE}|High envelope" \
+  --run "ogh_sensitivity_area_low=${MODEL_VERSION}:${RUN_DATE}|Area low" \
+  --run "ogh_sensitivity_area_high=${MODEL_VERSION}:${RUN_DATE}|Area high" \
+  --run "ogh_sensitivity_ef_low=${MODEL_VERSION}:${RUN_DATE}|EF low" \
+  --run "ogh_sensitivity_ef_high=${MODEL_VERSION}:${RUN_DATE}|EF high"
 ```
+
+Resolution consistency: each comparison is rendered at a single resolution so
+the ~3% chunk_stats coarsening bias cannot contaminate the deltas. A comparison
+that contains any run in `SENSITIVITY_CHUNK_RUNS` (or any `--chunk-stats`
+override) is read entirely from chunk_stats (4000 px) — including the baseline;
+all other comparisons read every run from zonal stats (40000 px). So the
+distance and high/low-envelope comparisons are all-chunk, while the
+inventory-source, area-only, and EF-only comparisons are all-zonal and therefore
+require zonal stats for their sensitivity runs (`ogh_sensitivity_area_*`,
+`ogh_sensitivity_ef_*`, `gfw/gpd_standard_model_500m`). For the cleanest,
+figure-consistent result, run zonal stats (40000 px) on every sensitivity run
+and they will all compare like-for-like; only fall back to chunk_stats (by
+listing a run in `SENSITIVITY_CHUNK_RUNS`) when zonal stats are unavailable for
+that run.
 
 Run FAOSTAT comparison:
 
@@ -792,7 +826,6 @@ Run at least for any comparison runs that need map products:
 - `gfw_standard_model_500m`
 - `gpd_standard_model_500m`
 - `ogh_sensitivity_250m`
-- `ogh_sensitivity_500m`
 - `ogh_sensitivity_750m`
 - `ogh_sensitivity_low`
 - `ogh_sensitivity_high`
@@ -809,13 +842,15 @@ Add sensitivity maps only if the publication needs maps for those scenarios.
    running scenarios one at a time.
 3. Run the 2021-2024 sensitivity model matrix from Stage 6:
    `gfw_standard_model_500m`, `gpd_standard_model_500m`,
-   `ogh_sensitivity_250m`, `ogh_sensitivity_500m`,
-   `ogh_sensitivity_750m`, `ogh_sensitivity_low`, and
-   `ogh_sensitivity_high`.
+   `ogh_sensitivity_250m`, `ogh_sensitivity_750m`,
+   `ogh_sensitivity_low`,
+   `ogh_sensitivity_high`, `ogh_sensitivity_area_low`,
+   `ogh_sensitivity_area_high`, `ogh_sensitivity_ef_low`, and
+   `ogh_sensitivity_ef_high`.
 4. For each completed sensitivity run, aggregate 10x10 degree tiles for
    `--interval_end_years 2024`, then run zonal statistics for `2024`.
 5. Run per-run publication assets for the sensitivity outputs, then run
-   `pub_compare_runs.py` after resolving the OGH baseline alias decision.
+   `pub_compare_runs.py` using the completed OGH baseline as the midpoint.
 6. Run FAOSTAT and NGHGI comparisons using the completed all-period baseline
    `ogh_mixed_f1_f15_f2_20260513`.
 7. Produce global map rasters for sensitivity or inventory-source runs only if
@@ -824,11 +859,10 @@ Add sensitivity maps only if the publication needs maps for those scenarios.
 
 ## Open Uncertainties
 
-- Whether to update `pub_compare_runs.py` to use the current baseline run name
-  or to run a 2021-2024 `ogh_biome_thresholds` alias for inventory-source
-  comparisons.
-- Whether the sensitivity scenarios should reuse `RUN_DATE=20260525` or use a
-  new sensitivity-specific date tag.
+- Recommended: keep `RUN_DATE=20260525` for the sensitivity matrix so the
+  completed baseline and 2021-2024 sensitivities share one publication batch
+  tag. Use a new sensitivity-specific date only if the failed 500 m alias
+  attempt needs to be preserved as a separate operational boundary.
 - Whether global rasters are needed for earlier baseline inventory periods or
   only for `2021_2024`.
 
