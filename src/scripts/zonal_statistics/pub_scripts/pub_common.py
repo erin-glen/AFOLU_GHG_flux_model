@@ -1079,6 +1079,38 @@ def table_topn_country_sql(component: str, topn: int, with_lookup: bool) -> str:
     ORDER BY ranked.interval_end, rank
     """
 
+def landuse_case_sql(combined_col: str, emissions_col: str, undrained_predicate: str) -> str:
+    """Canonical model-state -> IPCC LandUse decode as a SQL CASE expression.
+
+    Shared by table_nghgi_comparison_subset_sql and the master export
+    (pub_master) so the land-use mapping cannot drift between them.
+
+    Args:
+      combined_col / emissions_col: SQL column expressions for the combined-state
+        and emissions-state labels (e.g. 'j.combined_state', 'ctx.emissions_state').
+      undrained_predicate: SQL boolean expression that is true for undrained peat
+        (e.g. "j.peat_state = 'undrained'").
+
+    Returns the CASE expression (no trailing alias).
+    """
+    state = f"lower(COALESCE({combined_col}, {emissions_col}, ''))"
+    fallback = f"COALESCE({combined_col}, {emissions_col}, 'Unspecified')"
+    return f"""CASE
+          WHEN regexp_matches({state}, '^.*coastal[_\\- ]?(mangrove|tidal[_\\- ]?marsh).*$') THEN 'Wetland'
+          WHEN regexp_matches({state}, '^(oil[_\\- ]?palm|oilpalm)$') THEN 'Oil Palm'
+          WHEN regexp_matches({state}, '^(short[_\\- ]?rotation|long[_\\- ]?rotation|plantation.*|planted.*|tree[_\\- ]?crop.*)$') THEN 'Other plantation'
+          WHEN regexp_matches({state}, '^cropland.*$') THEN 'Cropland'
+          WHEN regexp_matches({state}, '^forest.*$') THEN 'Forest'
+          WHEN regexp_matches({state}, '^(grassland|pasture|rangeland).*$') THEN 'Grassland'
+          WHEN regexp_matches({state}, '^(settlement|built[_\\- ]?up|urban).*$') THEN 'Settlement'
+          WHEN regexp_matches({state}, '^wetland.*$') THEN 'Wetland'
+          WHEN regexp_matches({state}, '^(extraction|peat[_\\- ]?extraction|cutover).*$') THEN 'Extraction'
+          WHEN regexp_matches({state}, '^(otherland|other)$') THEN 'Otherland'
+          WHEN {undrained_predicate} THEN 'Undrained (unclassified)'
+          ELSE {fallback}
+        END"""
+
+
 def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
     """
     Country × inventory period × land-use subset intended for NGHGI comparisons.
@@ -1092,6 +1124,7 @@ def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
     """
     select_l = ", l.country, l.iso3" if with_lookup else ""
     join_l = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = base.gadm_adm0" if with_lookup else ""
+    lu_case = landuse_case_sql("j.combined_state", "j.emissions_state", "j.peat_state = 'undrained'")
     return f"""
     WITH joined AS (
       SELECT
@@ -1113,34 +1146,7 @@ def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
       SELECT
         j.interval_end,
         j.gadm_adm0,
-        CASE
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')),
-                              '^.*coastal[_\\- ]?(mangrove|tidal[_\\- ]?marsh).*$')
-          THEN 'Wetland'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')), '^(oil[_\\- ]?palm|oilpalm)$')
-          THEN 'Oil Palm'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')),
-                              '^(short[_\\- ]?rotation|long[_\\- ]?rotation|plantation.*|planted.*|tree[_\\- ]?crop.*)$')
-          THEN 'Other plantation'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')), '^cropland.*$')
-          THEN 'Cropland'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')), '^forest.*$')
-          THEN 'Forest'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')), '^(grassland|pasture|rangeland).*$')
-          THEN 'Grassland'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')), '^(settlement|built[_\\- ]?up|urban).*$')
-          THEN 'Settlement'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')), '^wetland.*$')
-          THEN 'Wetland'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')),
-                              '^(extraction|peat[_\\- ]?extraction|cutover).*$')
-          THEN 'Extraction'
-          WHEN regexp_matches(lower(COALESCE(j.combined_state, j.emissions_state, '')), '^(otherland|other)$')
-          THEN 'Otherland'
-          WHEN j.peat_state = 'undrained'
-          THEN 'Undrained (unclassified)'
-          ELSE COALESCE(j.combined_state, j.emissions_state, 'Unspecified')
-        END AS land_use,
+        {lu_case} AS land_use,
         SUM(
           CASE
             WHEN lower(j.flux_type) IN ('area__ha', 'area_ha') AND j.peat_state = 'drained'

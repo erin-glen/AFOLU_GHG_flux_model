@@ -682,6 +682,18 @@ python -m src.scripts.zonal_statistics.pub_scripts.pub_assets \
   --topn 20
 ```
 
+Export the master full-disaggregation table (one parquet + CSV with every
+contextual overlay retained, beside the per-interval parquets on S3). Reads the
+per-interval `combined_state` directly (not `all_inventory_periods`):
+
+```bash
+python -m src.scripts.zonal_statistics.pub_scripts.pub_master \
+  --model_version {MODEL_VERSION} \
+  --run_name {RUN_NAME} \
+  --run_date {RUN_DATE} \
+  --years {YEARS}
+```
+
 Run cross-run comparisons:
 
 ```bash
