@@ -55,31 +55,36 @@ CHUNK_STATS_ROOT = os.environ.get(
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs",
 )
 
-DRAINED_GAS_LAYERS: Dict[str, str] = {
-    "drained_ch4_ditch_Mg_CO2e_ha_yr": "CH₄ (ditch)",
-    "drained_ch4_land_Mg_CO2e_ha_yr": "CH₄ (land)",
-    "drained_co2_Mg_CO2_ha_yr": "CO₂ (on-site)",
-    "drained_co2_offsite_Mg_CO2_ha_yr": "CO₂ (off-site)",
-    "drained_n2o_Mg_CO2e_ha_yr": "N₂O",
+# Gas-split layers, keyed by the zonal-stats flux_type. Built from the same
+# zonal parquet as the headline totals so the stacked bars reconcile exactly.
+#
+# Drained: these four sum to drained_total_Mg_CO2e. CH4 is the combined
+# land+ditch flux; the zonal parquet does not retain the land/ditch split (use
+# chunk_stats only if that split is required, accepting the ~2-3% source gap).
+DRAINED_GAS_FLUX: Dict[str, str] = {
+    "drained_co2_onsite_Mg_CO2": "CO₂ (on-site)",
+    "drained_co2_offsite_Mg_CO2": "CO₂ (off-site)",
+    "drained_total_ch4_Mg_CO2e": "CH₄",
+    "drained_n2o_Mg_CO2e": "N₂O",
+}
+
+# Burned: CO₂ + CH₄ sum exactly to burned_total_Mg_CO2e (the model's burned
+# total is CO₂ + CH₄ only; CO is computed but not included in the total).
+BURNED_GAS_FLUX: Dict[str, str] = {
+    "burned_total_co2_Mg_CO2": "CO₂",
+    "burned_total_ch4_Mg_CO2e": "CH₄",
 }
 
 BURNED_GAS_COLORS: Dict[str, str] = {
-    "CH₄": "#0072B2",  # strong blue
     "CO₂": "#D55E00",  # vermillion
+    "CH₄": "#0072B2",  # strong blue
 }
 
 DRAINED_GAS_COLORS: Dict[str, str] = {
-    "CH₄ (ditch)": "#0072B2",  # same CH₄ blue as burned panel
-    "CH₄ (land)":  "#56B4E9",  # lighter blue
-    "CO₂ (on-site)":  "#D55E00",  # same CO₂ vermillion as burned panel
+    "CO₂ (on-site)":  "#D55E00",  # vermillion
     "CO₂ (off-site)": "#E69F00",  # orange
-    "N₂O": "#009E73",            # bluish green
-}
-
-
-BURNED_GAS_LAYERS: Dict[str, str] = {
-    "burned_ch4_Mg_CO2e_ha_yr": "CH₄",
-    "burned_co2_Mg_CO2_ha_yr": "CO₂",
+    "CH₄": "#0072B2",             # strong blue
+    "N₂O": "#009E73",             # bluish green
 }
 
 # ----------------------------- path helpers -----------------------------
@@ -722,10 +727,38 @@ def _build_component_climate_plot(
     _save_png(fig, _join(OUT_DIR, "figures", f"{meta.file_stub}_column.png"))
 
 
+def _gas_totals_by_period_from_zonal(
+    con: duckdb.DuckDBPyConnection,
+    view: str,
+    flux_map: Mapping[str, str],
+    period_labels: Mapping[int, str],
+    inv_col: str,
+) -> pd.DataFrame:
+    """Per-period gas totals (GtCO2e) from a zonal-stats view (zs_drained /
+    zs_burned), summing the flux_types in ``flux_map``.
+
+    Built from the same parquet as the headline totals, so the stacked gas
+    components reconcile exactly to the drained/burned totals (unlike the older
+    chunk_stats source, which differed by ~2-3%).
+    """
+    flux_list = ", ".join(f"'{k}'" for k in flux_map)
+    df = con.execute(
+        f"SELECT interval_end, flux_type, SUM(value) AS Mg "
+        f"FROM {view} WHERE flux_type IN ({flux_list}) GROUP BY 1, 2"
+    ).df()
+    if df.empty:
+        return pd.DataFrame(columns=[inv_col, "Gas", "GtCO2e"])
+    df["Gas"] = df["flux_type"].map(dict(flux_map))
+    df[inv_col] = df["interval_end"].map(dict(period_labels))
+    df["GtCO2e"] = df["Mg"] / 1_000_000_000.0
+    df = df[df[inv_col].notna() & df["Gas"].notna()]
+    return df[[inv_col, "Gas", "GtCO2e"]].reset_index(drop=True)
+
+
 def _build_gas_stack_figure(
     con: duckdb.DuckDBPyConnection,
-    chunk_df: pd.DataFrame,
-    layer_map: Mapping[str, str],
+    view: str,
+    flux_map: Mapping[str, str],
     color_overrides: Mapping[str, str] | None,
     inv_col: str,
     period_labels: Mapping[int, str],
@@ -734,12 +767,12 @@ def _build_gas_stack_figure(
     data_only: bool,
     collector: FigureTableCollector | None,
 ):
-    gas_order = list(dict.fromkeys(layer_map.values()))
+    gas_order = list(dict.fromkeys(flux_map.values()))
     gas_colors = pc.resolve_colors(gas_order, color_overrides, palette="tol_bright")
 
-    long_df = _layer_totals_by_period(chunk_df, layer_map, period_labels, inv_col)
+    long_df = _gas_totals_by_period_from_zonal(con, view, flux_map, period_labels, inv_col)
     if long_df.empty:
-        print(f"[chunk_stats] No matching layers found for {file_stub}; skipping figure.")
+        print(f"[zonal] No matching gas layers found in {view} for {file_stub}; skipping figure.")
         return
 
     long_df["Gas"] = pd.Categorical(long_df["Gas"], gas_order, ordered=True)
@@ -843,23 +876,8 @@ def main(argv=None):
     _register_state_context_views(con)
     have_lookup = _ensure_adm0_lookup(con, args.adm0_lookup)
 
-    chunk_stats_path = _resolve_chunk_stats_path(
-        con,
-        args.model_version,
-        args.run_name,
-        args.run_date,
-        args.chunk_stats,
-        args.aws_region,
-    )
-    chunk_stats_df = None
-    if chunk_stats_path:
-        try:
-            chunk_stats_df = _read_chunk_table(con, chunk_stats_path, args.aws_region)
-            print(f"[chunk_stats] Loaded summary from {chunk_stats_path}")
-        except Exception as exc:
-            print(f"[chunk_stats] Failed to read {chunk_stats_path}: {exc}")
-    else:
-        print("[chunk_stats] No summary file located; gas-split figures will be skipped.")
+    # Gas-split figures are built from the zonal parquet (zs_drained/zs_burned)
+    # below, so no chunk_stats summary is loaded here.
 
     # Inventory period labels
     pairs = build_interval_pairs(list(years))
@@ -938,14 +956,15 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "global_total_by_climate_column.png"))
 
-        # 2) Drained: Land Use × Climate (avg annual across selected periods)
+        # 2) Drained: Land Use × Climate (LATEST inventory period only)
+        latest_period = period_labels.get(max(years), "latest period")
         d_lu_raw = con.execute(pc.sql_drained_landuse_climate_avgs(n_periods)).df()
         d_lu = pc.aggregate_landuse(d_lu_raw, "drained_avg_GtCO2e_per_yr")
         _write_figure_table(
             con,
             d_lu[["LandUse", "Climate", "drained_avg_GtCO2e_per_yr"]],
             _join(OUT_DIR, "figures", "data", "drained_landuse_climate_long.csv"),
-            "Average annual drained emissions by land use and climate",
+            f"Drained emissions by land use and climate ({latest_period})",
             figure_table_collector,
         )
         wide = (
@@ -956,17 +975,17 @@ def main(argv=None):
         _write_csv_df(con, wide, _join(OUT_DIR, "figures", "data", "drained_landuse_climate_wide.csv"))
         if not args.data_only:
             fig = pc.stacked_hbar(d_lu, "drained_avg_GtCO2e_per_yr",
-                                  xlabel="Average Annual Emissions (Gt CO₂e/year)")
+                                  xlabel=f"Annual Emissions, {latest_period} (Gt CO₂e/year)")
             _save_png(fig, _join(OUT_DIR, "figures", "drained_landuse_climate_bar.png"))
 
-        # 3) Burned: Land Use × Climate (avg annual across selected periods)
+        # 3) Burned: Land Use × Climate (LATEST inventory period only)
         b_lu_raw = con.execute(pc.sql_burned_landuse_climate_avgs(n_periods)).df()
         b_lu = pc.aggregate_landuse(b_lu_raw, "burned_avg_GtCO2e_per_yr")
         _write_figure_table(
             con,
             b_lu[["LandUse", "Climate", "burned_avg_GtCO2e_per_yr"]],
             _join(OUT_DIR, "figures", "data", "burned_landuse_climate_long.csv"),
-            "Average annual burned emissions by land use and climate",
+            f"Burned emissions by land use and climate ({latest_period})",
             figure_table_collector,
         )
         wide = (
@@ -977,7 +996,7 @@ def main(argv=None):
         _write_csv_df(con, wide, _join(OUT_DIR, "figures", "data", "burned_landuse_climate_wide.csv"))
         if not args.data_only:
             fig = pc.stacked_hbar(b_lu, "burned_avg_GtCO2e_per_yr",
-                                  xlabel="Average Annual Emissions (Gt CO₂e/year)")
+                                  xlabel=f"Annual Emissions, {latest_period} (Gt CO₂e/year)")
             _save_png(fig, _join(OUT_DIR, "figures", "burned_landuse_climate_bar.png"))
 
         # D) Component split within each climate (avg over selected periods)
@@ -1076,32 +1095,31 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "global_total_emissions_column.png"))
 
-        # 6b) Global gas splits (chunk_stats)
-        if chunk_stats_df is not None:
-            _build_gas_stack_figure(
-                con,
-                chunk_stats_df,
-                DRAINED_GAS_LAYERS,
-                DRAINED_GAS_COLORS,
-                inv_col,
-                period_labels,
-                "global_drained_gas_emissions",
-                "Global drained emissions by gas and inventory period",
-                args.data_only,
-                figure_table_collector,
-            )
-            _build_gas_stack_figure(
-                con,
-                chunk_stats_df,
-                BURNED_GAS_LAYERS,
-                BURNED_GAS_COLORS,
-                inv_col,
-                period_labels,
-                "global_burned_gas_emissions",
-                "Global burned emissions by gas and inventory period",
-                args.data_only,
-                figure_table_collector,
-            )
+        # 6b) Global gas splits (from the zonal parquet; reconcile to totals)
+        _build_gas_stack_figure(
+            con,
+            "zs_drained",
+            DRAINED_GAS_FLUX,
+            DRAINED_GAS_COLORS,
+            inv_col,
+            period_labels,
+            "global_drained_gas_emissions",
+            "Global drained emissions by gas and inventory period",
+            args.data_only,
+            figure_table_collector,
+        )
+        _build_gas_stack_figure(
+            con,
+            "zs_burned",
+            BURNED_GAS_FLUX,
+            BURNED_GAS_COLORS,
+            inv_col,
+            period_labels,
+            "global_burned_gas_emissions",
+            "Global burned emissions by gas and inventory period",
+            args.data_only,
+            figure_table_collector,
+        )
 
         # 7) Top-N average-annual by component (separate charts)
         df_topd = con.execute(pc.sql_topn_avg_component_emissions("drained", args.topn, have_lookup, n_periods)).df()
