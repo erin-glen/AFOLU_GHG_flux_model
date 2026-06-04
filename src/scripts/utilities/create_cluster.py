@@ -90,6 +90,7 @@ def create_cluster(
     arch: str = "arm",
     scheduler_vm_types: list[str] | None = None,
     software: str | None = None,
+    idle_timeout: str | None = None,
 ):
     """
     Create a Coiled cluster with availability-friendly instance-type fallbacks.
@@ -105,8 +106,9 @@ def create_cluster(
         scheduler_vm_types_override=scheduler_vm_types,
     )
 
-    idle_timeout_minutes = IDLE_TIMEOUT_MINUTES.get(worker_memory, 20)
-    idle_timeout = f"{idle_timeout_minutes} minutes"
+    if idle_timeout is None:
+        idle_timeout_minutes = IDLE_TIMEOUT_MINUTES.get(worker_memory, 20)
+        idle_timeout = f"{idle_timeout_minutes} minutes"
 
     cluster_kwargs = {
         "name": cluster_name,
@@ -141,6 +143,7 @@ def create_cluster(
     print(f"Workspace: {workspace}; Region: {region}; Arch: {arch}")
     print(f"Software environment: {software or 'package sync/default'}")
     print(f"Spot policy: {spot_policy}; use_best_zone: {use_best_zone}; allow_cross_zone: {allow_cross_zone}")
+    print(f"Idle timeout: {idle_timeout}")
     print(f"Scheduler types (priority): {scheduler_vm_types_final}")
     print(f"Worker types (priority): {worker_vm_types}")
     print(f"Number of workers: {n_workers}; worker memory tier: {worker_memory}GiB; threads/worker: {threads_per_worker}")
@@ -176,6 +179,14 @@ if __name__ == "__main__":
                         help='Override scheduler instance types as CSV (must match --arch), e.g. "m7g.large,m6g.large,t4g.large"')
     parser.add_argument("--software", type=str, default=None,
                         help="Optional Coiled software environment name, e.g. coiled_20251119")
+    parser.add_argument(
+        "--idle-timeout",
+        default=None,
+        help=(
+            "Optional Coiled idle timeout, e.g. '6 hours'. Defaults to the "
+            "repo's memory-tier timeout."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -192,6 +203,7 @@ if __name__ == "__main__":
         arch=args.arch,
         scheduler_vm_types=args.scheduler_vm_types,
         software=args.software,
+        idle_timeout=args.idle_timeout,
     )
 
 """

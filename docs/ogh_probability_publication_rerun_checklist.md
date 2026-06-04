@@ -479,14 +479,19 @@ Recommended one-cluster launcher for the model sensitivity matrix:
 
 ```bash
 python -m src.scripts.utilities.create_cluster \
-  -n 150 \
-  -m 64 \
+  -n 100 \
+  -m 32 \
   -cn organic_soil_sensitivities \
+  --idle-timeout "6 hours" \
   --spot-policy on-demand
 
 python -m src.scripts.core_model.sequence_runs.run_ogh_20260513_sensitivity_matrix \
   --cluster-name organic_soil_sensitivities
 ```
+
+Use an explicit long idle timeout for this matrix. A default 32 GiB cluster has
+a short worker idle timeout, and early sensitivity attempts failed after Coiled
+started retiring workers during the first model scenario.
 
 To also run the 2024 10x10 aggregation and zonal statistics after all model
 scenarios finish, add `--phases model aggregate zonal`.
@@ -753,18 +758,17 @@ python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
 ```
 
 Resolution consistency: each comparison is rendered at a single resolution so
-the ~3% chunk_stats coarsening bias cannot contaminate the deltas. A comparison
-that contains any run in `SENSITIVITY_CHUNK_RUNS` (or any `--chunk-stats`
-override) is read entirely from chunk_stats (4000 px) — including the baseline;
-all other comparisons read every run from zonal stats (40000 px). So the
-distance and high/low-envelope comparisons are all-chunk, while the
-inventory-source, area-only, and EF-only comparisons are all-zonal and therefore
-require zonal stats for their sensitivity runs (`ogh_sensitivity_area_*`,
-`ogh_sensitivity_ef_*`, `gfw/gpd_standard_model_500m`). For the cleanest,
-figure-consistent result, run zonal stats (40000 px) on every sensitivity run
-and they will all compare like-for-like; only fall back to chunk_stats (by
-listing a run in `SENSITIVITY_CHUNK_RUNS`) when zonal stats are unavailable for
-that run.
+the ~3% chunk_stats coarsening bias cannot contaminate the deltas. The choice is
+availability-driven per comparison: if every run has zonal stats (40000 px) it
+uses zonal for all (preferred — finest, and consistent with the headline
+figures); else if every run has chunk_stats (4000 px) it uses chunk for all (the
+systematic bias then cancels in the relative deltas); else the comparison is
+skipped with a message. So once you run zonal stats on every sensitivity run,
+all comparisons become all-zonal automatically with no code change — run the
+`zonal` phase of `run_ogh_20260513_sensitivity_matrix` on the sensitivity runs
+and that is the recommended, cleanest path. `SENSITIVITY_CHUNK_RUNS` /
+`--chunk-stats` only pre-resolve chunk_stats paths for the fallback; they no
+longer force chunk when zonal is also present.
 
 Run FAOSTAT comparison:
 
