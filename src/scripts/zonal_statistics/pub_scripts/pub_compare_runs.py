@@ -35,35 +35,38 @@ Usage example (inventory + OGH sensitivity combined):
 
   cd /mnt/c/gis/git/AFOLU_GHG_flux_model
 
-  python -m src.scripts.zonal_statistics.pub_compare_runs \
-    --years 2005 2010 2015 2020 2024 \
-    --run ogh_sensitivity_250m=0_9_7:20251120\
-    --run ogh_sensitivity_500m=0_9_7:20251121 \
-    --run ogh_sensitivity_750m=0_9_7:20251120 \
-    --run "ogh_sensitivity_high=0_9_7:20251120|OGH High" \
-    --run "ogh_sensitivity_low=0_9_7:20251121|OGH Low" \
-    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH inventory (500 m)" \
-    --run "gfw_standard_model_500m=0_9_7:20251120|GFW 500 m" \
-    --run "gpd_standard_model_500m=0_9_7:20251120|GPD 500 m"
-
-
-  python -m src.scripts.zonal_statistics.pub_compare_runs \
+  python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
     --years 2024 \
-    --run "ogh_sensitivity_500m_10=0_9_7:20251118|OGH" \
-    --run "gfw_standard_model_500m=0_9_7:20251120|GFW" \
-    --run "gpd_standard_model_500m=0_9_7:20251120|GPD"
+    --run "ogh_mixed_f1_f15_f2_20260513=1_0_1:20260525|OGH baseline" \
+    --run "gfw_standard_model_500m=1_0_1:20260525|GFW" \
+    --run "gpd_standard_model_500m=1_0_1:20260525|GPD" \
+    --run "ogh_sensitivity_250m=1_0_1:20260525|250 m" \
+    --run "ogh_sensitivity_750m=1_0_1:20260525|750 m" \
+    --run "ogh_sensitivity_low=1_0_1:20260525|Low envelope" \
+    --run "ogh_sensitivity_high=1_0_1:20260525|High envelope" \
+    --run "ogh_sensitivity_area_low=1_0_1:20260525|Area low" \
+    --run "ogh_sensitivity_area_high=1_0_1:20260525|Area high" \
+    --run "ogh_sensitivity_ef_low=1_0_1:20260525|EF low" \
+    --run "ogh_sensitivity_ef_high=1_0_1:20260525|EF high"
 
-  python -m src.scripts.zonal_statistics.pub_compare_runs \
-    --years 2024 \
-    --run "ogh_sensitivity_250m=0_9_7:20251120|250 m" \
-    --run "ogh_sensitivity_500m=0_9_7:20251121|500 m" \
-    --run "ogh_sensitivity_750m=0_9_7:20251120|750 m"
 
-  python -m src.scripts.zonal_statistics.pub_compare_runs \
+  python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
     --years 2024 \
-    --run "ogh_sensitivity_high=0_9_7:20251120|High" \
-    --run "ogh_sensitivity_low=0_9_7:20251121|Low" \
-    --run "ogh_sensitivity_500m=0_9_7:20251121|Baseline"
+    --run "ogh_mixed_f1_f15_f2_20260513=1_0_1:20260525|OGH" \
+    --run "gfw_standard_model_500m=1_0_1:20260525|GFW" \
+    --run "gpd_standard_model_500m=1_0_1:20260525|GPD"
+
+  python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
+    --years 2024 \
+    --run "ogh_sensitivity_250m=1_0_1:20260525|250 m" \
+    --run "ogh_mixed_f1_f15_f2_20260513=1_0_1:20260525|500 m baseline" \
+    --run "ogh_sensitivity_750m=1_0_1:20260525|750 m"
+
+  python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
+    --years 2024 \
+    --run "ogh_sensitivity_low=1_0_1:20260525|Low envelope" \
+    --run "ogh_mixed_f1_f15_f2_20260513=1_0_1:20260525|Baseline" \
+    --run "ogh_sensitivity_high=1_0_1:20260525|High envelope"
 
 
 OGH sensitivity comparisons (distance and high/low emissions) are designed to
@@ -78,10 +81,9 @@ output layout on S3:
 where ``dir_name`` is:
 
   - ``ogh_sensitivity_250m_10``
-  - ``ogh_sensitivity_500m_10``
   - ``ogh_sensitivity_750m_10``
-  - ``ogh_sensitivity_500m_10_low``   (for ``ogh_sensitivity_low``)
-  - ``ogh_sensitivity_500m_10_high``  (for ``ogh_sensitivity_high``)
+  - ``ogh_sensitivity_low_10``
+  - ``ogh_sensitivity_high_10``
 
 If no such Excel file is found for a sensitivity run, the script falls back to
 using zonal statistics only for that run.
@@ -89,7 +91,7 @@ using zonal statistics only for that run.
 The **Inventory Input Source Comparison** uses the following runs and, by
 default, reads *only* zonal-statistics outputs:
 
-  - ``ogh_sensitivity_500m_10``
+  - ``ogh_mixed_f1_f15_f2_20260513``
   - ``gfw_standard_model_500m``
   - ``gpd_standard_model_500m``
 
@@ -110,11 +112,11 @@ automatically extracts the ``sum_value`` totals (converted from Mg to Gt).
 
 Example OGH high/low comparison:
 
-  python -m src.scripts.zonal_statistics.pub_compare_runs \
+  python -m src.scripts.zonal_statistics.pub_scripts.pub_compare_runs \
     --years 2024 \
-    --run "ogh_sensitivity_500m=0_9_7:20251120|OGH 500 m baseline" \
-    --run "ogh_sensitivity_high=0_9_7:20251120|OGH High" \
-    --run "ogh_sensitivity_low=0_9_7:20251121|OGH Low"
+    --run "ogh_sensitivity_low=1_0_1:20260525|Low envelope" \
+    --run "ogh_mixed_f1_f15_f2_20260513=1_0_1:20260525|OGH baseline" \
+    --run "ogh_sensitivity_high=1_0_1:20260525|High envelope"
 
 For distance and high/low comparisons, this script produces a *single* stacked
 bar chart each, showing total emissions (Gt CO₂e/year) split into drained and
@@ -188,10 +190,14 @@ CHUNK_STATS_ROOT = os.environ.get(
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs",
 )
 
-# Runs that should auto-prefer chunk_stats (distance + high/low sensitivities)
+# Chunk-only runs: sensitivities that are compared from chunk_stats (4000 px)
+# rather than zonal stats (40000 px). Any comparison containing one of these is
+# rendered entirely from chunk_stats -- including the baseline -- so the ~3%
+# coarsening bias cancels in the deltas (see _comparison_uses_chunk in main).
+# Runs NOT listed here are read from zonal stats; their comparisons are
+# therefore all-zonal. List a sensitivity run here only if it lacks zonal stats.
 SENSITIVITY_CHUNK_RUNS = {
     "ogh_sensitivity_250m",
-    "ogh_sensitivity_500m",
     "ogh_sensitivity_750m",
     "ogh_sensitivity_low",
     "ogh_sensitivity_high",
@@ -325,7 +331,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         label="OGH Sensitivity (Distance Threshold (meters))",
         run_names=(
             "ogh_sensitivity_250m",
-            "ogh_sensitivity_500m",
+            "ogh_mixed_f1_f15_f2_20260513",
             "ogh_sensitivity_750m",
         ),
         # summary CSV has drained area + drained + total; figure uses total stack
@@ -335,7 +341,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         key="inventory_source",
         label="Inventory Input Source Comparison",
         run_names=(
-            "ogh_biome_thresholds",
+            "ogh_mixed_f1_f15_f2_20260513",
             "gfw_standard_model_500m",
             "gpd_standard_model_500m",
         ),
@@ -345,7 +351,27 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         key="ogh_sensitivity_range",
         label="OGH Sensitivity (High/Low Emissions)",
         # Low – Baseline – High so baseline is always in the middle
-        run_names=("ogh_sensitivity_low", "ogh_sensitivity_500m", "ogh_sensitivity_high"),
+        run_names=("ogh_sensitivity_low", "ogh_mixed_f1_f15_f2_20260513", "ogh_sensitivity_high"),
+        metric_keys=("drained_emissions", "burned_emissions", "total_emissions"),
+    ),
+    ComparisonSpec(
+        key="ogh_area_effect",
+        label="OGH Sensitivity (Mapped Area Threshold Only)",
+        run_names=(
+            "ogh_sensitivity_area_low",
+            "ogh_mixed_f1_f15_f2_20260513",
+            "ogh_sensitivity_area_high",
+        ),
+        metric_keys=("peat_drained_area", "drained_emissions", "burned_emissions", "total_emissions"),
+    ),
+    ComparisonSpec(
+        key="ogh_ef_effect",
+        label="OGH Sensitivity (Emission Factor Only)",
+        run_names=(
+            "ogh_sensitivity_ef_low",
+            "ogh_mixed_f1_f15_f2_20260513",
+            "ogh_sensitivity_ef_high",
+        ),
         metric_keys=("drained_emissions", "burned_emissions", "total_emissions"),
     ),
 )
@@ -499,26 +525,12 @@ def _guess_chunk_stats_path(spec: RunSpec) -> str | None:
     Default pattern (most runs):
       {CHUNK_STATS_ROOT}/version_{model_version}/chunk_stats/{run_name}_10/{run_date}/*.xlsx
 
-    Special handling for the 500 m baseline and low/high sensitivity runs, which store
-    chunk_stats under:
-      baseline: .../chunk_stats/ogh_sensitivity_500m_10/<run_date>/*.xlsx
-      low:      .../chunk_stats/ogh_sensitivity_500m_10_low/<run_date>/*.xlsx
-      high:     .../chunk_stats/ogh_sensitivity_500m_10_high/<run_date>/*.xlsx
-
     Returns a concrete file path or None if nothing is found.
     """
 
     root = CHUNK_STATS_ROOT.rstrip("/")
 
-    # Map run_name -> "chunk_stats directory name" (without version_*/ prefix)
-    if spec.run_name == "ogh_sensitivity_500m":
-        dir_name = "ogh_sensitivity_500m_10"
-    elif spec.run_name == "ogh_sensitivity_low":
-        dir_name = "ogh_sensitivity_500m_10_low"
-    elif spec.run_name == "ogh_sensitivity_high":
-        dir_name = "ogh_sensitivity_500m_10_high"
-    else:
-        dir_name = f"{spec.run_name}_10"
+    dir_name = f"{spec.run_name}_10"
 
     rel_candidates = [
         f"version_{spec.model_version}/chunk_stats/{dir_name}/{spec.run_date}",
@@ -1751,28 +1763,80 @@ def main(argv: Sequence[str] | None = None):
 
     color_map = _assign_colors(run_specs.keys())
 
-    records: dict[str, RunRecord] = {}
-    for run_name, spec in run_specs.items():
-        cs_path, cs_strict = chunk_stat_config.get(run_name, (None, False))
-        metrics, breakouts, uncertainty = _compute_run_data(
-            spec, years, args.aws_region, cs_path, chunk_stats_strict=cs_strict
-        )
-        records[run_name] = RunRecord(
-            spec=spec,
-            metrics=metrics,
-            breakouts=breakouts,
-            color=color_map[run_name],
-            uncertainty=uncertainty,
-        )
+    # Runs that are chunk-only for this invocation: auto-discovered sensitivity
+    # runs (SENSITIVITY_CHUNK_RUNS) plus explicit --chunk-stats overrides.
+    #
+    # Resolution-consistency rule: a comparison that includes ANY chunk-only run
+    # is rendered ENTIRELY from chunk_stats (4000 px / ~278 m) -- including the
+    # baseline -- so the ~3% coarsening low-bias cancels in the deltas instead
+    # of contaminating them. Comparisons with no chunk-only run use zonal stats
+    # (40000 px / ~28 m) for every run. A single comparison is therefore never a
+    # mix of resolutions. (If a sensitivity run only has chunk_stats, list it in
+    # SENSITIVITY_CHUNK_RUNS so its comparison switches to chunk for all runs.)
+    chunk_only_runs = set(chunk_stat_config.keys())
+
+    chunk_path_cache: dict[str, str | None] = {}
+
+    def _chunk_path_for(run_name: str) -> str | None:
+        if run_name not in chunk_path_cache:
+            if run_name in chunk_stat_config:
+                chunk_path_cache[run_name] = chunk_stat_config[run_name][0]
+            else:
+                chunk_path_cache[run_name] = _guess_chunk_stats_path(run_specs[run_name])
+        return chunk_path_cache[run_name]
+
+    # Records are loaded lazily and cached per (run_name, use_chunk); the baseline
+    # may be loaded at both resolutions (zonal for the inventory comparison, chunk
+    # for the sensitivity comparisons).
+    record_cache: dict[tuple[str, bool], RunRecord] = {}
+
+    def _get_record(run_name: str, use_chunk: bool) -> RunRecord:
+        key = (run_name, use_chunk)
+        if key not in record_cache:
+            spec = run_specs[run_name]
+            if use_chunk:
+                cs_path = _chunk_path_for(run_name)
+                cs_strict = chunk_stat_config.get(run_name, (None, False))[1]
+            else:
+                cs_path, cs_strict = None, False
+            metrics, breakouts, uncertainty = _compute_run_data(
+                spec, years, args.aws_region, cs_path, chunk_stats_strict=cs_strict
+            )
+            record_cache[key] = RunRecord(
+                spec=spec,
+                metrics=metrics,
+                breakouts=breakouts,
+                color=color_map[run_name],
+                uncertainty=uncertainty,
+            )
+        return record_cache[key]
+
+    def _comparison_uses_chunk(comp: ComparisonSpec) -> bool:
+        return any(rn in chunk_only_runs for rn in comp.run_names)
 
     out_data_dir = _join(out_dir, "figures", "comparisons", "data")
     writer_con = duckdb.connect()
     try:
         for comp in active_comparisons:
+            # Load every run in this comparison at a single, consistent resolution.
+            use_chunk = _comparison_uses_chunk(comp)
+            if use_chunk:
+                unresolved = [rn for rn in comp.run_names if not _chunk_path_for(rn)]
+                if unresolved:
+                    print(
+                        f"Skipping comparison '{comp.key}': it includes a chunk-only run, "
+                        f"so a consistent chunk_stats resolution is required for every run, "
+                        f"but no chunk_stats was found for: {', '.join(unresolved)}. "
+                        f"Provide --chunk-stats {unresolved[0]}=<path>, or produce zonal "
+                        f"stats for all runs in this comparison."
+                    )
+                    continue
+            records = {rn: _get_record(rn, use_chunk) for rn in comp.run_names}
+
             label_overrides: Mapping[str, str] = {}
             if comp.key == "inventory_source":
                 label_overrides = inventory_labels
-            elif comp.key == "ogh_sensitivity_range":
+            elif comp.key in {"ogh_sensitivity_range", "ogh_ef_effect"}:
                 label_overrides = emission_factor_labels
             elif comp.key == "ogh_distance":
                 label_overrides = distance_labels
@@ -1958,7 +2022,7 @@ def main(argv: Sequence[str] | None = None):
                 continue
 
             # Single stacked total-emissions chart for sensitivity comparisons
-            if comp.key in {"ogh_distance", "ogh_sensitivity_range"}:
+            if comp.key in {"ogh_distance", "ogh_sensitivity_range", "ogh_area_effect", "ogh_ef_effect"}:
                 stack_df = _build_emission_stack_df(comp, records)
                 stack_df = _apply_category_labels(stack_df, label_overrides)
                 stack_path = _join(out_data_dir, f"{comp.key}_drained_burned_stack.csv")
@@ -1968,12 +2032,27 @@ def main(argv: Sequence[str] | None = None):
                 if comp.key == "ogh_distance":
                     xlabel = "Distance threshold"
                 elif comp.key == "ogh_sensitivity_range":
+                    xlabel = "Area threshold + emission factor"
+                elif comp.key == "ogh_area_effect":
+                    xlabel = "Mapped area threshold"
+                elif comp.key == "ogh_ef_effect":
                     xlabel = "Emission factor"
 
                 stack_fig = _plot_stacked_total(stack_df, comp, xlabel=xlabel)
                 stack_fig_path = _join(out_dir, "figures", "comparisons", f"{comp.key}_total_stack.png")
                 _save_png(stack_fig, stack_fig_path)
                 plt.close(stack_fig)
+
+        # Breakout exports want the zonal (40000 px) view, which carries the
+        # per-country/state/climate detail. Use the zonal variant of each run
+        # where it was loaded; chunk-only runs fall back to their chunk record
+        # (empty breakouts), exactly as before this resolution split.
+        breakout_records: dict[str, RunRecord] = {}
+        for run_name in run_specs:
+            if (run_name, False) in record_cache:
+                breakout_records[run_name] = record_cache[(run_name, False)]
+            elif (run_name, True) in record_cache:
+                breakout_records[run_name] = record_cache[(run_name, True)]
 
         breakout_specs = (
             ("by_country_period", "by_country"),
@@ -2000,7 +2079,7 @@ def main(argv: Sequence[str] | None = None):
                 breakout_df = pd.DataFrame()
             else:
                 run_filter = inventory_runs if attr in climate_breakouts else None
-                breakout_df = _collect_breakouts(records, attr, run_filter=run_filter)
+                breakout_df = _collect_breakouts(breakout_records, attr, run_filter=run_filter)
             breakout_path = _join(out_data_dir, f"runs_{file_stub}.csv")
             _write_csv_df(writer_con, breakout_df, breakout_path)
 
@@ -2008,7 +2087,7 @@ def main(argv: Sequence[str] | None = None):
             if comp.key == "inventory_source":
                 _export_inventory_source_area_disagreement(
                     comp=comp,
-                    records=records,
+                    records=breakout_records,
                     years=years,
                     abs_flag_mha=float(args.flag_abs_mha),
                     rel_flag_fold=float(args.flag_rel_fold),
