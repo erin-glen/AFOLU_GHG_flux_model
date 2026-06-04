@@ -190,12 +190,12 @@ CHUNK_STATS_ROOT = os.environ.get(
     "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs",
 )
 
-# Chunk-only runs: sensitivities that are compared from chunk_stats (4000 px)
-# rather than zonal stats (40000 px). Any comparison containing one of these is
-# rendered entirely from chunk_stats -- including the baseline -- so the ~3%
-# coarsening bias cancels in the deltas (see _comparison_uses_chunk in main).
-# Runs NOT listed here are read from zonal stats; their comparisons are
-# therefore all-zonal. List a sensitivity run here only if it lacks zonal stats.
+# Runs for which chunk_stats paths are auto-discovered (sensitivities that may
+# only have a chunk_stats 4000 px summary, not zonal stats). This list does NOT
+# force chunk usage: the per-comparison resolution is availability-driven
+# (_resolve_comparison_source in main) -- zonal is used whenever every run in a
+# comparison has zonal stats, and chunk is only the fallback. Listing a run here
+# just pre-resolves its chunk_stats path so it can serve as that fallback.
 SENSITIVITY_CHUNK_RUNS = {
     "ogh_sensitivity_250m",
     "ogh_sensitivity_750m",
@@ -1763,17 +1763,35 @@ def main(argv: Sequence[str] | None = None):
 
     color_map = _assign_colors(run_specs.keys())
 
-    # Runs that are chunk-only for this invocation: auto-discovered sensitivity
-    # runs (SENSITIVITY_CHUNK_RUNS) plus explicit --chunk-stats overrides.
-    #
-    # Resolution-consistency rule: a comparison that includes ANY chunk-only run
-    # is rendered ENTIRELY from chunk_stats (4000 px / ~278 m) -- including the
-    # baseline -- so the ~3% coarsening low-bias cancels in the deltas instead
-    # of contaminating them. Comparisons with no chunk-only run use zonal stats
-    # (40000 px / ~28 m) for every run. A single comparison is therefore never a
-    # mix of resolutions. (If a sensitivity run only has chunk_stats, list it in
-    # SENSITIVITY_CHUNK_RUNS so its comparison switches to chunk for all runs.)
-    chunk_only_runs = set(chunk_stat_config.keys())
+    # Resolution-consistency policy (availability-driven): each comparison is
+    # rendered at a SINGLE resolution so the ~3% chunk_stats coarsening bias
+    # cannot contaminate the deltas.
+    #   * if every run in the comparison has zonal stats (40000 px / ~28 m) ->
+    #     use zonal for all (preferred: finest, matches the headline figures);
+    #   * else if every run has chunk_stats (4000 px / ~278 m) -> use chunk for
+    #     all (the systematic coarsening bias then cancels in the relative deltas);
+    #   * else -> skip the comparison (cannot render it at one resolution).
+    # SENSITIVITY_CHUNK_RUNS / --chunk-stats only PRE-RESOLVE chunk_stats paths;
+    # they no longer force chunk when zonal is also available. So once zonal stats
+    # are produced for the sensitivity runs, the comparisons automatically switch
+    # to all-zonal with no code change.
+    _probe_con = duckdb.connect()
+    pa._ensure_httpfs(_probe_con, args.aws_region)
+    zonal_avail_cache: dict[str, bool] = {}
+
+    def _has_zonal(run_name: str) -> bool:
+        if run_name not in zonal_avail_cache:
+            spec = run_specs[run_name]
+            base_prefixes = _make_base_prefixes(
+                spec.model_version, spec.run_name, spec.run_date,
+                _interval_folder_strings(years),
+            )
+            drained_globs, _ = _make_globs_for_components(base_prefixes)
+            try:
+                zonal_avail_cache[run_name] = pa._count_globs(_probe_con, drained_globs) > 0
+            except Exception:
+                zonal_avail_cache[run_name] = False
+        return zonal_avail_cache[run_name]
 
     chunk_path_cache: dict[str, str | None] = {}
 
@@ -1811,26 +1829,39 @@ def main(argv: Sequence[str] | None = None):
             )
         return record_cache[key]
 
-    def _comparison_uses_chunk(comp: ComparisonSpec) -> bool:
-        return any(rn in chunk_only_runs for rn in comp.run_names)
+    def _resolve_comparison_source(comp: ComparisonSpec) -> str | None:
+        """Choose a single resolution shared by every run in the comparison.
+
+        Returns 'zonal', 'chunk', or None (skip). Prefers zonal; falls back to
+        chunk only when zonal is missing for one or more runs but chunk_stats is
+        available for all of them.
+        """
+        runs = comp.run_names
+        if all(_has_zonal(rn) for rn in runs):
+            return "zonal"
+        if all(_chunk_path_for(rn) for rn in runs):
+            return "chunk"
+        return None
 
     out_data_dir = _join(out_dir, "figures", "comparisons", "data")
     writer_con = duckdb.connect()
     try:
         for comp in active_comparisons:
-            # Load every run in this comparison at a single, consistent resolution.
-            use_chunk = _comparison_uses_chunk(comp)
-            if use_chunk:
-                unresolved = [rn for rn in comp.run_names if not _chunk_path_for(rn)]
-                if unresolved:
-                    print(
-                        f"Skipping comparison '{comp.key}': it includes a chunk-only run, "
-                        f"so a consistent chunk_stats resolution is required for every run, "
-                        f"but no chunk_stats was found for: {', '.join(unresolved)}. "
-                        f"Provide --chunk-stats {unresolved[0]}=<path>, or produce zonal "
-                        f"stats for all runs in this comparison."
-                    )
-                    continue
+            # Load every run in this comparison at a single, consistent resolution
+            # (zonal preferred; chunk fallback) so the deltas are not biased by a
+            # mix of 40000 px and 4000 px sources.
+            source = _resolve_comparison_source(comp)
+            if source is None:
+                missing_zonal = [rn for rn in comp.run_names if not _has_zonal(rn)]
+                print(
+                    f"Skipping comparison '{comp.key}': cannot render all of its runs at a "
+                    f"single resolution. Runs without zonal stats: "
+                    f"{', '.join(missing_zonal) or 'none'}; and chunk_stats is not available "
+                    f"for all runs either. Produce zonal stats for every run (preferred), or "
+                    f"chunk_stats for every run."
+                )
+                continue
+            use_chunk = source == "chunk"
             records = {rn: _get_record(rn, use_chunk) for rn in comp.run_names}
 
             label_overrides: Mapping[str, str] = {}
