@@ -1140,8 +1140,9 @@ def main(argv=None):
             )
             _save_png(fig, _join(OUT_DIR, "figures", "top_10_country_burned_avg_emissions_bar.png"))
 
-        # F) Emissions intensity by climate (avg over periods / latest areas), split by component
-        df_ic = con.execute(pc.sql_component_intensity_by_climate_avg(n_periods)).df()
+        # F) Emissions intensity by climate (area-weighted mean: total emissions
+        #    / total area, summed over all periods), split by component
+        df_ic = con.execute(pc.sql_component_intensity_by_climate_avg()).df()
         df_ic["Climate"] = df_ic["climate_domain"].apply(pc.titlecase_domain)
         df_ic = df_ic[df_ic["Climate"].isin(pc.CLIMATE_ORDER)]
         df_ic["Climate"] = pd.Categorical(df_ic["Climate"], pc.CLIMATE_ORDER, ordered=True)

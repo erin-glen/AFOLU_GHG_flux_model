@@ -13,7 +13,7 @@ Additions:
 New SQL helpers added in this revision:
 - sql_total_by_climate(): drained+burned totals by climate × period
 - sql_component_split_by_climate_avg(n_periods): avg drained vs burned per climate
-- sql_component_intensity_by_climate_avg(n_periods): emissions intensity per climate split by component
+- sql_component_intensity_by_climate_avg(): area-weighted mean emissions intensity per climate split by component
 - sql_drained_intensity_by_climate_avg(n_periods): drained emissions intensity per climate
 """
 
@@ -1420,12 +1420,29 @@ def sql_drained_intensity_by_climate_avg(n_periods: int) -> str:
     JOIN latest_area a ON a.climate_domain = e.climate_domain;
     """
 
-def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
+def sql_component_intensity_by_climate_avg() -> str:
+    # Area-weighted mean intensity per climate = (total emissions summed over
+    # ALL periods) / (total drained|burned area summed over ALL periods). This
+    # is identical to (avg annual emissions) / (avg area) -- the per-period
+    # count cancels -- and keeps the numerator and denominator on the SAME
+    # period basis.
+    #
+    # A previous version divided average-annual emissions by the LATEST
+    # period's area only. Because drained/burned areas are not stable across
+    # periods, that mismatched the two and distorted the intensities:
+    #   * Tropical burned was inflated (~2x): 2021-2024 was a low-fire period,
+    #     so the latest burned-area denominator was well below the multi-period
+    #     average while the averaged emissions still reflected big fire years.
+    #   * Boreal/temperate drained were deflated (~20%): the 2024 drained area
+    #     is the largest of any period (2024 land cover comes from the annual
+    #     GLCLU product vs the five-year product for 2005-2020), inflating the
+    #     denominator.
+    # Summing over all periods is robust to this and to zero-area periods (a
+    # period with no fire contributes 0 to both sums and drops out).
     return f"""
     WITH area_drained AS (
       SELECT
         COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
-        z.interval_end,
         SUM(CASE
               WHEN z.flux_type='area__ha' AND z.drained_state_meaning LIKE 'peat_drained%'
               THEN z.value ELSE 0 END) AS drained_ha
@@ -1433,41 +1450,17 @@ def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
       LEFT JOIN drained_state_ctx AS ctx
         ON (z.drained_state_meaning = ctx.meaning)
         OR ({_rpad_sql('z.drained_state_nodes')} = ctx.key)
-      GROUP BY 1,2
+      GROUP BY 1
     ),
     area_burned AS (
       SELECT
         COALESCE(ctx.climate_domain, 'Unspecified') AS climate_domain,
-        z.interval_end,
         SUM(CASE WHEN z.flux_type='area__ha' THEN z.value ELSE 0 END) AS burned_ha
       FROM zs_burned z
       LEFT JOIN burned_state_ctx AS ctx
         ON (z.burned_state_meaning = ctx.meaning)
         OR ({_rpad_sql('z.burned_state_nodes')} = ctx.key)
-      GROUP BY 1,2
-    ),
-    latest_area AS (
-      SELECT
-        COALESCE(d.climate_domain, b.climate_domain) AS climate_domain,
-        COALESCE(d.drained_ha, 0) AS latest_drained_ha,
-        COALESCE(b.burned_ha, 0) AS latest_burned_ha
-      FROM (
-        SELECT ad.climate_domain, ad.drained_ha
-        FROM area_drained ad
-        JOIN (
-          SELECT climate_domain, MAX(interval_end) AS max_end
-          FROM area_drained GROUP BY 1
-        ) mxd ON ad.climate_domain = mxd.climate_domain AND ad.interval_end = mxd.max_end
-      ) d
-      FULL OUTER JOIN (
-        SELECT ab.climate_domain, ab.burned_ha
-        FROM area_burned ab
-        JOIN (
-          SELECT climate_domain, MAX(interval_end) AS max_end
-          FROM area_burned GROUP BY 1
-        ) mxb ON ab.climate_domain = mxb.climate_domain AND ab.interval_end = mxb.max_end
-      ) b
-        ON d.climate_domain = b.climate_domain
+      GROUP BY 1
     ),
     em_drained AS (
       SELECT
@@ -1490,18 +1483,18 @@ def sql_component_intensity_by_climate_avg(n_periods: int) -> str:
       GROUP BY 1
     )
     SELECT
-      la.climate_domain,
+      ad.climate_domain,
       'Drained' AS component,
-      ( (ed.sum_Mg / NULLIF({n_periods},0)) / NULLIF(la.latest_drained_ha, 0) ) AS intensity_tCO2e_per_ha_yr
-    FROM latest_area la
-    LEFT JOIN em_drained ed ON la.climate_domain = ed.climate_domain
+      ( ed.sum_Mg / NULLIF(ad.drained_ha, 0) ) AS intensity_tCO2e_per_ha_yr
+    FROM area_drained ad
+    LEFT JOIN em_drained ed ON ad.climate_domain = ed.climate_domain
     UNION ALL
     SELECT
-      la.climate_domain,
+      ab.climate_domain,
       'Burned' AS component,
-      ( (eb.sum_Mg / NULLIF({n_periods},0)) / NULLIF(la.latest_burned_ha, 0) ) AS intensity_tCO2e_per_ha_yr
-    FROM latest_area la
-    LEFT JOIN em_burned eb ON la.climate_domain = eb.climate_domain;
+      ( eb.sum_Mg / NULLIF(ab.burned_ha, 0) ) AS intensity_tCO2e_per_ha_yr
+    FROM area_burned ab
+    LEFT JOIN em_burned eb ON ab.climate_domain = eb.climate_domain;
     """
 
 def sql_topn_total_emissions_split_avg(topn: int, with_lookup: bool, n_periods: int) -> str:
