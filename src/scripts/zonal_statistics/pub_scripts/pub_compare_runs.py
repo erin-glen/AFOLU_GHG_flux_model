@@ -2111,6 +2111,9 @@ def main(argv: Sequence[str] | None = None):
             else:
                 run_filter = inventory_runs if attr in climate_breakouts else None
                 breakout_df = _collect_breakouts(breakout_records, attr, run_filter=run_filter)
+            if breakout_df is None or len(breakout_df.columns) == 0:
+                print(f"Skipping optional breakout with no columns: runs_{file_stub}.csv")
+                continue
             breakout_path = _join(out_data_dir, f"runs_{file_stub}.csv")
             _write_csv_df(writer_con, breakout_df, breakout_path)
 
