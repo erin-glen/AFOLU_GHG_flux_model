@@ -90,10 +90,10 @@ FAO_N2O_GWP = pc.N2O_GWP
 # 1) Gas colors for CO₂ vs N₂O in the emissions stacked bar
 FAO_GAS_ORDER = ["CO₂", "N₂O"]
 FAO_GAS_COLORS = {
-    # Okabe–Ito CVD-safe pair:
-    # CO₂ = deep blue, N₂O = warm orange/red
-    "CO₂": "#0072B2",
-    "N₂O": "#D55E00",
+    # Okabe–Ito CVD-safe pair, harmonized with the per-run gas palette
+    # (pub_assets DRAINED/BURNED_GAS_COLORS): CO₂ = vermillion, N₂O = green.
+    "CO₂": "#D55E00",
+    "N₂O": "#009E73",
 }
 
 # 2) Land-use colors (Cropland vs Grassland) for peat area split

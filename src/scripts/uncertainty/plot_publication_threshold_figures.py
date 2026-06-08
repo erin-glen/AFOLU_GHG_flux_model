@@ -215,7 +215,7 @@ def main() -> None:
 
     fig.suptitle(
         "Per-biome threshold-response and area-versus-threshold curves "
-        "(OpenGeoHub organic-soil probability, 20260513)",
+        "(OpenGeoHub organic-soil probability)",
         fontsize=12,
     )
     for ext in ("png", "pdf"):

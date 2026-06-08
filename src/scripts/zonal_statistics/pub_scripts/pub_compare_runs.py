@@ -1935,7 +1935,7 @@ def main(argv: Sequence[str] | None = None):
                         area_stack_df,
                         ("Drained", "Undrained"),
                         PEAT_AREA_COLORS,
-                        "Peat area (million ha)",
+                        "Mapped area (million ha)",
                         comp.label,
                     )
                     area_stack_fig_path = _join(

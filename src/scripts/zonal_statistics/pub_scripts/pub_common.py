@@ -580,6 +580,7 @@ def stacked_column_by_category(
     bar_width: float = 0.58,              # <— slimmer columns (was implicit 0.8)
     segment_edgecolor: str = "white",     # clean separators between stacked segments
     segment_linewidth: float = 0.5,
+    show_totals: bool = True,             # annotate each column with its stacked total
 ) -> plt.Figure:
     df = df_long.copy()
     df[category_col] = pd.Categorical(df[category_col], category_order, ordered=True)
@@ -626,8 +627,9 @@ def stacked_column_by_category(
         fig.tight_layout(rect=(0, 0, 1, 0.88))
 
     ax.set_ylim(0, y_max)
-    for xpos, total in zip(range(len(totals)), totals):
-        ax.text(xpos, total + (y_max * 0.015), f"{total:.2f}", ha="center", va="bottom", fontsize=9)
+    if show_totals:
+        for xpos, total in zip(range(len(totals)), totals):
+            ax.text(xpos, total + (y_max * 0.015), f"{total:.2f}", ha="center", va="bottom", fontsize=9)
     return fig
 
 

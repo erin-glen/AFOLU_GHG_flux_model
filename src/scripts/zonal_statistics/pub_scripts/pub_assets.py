@@ -744,7 +744,8 @@ def _gas_totals_by_period_from_zonal(
     flux_list = ", ".join(f"'{k}'" for k in flux_map)
     df = con.execute(
         f"SELECT interval_end, flux_type, SUM(value) AS Mg "
-        f"FROM {view} WHERE flux_type IN ({flux_list}) GROUP BY 1, 2"
+        f"FROM {view} WHERE flux_type IN ({flux_list}) GROUP BY 1, 2 "
+        f"ORDER BY interval_end, flux_type"
     ).df()
     if df.empty:
         return pd.DataFrame(columns=[inv_col, "Gas", "GtCO2e"])
@@ -1198,6 +1199,7 @@ def main(argv=None):
                 bar_width=0.55,
                 segment_edgecolor="white",
                 segment_linewidth=0.6,
+                show_totals=False,  # Drained+Burned use different denominators; the stacked total is not additive
             )
             _save_png(fig, _join(OUT_DIR, "figures", "intensity_by_climate_component_column.png"))
 
