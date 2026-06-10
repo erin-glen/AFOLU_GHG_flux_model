@@ -187,11 +187,13 @@ OPTIONAL_CONTEXTUAL_GROUPERS: Dict[str, Dict[str, Any]] = {
         "source_label": "Landmark",
     },
     "primary_forest": {
-        "name": cn.primary_forest_pattern,
-        "zarr_path": cn.primary_forest_zarr_path,
-        "expected_groups": _expected_groups_with_zero(cn.primary_forest_codes, dtype=np.uint8),
+        "name": cn.starting_composite_primary_forest_pattern,
+        "zarr_path": cn.starting_composite_primary_forest_zarr_path,
+        "variable_name": cn.starting_composite_primary_forest_pattern,
+        "drop_singleton_year_dim": True,
+        "expected_groups": _expected_groups_with_zero(cn.starting_composite_primary_forest_codes, dtype=np.uint8),
         "dtype": np.uint8,
-        "source_label": "IFL2000_tropical_primary_forest_2001",
+        "source_label": "starting_composite_primary_forest_2015",
     },
     "kba": {
         "name": cn.KBA_pattern,
@@ -614,9 +616,25 @@ def _first_xy_var(ds_or_da: xr.Dataset | xr.DataArray) -> xr.DataArray:
         da_ = da_.isel(band=0, drop=True)
     return da_
 
-def open_zarr_region(path: str, bbox: Optional[List[float]], chunk_size: int) -> xr.DataArray:
+def open_zarr_region(
+    path: str,
+    bbox: Optional[List[float]],
+    chunk_size: int,
+    variable_name: Optional[str] = None,
+) -> xr.DataArray:
     dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
-    data_arr = _first_xy_var(dsx)
+    if variable_name is not None:
+        if isinstance(dsx, xr.DataArray):
+            data_arr = dsx
+        else:
+            if variable_name not in dsx:
+                raise ValueError(
+                    f"Variable '{variable_name}' not found in contextual zarr '{path}'. "
+                    f"Available variables: {sorted(dsx.data_vars)}"
+                )
+            data_arr = dsx[variable_name]
+    else:
+        data_arr = _first_xy_var(dsx)
     if bbox is not None and {"x", "y"}.issubset(data_arr.dims):
         west, south, east, north = bbox
         x0, x1 = float(data_arr.x.values[0]), float(data_arr.x.values[-1])
@@ -844,7 +862,16 @@ def open_optional_contextual_grouper(
     logger: logging.Logger,
 ) -> xr.DataArray:
     logger.info("Contextual grouper open start: name=%s source=%s path=%s", spec["name"], spec["source_label"], spec["zarr_path"])
-    arr = open_zarr_region(spec["zarr_path"], bbox, chunk_size)
+    arr = open_zarr_region(spec["zarr_path"], bbox, chunk_size, spec.get("variable_name"))
+    if spec.get("drop_singleton_year_dim") and "year" in arr.dims:
+        year_size = arr.sizes.get("year")
+        if year_size != 1:
+            raise ValueError(
+                "Refusing to collapse non-singleton year dimension for contextual grouper "
+                f"name={spec['name']} source={spec['source_label']} path={spec['zarr_path']} "
+                f"year_size={year_size}. Select a single-year source or add explicit year-selection logic."
+            )
+        arr = arr.isel(year=0, drop=True)
     logger.info("Contextual grouper open end: name=%s dims=%s chunks=%s", spec["name"], dict(arr.sizes), _chunk_structure(arr))
     return arr
 
@@ -1062,6 +1089,8 @@ def build_branch_manifest(
         "model_version": args.model_version,
         "run_name": args.run_name,
         "run_date": args.run_date,
+        "output_run_name": getattr(args, "output_run_name", None) or args.run_name,
+        "output_run_date": getattr(args, "output_run_date", None) or args.run_date,
         "interval": interval,
         "interval_type": args.interval_type,
         "branch": branch,
@@ -1487,7 +1516,11 @@ def run(args: argparse.Namespace) -> None:
         gadm_adm0_ids = np.array([i for i in zc.GADM_ADM0_IDS if i > 0], dtype=np.uint32)
         combined_state_codes_arr = zc.COMBINED_STATE_GROUP_VALUES.astype(np.uint32, copy=False)
         local_arrow = pafs.LocalFileSystem()
-        base_dir_root = Path(args.local_output).expanduser().resolve()
+        output_run_name = args.output_run_name or args.run_name
+        output_run_date = args.output_run_date or args.run_date
+        if args.local_output is None and (args.output_run_name or args.output_run_date):
+            args.local_output = default_local_output(args.model_version, output_run_name, output_run_date)
+        base_dir_root = Path(args.local_output or default_local_output(args.model_version, output_run_name, output_run_date)).expanduser().resolve()
         base_dir_root.mkdir(parents=True, exist_ok=True)
         base_dir_combined = base_dir_root / "combined_state"
         tile_stage_root = base_dir_root / "_tile_stage"
@@ -1513,7 +1546,7 @@ def run(args: argparse.Namespace) -> None:
                 logger=logger,
             )
             roi_meta = normalized_roi_metadata(interval_plan["explicit_tile_ids"], interval_plan["bbox"])
-            dest_root = build_output_parquet(args.model_version, args.run_name, args.run_date, interval)
+            dest_root = build_output_parquet(args.model_version, output_run_name, output_run_date, interval)
             dest_e = posixpath.join(dest_root.rstrip("/"), "combined_state")
             manifest_e = build_branch_manifest(
                 args,
@@ -1736,6 +1769,22 @@ def main(argv=None):
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no_sparse", action="store_true", default=not SPARSE_DEFAULT)
     parser.add_argument("--run_name", default="ogh_standard_model")
+    parser.add_argument(
+        "--output_run_name",
+        default=None,
+        help=(
+            "Optional zonal-stats output run-name override. Input mega-zarr and data-tile "
+            "filter discovery still use --run_name."
+        ),
+    )
+    parser.add_argument(
+        "--output_run_date",
+        default=None,
+        help=(
+            "Optional zonal-stats output run-date override. Input mega-zarr and data-tile "
+            "filter discovery still use --run_date."
+        ),
+    )
     parser.add_argument("--datasets", nargs="+", choices=sorted(list(FLUX_DATASETS.keys()) + list(FLUX_DATASET_ALIASES.keys()) + list(STATE_DATASETS.keys())),
                         help="Flux datasets to process (default: all flux datasets). State keys are ignored for compatibility.")
     parser.add_argument(

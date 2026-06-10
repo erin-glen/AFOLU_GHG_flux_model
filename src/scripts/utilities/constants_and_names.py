@@ -188,6 +188,15 @@ primary_forest_zarr_path = (
 # Starting-composite primary forest classes are binary: 0=outside, 1=inside.
 primary_forest_codes = np.array([0, 1], dtype=np.uint8)
 
+starting_composite_primary_forest_pattern = "starting_composite_primary_forest"
+starting_composite_primary_forest_zarr_path = (
+    "s3://gfw2-data/climate/AFOLU_flux_model/LULUCF/"
+    "starting_composite_primary_forest/2015/zarr/4000_pixels/20260210/"
+    "starting_composite_primary_forest.zarr"
+)
+# Starting-composite primary forest classes are binary: 0=outside, 1=inside.
+starting_composite_primary_forest_codes = np.array([0, 1], dtype=np.uint8)
+
 river_basins_pattern = "river_basins"
 river_basins_zarr_path = (
     f"{contextual_layer_global_zarr_root}/river_basins/v2018/"
