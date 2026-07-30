@@ -1122,7 +1122,13 @@ def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
       - gadm_adm0[, country, iso3]
       - land_use
       - drained_area_ha
+      - undrained_area_ha
       - drained_on_site_co2_Mg_CO2_yr
+      - drained_n2o_Mg_CO2e_yr
+
+    The CO2 term excludes off-site DOC-derived CO2. The N2O term excludes
+    off-site flux rows if present, so the output is aligned with direct N2O
+    reported in the NGHGI comparison.
     """
     select_l = ", l.country, l.iso3" if with_lookup else ""
     join_l = "LEFT JOIN adm0_lookup l ON l.gadm_adm0 = base.gadm_adm0" if with_lookup else ""
@@ -1171,6 +1177,7 @@ def table_nghgi_comparison_subset_sql(with_lookup: bool) -> str:
         SUM(
           CASE
             WHEN lower(j.flux_type) LIKE 'drained_n2o%'
+                 AND lower(j.flux_type) NOT LIKE '%offsite%'
                  AND j.peat_state = 'drained'
             THEN j.value ELSE 0
           END

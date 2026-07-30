@@ -58,7 +58,8 @@ s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/
 The interval folder is named `<start>_<end>`, such as `2021_2024`. The SQL
 used for this comparison is `pub_common.table_nghgi_comparison_subset_sql`.
 It returns country, interval, coarse land-use, drained area, undrained area,
-drained on-site CO2, and drained N2O.
+drained on-site CO2, and direct drained N2O, with off-site comparison terms
+excluded.
 
 Model N2O is stored upstream as CO2e using the project-wide AR6 GWP100 value
 for N2O (`273`). In this comparison pipeline, that original value is preserved
@@ -168,7 +169,7 @@ the non-overlapping parent rows (`4(II).X.1` and `4(II).X.2`) and only falling
 back to deeper children when a parent is missing. All sums use `min_count=1`
 so all-missing `IE`/`NE` groups remain `NaN` instead of becoming numeric zero.
 
-### Table 4(II) gas sub-row preference
+### Gas emissions: prefer Drained over Total sub-row
 
 For CO2, N2O, and CH4, Table 4(II) can contain both "Total organic soils" and
 "Drained organic soils" sub-rows. The comparison prefers the Drained row when
@@ -176,10 +177,24 @@ it is numeric and falls back to Total only when Drained is missing. This keeps
 the NGHGI gas comparison as close as possible to the model's drained-peat
 emissions while still supporting countries that only report the aggregate row.
 
-Drained area uses the Drained row only. Total organic area comes from Tables
-4.A-4.F, not from the Table 4(II) Total row.
+Area uses Drained-only (no fallback) because Total-organic area is what the
+cstock side reports.
 
-### CO2 source preference
+The output now retains gas-specific soil-row source flags:
+
+```text
+nghgi_em_co2_t4ii_soil_row_source
+nghgi_em_n2o_t4ii_soil_row_source
+nghgi_em_ch4_t4ii_soil_row_source
+```
+
+Allowed values are Drained organic soils, Total organic soils, and missing.
+For CO2, when the final preferred value comes from Tables 4.A--4.F
+carbon-stock change rather than Table 4(II),
+nghgi_em_co2_t4ii_soil_row_source is set to
+not_applicable_cstock_fallback.
+
+### CO2 source preference (Table 4(II) vs Tables 4.A-F)
 
 For each `(iso3, land_use, year)`, NGHGI CO2 is:
 
@@ -187,12 +202,33 @@ For each `(iso3, land_use, year)`, NGHGI CO2 is:
 2. Otherwise, Tables 4.A-4.F organic-soil C-stock change converted as
    `-cstock_soil_organic_ktC * 44/12`.
 
-The selected source is stored in `nghgi_em_co2_source`.
+The chosen source per country-year-LU is recorded in the nghgi_em_co2_source
+column of nghgi_country_landuse.csv. The additional
+nghgi_em_co2_t4ii_soil_row_source column records whether a numeric Table
+4(II) CO2 value, when used, came from the Drained organic soils or Total
+organic soils sub-row; when CO2 is instead derived from Tables 4.A--4.F, this
+row-source column is set to not_applicable_cstock_fallback.
 
-### N2O GWP convention
+### N₂O GWP convention for NGHGI comparison
 
-For the NGHGI comparison outputs, both model and inventory N2O are normalized
-to the current inventory convention: AR5 GWP100 for N2O = `265`.
+```python
+MODEL_N2O_GWP=273.0
+INVENTORY_N2O_GWP = 265.0
+N2O_GWP = INVENTORY_N2O_GWP
+N2O_MODEL_TO_INVENTORY_SCALE = INVENTORY_N2O_GWP / MODEL_N2O_GWP
+```
+
+The core model stores drained N2O as CO2e using the project-wide AR6 GWP100
+value for N2O = 273. For NGHGI comparison outputs only, model N2O is rescaled
+by 265 / 273 so both model and inventory values are expressed on the
+inventory-comparison convention, GWP100 = 265. Main manuscript model totals
+outside the NGHGI benchmark remain on the AR6 basis.
+
+The inventory-side conversion is:
+
+```text
+nghgi_em_n2o_Mg_CO2e_yr = nghgi_em_n2o_kt * 265.0 * 1000.0
+```
 
 The output keeps enough metadata to avoid ambiguity:
 
@@ -231,8 +267,14 @@ Country bars are built by summing the model side only across land-use cells
 where the NGHGI side has a numeric value for that metric. This keeps the
 model from being inflated by categories a country did not report.
 
-Reported zeroes are retained. A zero inventory value is information, and it
-should reveal model false positives in the paired country bars.
+Numeric zeros are retained in `_matched_sum`: a reported zero is treated as
+information and can reveal model false positives in the paired country bars.
+Missing inventory values are represented as NaN and are not converted to zero
+by the interval aggregation.
+
+Scatter plots use log-log axes and therefore intentionally filter to positive
+model and NGHGI values only. This positive-only scatter filtering does not
+affect the paired country bars.
 
 ## Table 3.D.1.f Scope
 
@@ -331,6 +373,14 @@ visual comparability:
 The order is computed from latest-interval NGHGI total organic-soil area and
 then reused across figures.
 
+Figure comparison scopes:
+
+| Figure prefix | Model side | Inventory side | Units |
+| --- | --- | --- | --- |
+| `topn_compare_co2_` | drained on-site `drained_co2%` excluding `%offsite%` | Table 4(II) `em_co2_kt` numeric **else** Tables 4.A--F `cstock_soil_organic_ktC × -44/12` | Mt CO₂/yr |
+| `topn_compare_n2o_` | direct drained `drained_n2o%` excluding `%offsite%` if present; model values are rescaled from project AR6 GWP100 = 273 to inventory-comparison GWP100 = 265 | Table 4(II) `em_n2o_kt × 265 × 1000` | Mt CO₂e/yr |
+| `topn_compare_t3d_n2o_` | drained N₂O filtered to `T3D_N2O_MODEL_LANDUSE`; model values are rescaled from project AR6 GWP100 = 273 to inventory-comparison GWP100 = 265 | Table 3.D.1.f `n2o_kt × 265 × 1000` | Mt CO₂e/yr |
+
 ### JRC validation mode
 
 `--validate_jrc` writes:
@@ -372,6 +422,29 @@ This mode skips the model side and does not require `--years` or `--run`.
 `publication_root("nghgi")` is resolved by
 `src/scripts/utilities/local_output_paths.py`, usually under `C:/tmp/afolu`
 on Windows.
+
+## Input-data provenance and archiving requirement
+
+The NGHGI comparison depends on compiled inventory inputs that are not fully
+reproduced from the publication plotting script alone. Before manuscript
+submission, archive the exact benchmark inputs used to generate the NGHGI
+figures and CSV outputs, or archive derived tidy versions sufficient to
+reproduce the comparison.
+
+The archive should include, at minimum:
+
+- organic_soil_compiled.csv
+- organic_soil_cstock_compiled.csv
+- JRC-derived tidy Tables 4.A--4.F organic-soil area and carbon-stock-change
+  records used by extract_organic_soil_jrc.py
+- JRC/BTR-derived tidy Table 3.D.1.f cultivation-of-organic-soils records used
+  by extract_organic_soil_jrc.py
+- a README or manifest listing original inventory submission cycle,
+  extraction date, source table, source file, and whether each source came
+  from raw CRT extraction, JRC Annex I 2026 aggregation, or JRC BTR1 2024
+  aggregation
+
+The comparison remains diagnostic and is not used to calibrate the model.
 
 ## Known Caveats
 

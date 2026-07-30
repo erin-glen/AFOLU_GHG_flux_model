@@ -390,6 +390,14 @@ def _source_summary(series: pd.Series) -> Optional[str]:
     return vals[0] if len(vals) == 1 else "mixed_" + "_".join(vals)
 
 
+def _source_mode(series: pd.Series) -> Optional[str]:
+    vals = series.dropna()
+    if vals.empty:
+        return None
+    mode = vals.mode()
+    return str(mode.iloc[0] if not mode.empty else vals.iloc[0])
+
+
 def nghgi_annual_by_iso_landuse(
     nghgi_t4ii: pd.DataFrame,
     nghgi_cstock: pd.DataFrame,
@@ -456,16 +464,47 @@ def nghgi_annual_by_iso_landuse(
     area_per_year = area_per_year.rename(columns={"area_kha": "nghgi_area_drained_organic_kha"})
 
     # Gas emissions: collapse Drained and Total separately, then prefer Drained
-    def _prefer_drained_gas(drained_df, total_df, col):
+    def _prefer_drained_gas(
+        drained_df: pd.DataFrame,
+        total_df: pd.DataFrame,
+        col: str,
+        source_col: str,
+    ) -> pd.DataFrame:
         drn = _collapse_to_toplevel(drained_df, col).rename(columns={col: "drn"})
         tot = _collapse_to_toplevel(total_df, col).rename(columns={col: "tot"})
         m = drn.merge(tot, on=["iso3", "year", "land_use"], how="outer")
         m[col] = m["drn"].where(m["drn"].notna(), m["tot"])
-        return m[["iso3", "year", "land_use", col]]
+        m[source_col] = np.select(
+            [
+                m["drn"].notna(),
+                m["drn"].isna() & m["tot"].notna(),
+            ],
+            [
+                "Drained organic soils",
+                "Total organic soils",
+            ],
+            default="missing",
+        )
+        return m[["iso3", "year", "land_use", col, source_col]]
 
-    co2_per_year = _prefer_drained_gas(gas_drained, gas_total, "em_co2_kt")
-    n2o_per_year = _prefer_drained_gas(gas_drained, gas_total, "em_n2o_kt")
-    ch4_per_year = _prefer_drained_gas(gas_drained, gas_total, "em_ch4_kt")
+    co2_per_year = _prefer_drained_gas(
+        gas_drained,
+        gas_total,
+        "em_co2_kt",
+        "nghgi_em_co2_t4ii_soil_row_source",
+    )
+    n2o_per_year = _prefer_drained_gas(
+        gas_drained,
+        gas_total,
+        "em_n2o_kt",
+        "nghgi_em_n2o_t4ii_soil_row_source",
+    )
+    ch4_per_year = _prefer_drained_gas(
+        gas_drained,
+        gas_total,
+        "em_ch4_kt",
+        "nghgi_em_ch4_t4ii_soil_row_source",
+    )
 
     co2_per_year = co2_per_year.rename(columns={"em_co2_kt": "nghgi_em_co2_kt"})
     n2o_per_year = n2o_per_year.rename(columns={"em_n2o_kt": "nghgi_em_n2o_kt"})
@@ -479,13 +518,6 @@ def nghgi_annual_by_iso_landuse(
         nghgi_cstock["category_code"].str.count(r"\.") == 1
     ].copy()
     cstock_top_raw["nghgi_t4land_source"] = "raw_CRT_extract"
-
-    def _source_mode(series: pd.Series) -> Optional[str]:
-        vals = series.dropna()
-        if vals.empty:
-            return None
-        mode = vals.mode()
-        return str(mode.iloc[0] if not mode.empty else vals.iloc[0])
 
     raw_area_per_year = (
         cstock_top_raw.groupby(["iso3", "year", "land_use"], as_index=False, observed=False)
@@ -552,6 +584,17 @@ def nghgi_annual_by_iso_landuse(
         "T4II",
         np.where(annual["nghgi_em_co2_from_cstock_kt"].notna(), "T4land_cstock", None),
     )
+    t4ii_co2 = annual["nghgi_em_co2_kt"]
+    cstock_co2 = annual["nghgi_em_co2_from_cstock_kt"]
+    annual["nghgi_em_co2_t4ii_soil_row_source"] = np.where(
+        t4ii_co2.notna(),
+        annual["nghgi_em_co2_t4ii_soil_row_source"],
+        np.where(
+            cstock_co2.notna(),
+            "not_applicable_cstock_fallback",
+            annual["nghgi_em_co2_t4ii_soil_row_source"],
+        ),
+    )
 
     # Undrained proxy is annual too, so availability requires raw total area
     # and raw drained area in the same inventory year.
@@ -594,9 +637,24 @@ def nghgi_by_iso_landuse_interval(
     """
     Average NGHGI values over each (start_year, end_year) interval.
 
-    Returns one row per (iso3, land_use, interval_end) with metric-specific
-    availability counts. A metric is chartable only when its corresponding
-    ``*_years_available`` column is at least 1.
+    Returns one row per (iso3, land_use, interval_end) with:
+        nghgi_area_drained_organic_ha
+        nghgi_em_co2_Mg_yr
+            preferred: Table 4(II) numeric CO2; fallback:
+            Tables 4.A--4.F organic-soil carbon-stock change * -44/12
+        nghgi_em_co2_source
+            'T4II' | 'T4land_cstock' | None
+        nghgi_em_co2_t4ii_soil_row_source
+            'Drained organic soils' | 'Total organic soils' |
+            'not_applicable_cstock_fallback' | 'missing'
+        nghgi_em_n2o_kt_yr
+        nghgi_em_n2o_t4ii_soil_row_source
+            'Drained organic soils' | 'Total organic soils' | 'missing'
+        nghgi_em_ch4_kt_yr
+        nghgi_em_ch4_t4ii_soil_row_source
+            'Drained organic soils' | 'Total organic soils' | 'missing'
+        nghgi_years_available
+            count of inventory years in the window with any numeric value
     """
     annual = (
         annual_df.copy()
@@ -620,6 +678,18 @@ def nghgi_by_iso_landuse_interval(
                 nghgi_em_co2_kt=("nghgi_em_co2_kt", "mean"),
                 nghgi_em_n2o_kt=("nghgi_em_n2o_kt", "mean"),
                 nghgi_em_ch4_kt=("nghgi_em_ch4_kt", "mean"),
+                nghgi_em_co2_t4ii_soil_row_source=(
+                    "nghgi_em_co2_t4ii_soil_row_source",
+                    _source_mode,
+                ),
+                nghgi_em_n2o_t4ii_soil_row_source=(
+                    "nghgi_em_n2o_t4ii_soil_row_source",
+                    _source_mode,
+                ),
+                nghgi_em_ch4_t4ii_soil_row_source=(
+                    "nghgi_em_ch4_t4ii_soil_row_source",
+                    _source_mode,
+                ),
                 nghgi_em_co2_from_cstock_kt=("nghgi_em_co2_from_cstock_kt", "mean"),
                 nghgi_em_co2_kt_preferred=("nghgi_em_co2_kt_preferred", "mean"),
                 nghgi_em_co2_source=("nghgi_em_co2_source", _source_summary),
@@ -764,6 +834,9 @@ def join_model_nghgi(
         m["nghgi_em_co2_Mg_yr"] = np.nan
         m["nghgi_em_n2o_Mg_CO2e_yr"] = np.nan
         m["nghgi_em_co2_source"] = None
+        m["nghgi_em_co2_t4ii_soil_row_source"] = None
+        m["nghgi_em_n2o_t4ii_soil_row_source"] = None
+        m["nghgi_em_ch4_t4ii_soil_row_source"] = None
         m["nghgi_years_available"] = np.nan
         return m
 
@@ -807,6 +880,9 @@ def join_model_nghgi(
         "nghgi_em_n2o_Mg_CO2e_yr",
         "nghgi_em_co2_kt", "nghgi_em_n2o_kt", "nghgi_em_ch4_kt",
         "nghgi_em_co2_from_cstock_kt", "nghgi_em_co2_source",
+        "nghgi_em_co2_t4ii_soil_row_source",
+        "nghgi_em_n2o_t4ii_soil_row_source",
+        "nghgi_em_ch4_t4ii_soil_row_source",
         "nghgi_n2o_gwp",
         "nghgi_years_available",
     ]
@@ -890,6 +966,8 @@ def _plot_scatter_model_vs_nghgi(
     df = df.copy()
     df = df.dropna(subset=[value_model, value_nghgi])
     df = df[(df[value_model] > 0) & (df[value_nghgi] > 0)]
+    # Scatter plots use log-log axes, so non-positive matched values are
+    # intentionally excluded here. Paired country bars retain numeric zeros.
 
     order = list(landuse_order) if landuse_order is not None else LANDUSE_ORDER
     colors = landuse_colors if landuse_colors is not None else LANDUSE_COLORS
@@ -1877,13 +1955,13 @@ def main(argv=None):
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"scatter_area_{interval}.png"))
 
-        # Scatter: CO2
+        # Scatter: on-site CO2
         fig = _plot_scatter_model_vs_nghgi(
             sub,
             value_model="model_drained_co2_Mg_yr",
             value_nghgi="nghgi_em_co2_Mg_yr",
-            unit_label="drained organic-soil CO2 (Mg CO2/yr)",
-            title=f"Model vs NGHGI drained organic-soil CO2 ({interval})",
+            unit_label="drained organic-soil on-site CO2 (Mg CO2/yr)",
+            title=f"Model vs NGHGI on-site CO2 from drained organic soils ({interval})",
         )
         _save_png(fig, _join(OUT_DIR, "figures", f"scatter_co2_{interval}.png"))
 
@@ -1978,9 +2056,9 @@ def main(argv=None):
             per_ctry_focus,
             value_model="model_drained_co2_Mt",
             value_nghgi="nghgi_em_co2_Mt",
-            unit_label="Drained organic-soil CO₂ (Mt CO₂e/yr)",
-            title="Model vs NGHGI drained organic-soil CO₂",
-            subtitle="NGHGI = Table 4(II) numeric where reported, else cstock-derived from Tables 4.A–4.F",
+            unit_label="Drained organic-soil on-site CO₂ (Mt CO₂/yr)",
+            title="Model vs NGHGI on-site CO₂ from drained organic soils",
+            subtitle="NGHGI = Table 4(II) numeric where reported, else cstock-derived from Tables 4.A–4.F; model excludes off-site DOC CO₂",
             interval_label=interval_label,
             country_order=focus_order,
             nghgi_color=FIGURE_COLORS["co2"][0],

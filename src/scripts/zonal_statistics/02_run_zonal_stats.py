@@ -1845,7 +1845,11 @@ def main(argv=None):
     parser.add_argument("--keep_tile_stage", action="store_true")
     args = parser.parse_args(argv)
     if args.local_output is None:
-        args.local_output = default_local_output(args.model_version, args.run_name, args.run_date)
+        args.local_output = default_local_output(
+            args.model_version,
+            args.output_run_name or args.run_name,
+            args.output_run_date or args.run_date,
+        )
     run(args)
 
 if __name__ == "__main__":
