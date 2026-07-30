@@ -21,6 +21,9 @@ model_version_underscore = model_version.replace(".", "_")   # "0_3_0"
 
 s3_bucket_name = 'gfw2-data'
 
+# Coiled workspace that clusters are created in
+Coiled_workspace = "wri-land-research"
+
 logger = logging.getLogger(__name__)
 full_bucket_prefix = f"s3://{s3_bucket_name}"
 s3_region_name = 'us-east-1'

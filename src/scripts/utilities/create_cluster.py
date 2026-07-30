@@ -14,8 +14,7 @@ import inspect
 import sys
 import coiled
 
-# Keep this import if your package structure relies on it elsewhere (even if unused here).
-from . import constants_and_names as cn  # noqa: F401
+from . import constants_and_names as cn
 
 
 # ----------------------------
@@ -82,7 +81,7 @@ def create_cluster(
     threads_per_worker: int,
     worker_memory: int,
     *,
-    workspace: str = "wri-forest-research",
+    workspace: str = cn.Coiled_workspace,
     region: str = "us-east-1",
     spot_policy: str = "spot_with_fallback",
     use_best_zone: bool = True,
@@ -164,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--threads_per_worker", type=int, default=1, help="Number of threads per worker (default=1)")
 
     # New knobs
-    parser.add_argument("--workspace", type=str, default="wri-forest-research", help="Coiled workspace (replaces account)")
+    parser.add_argument("--workspace", type=str, default=cn.Coiled_workspace, help="Coiled workspace (replaces account)")
     parser.add_argument("--region", type=str, default="us-east-1", help="AWS region (default: us-east-1)")
     parser.add_argument("--spot-policy", type=str, default="spot_with_fallback",
                         choices=["on-demand", "spot", "spot_with_fallback"],

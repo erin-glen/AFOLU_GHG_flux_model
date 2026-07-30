@@ -337,13 +337,13 @@ def connect_to_Coiled_cluster(cluster_name, run_local):
     # If no local run flag, it tries to attach to the named cluster
     else:
         # Gets info on all Coiled clusters (including terminated ones)
-        all_clusters = coiled.list_clusters()
+        all_clusters = coiled.list_clusters(workspace=cn.Coiled_workspace)
 
         # Iterates through clusters and identifies the running one of the correct name to connect to
         for cluster in all_clusters:
             if cluster.get("name") == cluster_name and cluster.get("current_state", {}).get("state") == 'ready':
                 print(f"Connecting to running cluster '{cluster_name}'.")
-                cluster = coiled.Cluster(name=cluster_name)
+                cluster = coiled.Cluster(name=cluster_name, workspace=cn.Coiled_workspace)
                 client = Client(cluster)
                 return cluster, client, run_local
 
@@ -364,7 +364,7 @@ def get_client_from_cluster_type(cluster_type, cluster_name=None, workers=None, 
             idle_timeout="10 minutes",
             region="us-east-1",
             name=cluster_name,
-            workspace='wri-forest-research',
+            workspace=cn.Coiled_workspace,
             worker_cpu=cpu,
             worker_memory=memory
         )

@@ -306,11 +306,11 @@ def connect_to_cluster(
     wait_seconds = int(os.environ.get("AFOLU_CLUSTER_READY_WAIT_SECONDS", "0"))
     deadline = time.time() + wait_seconds
     while True:
-        all_clusters = coiled.list_clusters()
+        all_clusters = coiled.list_clusters(workspace=cn.Coiled_workspace)
         for info in all_clusters:
             if info.get("name") == cluster_name and info.get("current_state", {}).get("state") == "ready":
                 print(f"Connecting to running cluster '{cluster_name}'.")
-                cluster = coiled.Cluster(name=cluster_name, shutdown_on_close=False)
+                cluster = coiled.Cluster(name=cluster_name, workspace=cn.Coiled_workspace, shutdown_on_close=False)
                 client = Client(cluster)
                 upload_repo_source_to_dask(client)
                 return cluster, client, run_local
