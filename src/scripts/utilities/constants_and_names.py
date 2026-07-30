@@ -164,8 +164,10 @@ WDPA_zarr_path = (
     f"{contextual_layer_global_zarr_root}/WDPAv202511/"
     "20251229_fillValue_removed/wdpa_20251229.zarr"
 )
-# WDPA stores IUCN category-style codes; 0 is outside/no data.
-WDPA_codes = np.arange(0, 12, dtype=np.uint8)
+# WDPA stores IUCN category-style codes; 0 is outside/no data. Match the
+# vegetation zonal-statistics contract so valid codes such as 12 (Not
+# Applicable) and 13 (Not Assigned) are retained rather than silently dropped.
+WDPA_codes = np.arange(0, 17, dtype=np.uint8)
 
 KBA_pattern = "kba"
 KBA_zarr_path = (
@@ -203,7 +205,7 @@ starting_composite_primary_forest_codes = np.array([0, 1], dtype=np.uint8)
 river_basins_pattern = "river_basins"
 river_basins_zarr_path = (
     f"{contextual_layer_global_zarr_root}/river_basins/v2018/"
-    "20260213_fillValue_removed/river_basins_20260213.zarr"
+    "20260508_fillValue_removed/river_basins_20260508.zarr"
 )
 # River basins use 4-digit basin IDs in the global contextual zarr.
 river_basins_codes = np.arange(0, 10000, dtype=np.uint16)

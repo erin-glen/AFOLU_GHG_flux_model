@@ -253,7 +253,7 @@ def test_contextual_grouper_registry_for_requested_layers() -> None:
         "20251229_fillValue_removed/wdpa_20251229.zarr"
     )
     assert wdpa["dtype"] == np.uint8
-    assert wdpa["expected_groups"].tolist() == list(range(12))
+    assert wdpa["expected_groups"].tolist() == list(range(17))
 
     landmark = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["landmark"]
     assert landmark["name"] == "landmark"
@@ -264,10 +264,10 @@ def test_contextual_grouper_registry_for_requested_layers() -> None:
     assert landmark["expected_groups"].tolist() == [0, 1]
 
     primary = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS["primary_forest"]
-    assert primary["name"] == "primary_forest_2001"
+    assert primary["name"] == "starting_composite_primary_forest"
     assert primary["zarr_path"].endswith(
-        "/contextual_layer_global_zarr/IFL2000_tropical_primary_forest_2001/"
-        "20251114/ifl_primary_forest_merged_20251114.zarr"
+        "/LULUCF/starting_composite_primary_forest/2015/zarr/4000_pixels/"
+        "20260210/starting_composite_primary_forest.zarr"
     )
     assert primary["expected_groups"].tolist() == [0, 1]
 
@@ -283,7 +283,7 @@ def test_contextual_grouper_registry_for_requested_layers() -> None:
     assert river_basins["name"] == "river_basins"
     assert river_basins["zarr_path"].endswith(
         "/contextual_layer_global_zarr/river_basins/v2018/"
-        "20260213_fillValue_removed/river_basins_20260213.zarr"
+        "20260508_fillValue_removed/river_basins_20260508.zarr"
     )
     assert river_basins["dtype"] == np.uint16
     assert river_basins["expected_groups"].dtype == np.uint16
@@ -300,6 +300,50 @@ def test_contextual_grouper_registry_for_requested_layers() -> None:
     assert spec["dtype"] == np.uint8
     assert spec["expected_groups"].dtype == np.uint8
     assert spec["expected_groups"].tolist() == [0, 1, 2, 3, 4, 5, 6, 7]
+
+
+def test_contextual_expected_groups_cover_david_contracts() -> None:
+    groupers = organic_zonal.OPTIONAL_CONTEXTUAL_GROUPERS
+    assert groupers["wdpa"]["expected_groups"].tolist() == list(range(17))
+    assert groupers["landmark"]["expected_groups"].tolist() == [0, 1]
+    assert groupers["primary_forest"]["expected_groups"].tolist() == [0, 1]
+    assert groupers["kba"]["expected_groups"].tolist() == [0, 1]
+    assert groupers["drivers_of_loss"]["expected_groups"].tolist() == list(range(8))
+
+    # David's explicit watershed registry contains 231 codes and has a maximum
+    # of 8009. The organic-soils 0..9999 superset therefore cannot drop one of
+    # those registered basin IDs.
+    watershed_groups = groupers["river_basins"]["expected_groups"]
+    assert watershed_groups[0] == 0
+    assert watershed_groups[-1] == 9999
+    assert 8009 in watershed_groups
+
+
+def test_unexpected_group_count_tasks_detect_unlisted_values_within_mask() -> None:
+    grouper = xr.DataArray(
+        np.array([[0, 1, 12], [13, 16, 17]], dtype=np.uint8),
+        dims=("y", "x"),
+        name="wdpa",
+    )
+    where_mask = xr.DataArray(
+        np.array([[True, True, True], [True, True, False]]),
+        dims=("y", "x"),
+    )
+
+    task = organic_zonal.unexpected_group_count_tasks(
+        [grouper],
+        [np.arange(0, 17, dtype=np.uint8)],
+        where_mask,
+    )[0]
+
+    assert int(task.compute()) == 0
+
+    missing_12_to_16_task = organic_zonal.unexpected_group_count_tasks(
+        [grouper],
+        [np.arange(0, 12, dtype=np.uint8)],
+        where_mask,
+    )[0]
+    assert int(missing_12_to_16_task.compute()) == 3
 
 
 def test_finalize_interval_tile_outputs_preserves_optional_contextual_columns(tmp_path: Path) -> None:

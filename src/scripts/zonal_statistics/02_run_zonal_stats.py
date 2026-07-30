@@ -1343,6 +1343,30 @@ def resolve_combined_state_nodes(
     )
 
 
+def unexpected_group_count_tasks(
+    groupers: List[xr.DataArray],
+    expected_groups: List[np.ndarray],
+    where_mask: Optional[xr.DataArray],
+) -> List[xr.DataArray]:
+    """Return lazy pixel counts for grouper values absent from their registries."""
+    tasks = []
+    for grouper, group_values in zip(groupers, expected_groups, strict=True):
+        expected = np.asarray(group_values, dtype=grouper.dtype)
+        if expected.size == 0:
+            invalid = xr.ones_like(grouper, dtype=bool)
+        elif np.array_equal(
+            expected,
+            np.arange(int(expected[0]), int(expected[-1]) + 1, dtype=expected.dtype),
+        ):
+            invalid = (grouper < expected[0]) | (grouper > expected[-1])
+        else:
+            invalid = ~grouper.isin(expected)
+        if where_mask is not None:
+            invalid = invalid & where_mask
+        tasks.append(invalid.astype(np.uint64).sum())
+    return tasks
+
+
 def run_combined_state_reduce(
     *,
     selected_flux_arrays: List[xr.DataArray],
@@ -1378,15 +1402,39 @@ def run_combined_state_reduce(
         [int(len(gv)) for gv in all_expected_groups],
         where_mask is not None,
     )
+    unexpected_count_tasks = unexpected_group_count_tasks(
+        all_groupers,
+        all_expected_groups,
+        where_mask,
+    )
+
     with dask.annotate(label=reduce_label):
-        result = xarray_reduce(
+        result_lazy = xarray_reduce(
             cube_e,
             *all_groupers,
             func="sum",
             expected_groups=tuple(all_expected_groups),
             where=where_mask,
             **flox_sparse_reindex_kwargs(not no_sparse),
-        ).compute()
+        )
+        computed = dask.compute(result_lazy, *unexpected_count_tasks)
+    result = computed[0]
+    unexpected_group_counts = [int(np.asarray(value).item()) for value in computed[1:]]
+    unexpected = {
+        grouper.name or f"grouper_{index}": count
+        for index, (grouper, count) in enumerate(zip(all_groupers, unexpected_group_counts, strict=True))
+        if count > 0
+    }
+    if unexpected:
+        raise RuntimeError(
+            "Zonal reduction found grouper values outside expected_groups; refusing to write "
+            f"an incomplete result. label={reduce_label} unexpected_pixel_counts={unexpected}"
+        )
+    logger.info(
+        "Reduction category coverage check passed: label=%s groupers=%s",
+        reduce_label,
+        [g.name for g in all_groupers],
+    )
     logger.info("Reduction end: label=%s", reduce_label)
     flux_map = {FLUX_SPECS[k]["code"]: FLUX_SPECS[k]["label"] for k in selected_flux_keys}
     flux_map[2] = "area__ha"
