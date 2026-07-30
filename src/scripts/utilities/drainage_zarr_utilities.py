@@ -32,8 +32,12 @@ def global_grid_shape() -> tuple[int, int]:
 def global_coords() -> tuple[np.ndarray, np.ndarray, float]:
     res = pixel_resolution()
     height, width = global_grid_shape()
-    x = GLOBAL_WEST + res * (0.5 + np.arange(width, dtype=np.float32))
-    y = GLOBAL_NORTH - res * (0.5 + np.arange(height, dtype=np.float32))
+    # Global pixel-center coordinates must remain float64. At longitudes near
+    # +/-180 degrees, float32 cannot represent the 0.00025-degree grid spacing
+    # consistently and produces an apparent first-pixel step of
+    # 0.0002593994140625 degrees.
+    x = GLOBAL_WEST + res * (0.5 + np.arange(width, dtype=np.float64))
+    y = GLOBAL_NORTH - res * (0.5 + np.arange(height, dtype=np.float64))
     return x, y, res
 
 

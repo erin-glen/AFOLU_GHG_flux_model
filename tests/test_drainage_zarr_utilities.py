@@ -18,6 +18,20 @@ class _Logger:
 
 
 class DrainageZarrUtilitiesTests(unittest.TestCase):
+    def test_global_coords_use_canonical_float64_grid(self):
+        x, y, resolution = dzu.global_coords()
+
+        self.assertEqual(x.dtype, np.dtype("float64"))
+        self.assertEqual(y.dtype, np.dtype("float64"))
+        self.assertEqual(x.size, 1_440_000)
+        self.assertEqual(y.size, 720_000)
+        self.assertAlmostEqual(float(x[1] - x[0]), resolution, places=12)
+        self.assertAlmostEqual(float(y[0] - y[1]), resolution, places=12)
+        self.assertAlmostEqual(float(x[0]), -179.999875, places=12)
+        self.assertAlmostEqual(float(x[-1]), 179.999875, places=12)
+        self.assertAlmostEqual(float(y[0]), 89.999875, places=12)
+        self.assertAlmostEqual(float(y[-1]), -89.999875, places=12)
+
     def test_make_zarr_store_uses_zarr_v3_fsspec_store_for_s3(self):
         fake_fs = SimpleNamespace(async_impl=True, asynchronous=True)
 
