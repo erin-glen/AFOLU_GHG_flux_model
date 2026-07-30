@@ -1,0 +1,18 @@
+{
+  "bundle_name": "afolu-input-dataset-maps",
+  "bundle_version": "1.0.0",
+  "built_utc_date": "2026-07-13",
+  "source_repository": "AFOLU_GHG_flux_model",
+  "source_commit": "bec54bd2b712138d4901bec020a1d716061006ba",
+  "canonical_source": "src/scripts/postprocessing/visualization/create_input_dataset_maps.py",
+  "portable_changes": [
+    "Removed AFOLU repository imports and model_input resolution",
+    "Replaced model_input keys with eight explicit S3 sources",
+    "Added pinned environments, launchers, documentation, and a local smoke test"
+  ],
+  "example_model_output_version": "version_1_0_1",
+  "example_model_run": "ogh_mixed_f1_f15_f2_20260513",
+  "example_interval": "2021_2024",
+  "tested_python": "3.11.7"
+}
+

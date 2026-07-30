@@ -1,0 +1,163 @@
+{
+  "description": "Standalone eight-layer map export over a Central Kalimantan, Borneo AOI: six model inputs plus final state and total drained emissions for 2021-2024.",
+  "target": {
+    "crs": "EPSG:4326",
+    "bounds": [
+      112.0,
+      -3.0,
+      115.0,
+      -0.5
+    ],
+    "width": 1800,
+    "height": 1500
+  },
+  "prefix_output_order": true,
+  "write_aligned_geotiff": true,
+  "datasets": [
+    {
+      "name": "land_cover",
+      "title": "IPCC land cover (2024)",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/land_cover_ipcc/20250715/annual/2024/40000_pixels/{tile_id}__lc_ipcc.tif",
+      "kind": "categorical",
+      "resampling": "nearest",
+      "mosaic_method": "last",
+      "style": {
+        "colors": {
+          "0": "#00000000",
+          "1": "#2F6B3BFF",
+          "2": "#D7B85BFF",
+          "3": "#C75B4BFF",
+          "4": "#6CA6CDFF",
+          "5": "#A7C76FFF",
+          "6": "#B8AA91FF"
+        },
+        "unknown_color": "#7A7A7AFF",
+        "nodata_color": "#00000000"
+      }
+    },
+    {
+      "name": "organic_soil_probability",
+      "title": "OGH organic-soil probability (raw, unthresholded)",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/peat_mask/OGH/tiles_unthresholded/20260513/{tile_id}_ogh_unthresholded_mask.tif",
+      "kind": "continuous",
+      "resampling": "bilinear",
+      "mosaic_method": "last",
+      "source_nodata": 0,
+      "style": {
+        "cmap": "viridis",
+        "stretch": "linear",
+        "vmin": 0,
+        "vmax": 100,
+        "nodata_color": "#00000000"
+      }
+    },
+    {
+      "name": "osm_canal_distance",
+      "title": "Distance to OSM canals (m)",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_canals_density/distance/40000_pixels/20260513/{tile_id}__osm_canals_distance.tif",
+      "kind": "continuous",
+      "resampling": "bilinear",
+      "mosaic_method": "last",
+      "valid_min": 0,
+      "style": {
+        "cmap": "magma_r",
+        "stretch": "linear",
+        "vmin": 0,
+        "vmax": 1000,
+        "nodata_color": "#00000000"
+      }
+    },
+    {
+      "name": "osm_road_distance",
+      "title": "Distance to OSM roads (m)",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/osm_roads_density/distance/40000_pixels/20260513/{tile_id}__osm_roads_distance.tif",
+      "kind": "continuous",
+      "resampling": "bilinear",
+      "mosaic_method": "last",
+      "valid_min": 0,
+      "style": {
+        "cmap": "cividis_r",
+        "stretch": "linear",
+        "vmin": 0,
+        "vmax": 1000,
+        "nodata_color": "#00000000"
+      }
+    },
+    {
+      "name": "planted_forest_type",
+      "title": "Planted-forest type",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/sdpt/40000_pixels/20250531/{tile_id}__sdpt.tif",
+      "kind": "categorical",
+      "resampling": "nearest",
+      "mosaic_method": "last",
+      "respect_source_nodata": false,
+      "style": {
+        "colors": {
+          "0": "#F1EEE6FF",
+          "1": "#E88732FF",
+          "2": "#D95F8DFF",
+          "3": "#7651A8FF"
+        },
+        "unknown_color": "#00000000",
+        "nodata_color": "#00000000"
+      }
+    },
+    {
+      "name": "burned_area_2024",
+      "title": "Burned area (2024 raw input)",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/inputs/processed/fires/2024/{tile_id}_burned_area_final_2024.tif",
+      "kind": "categorical",
+      "resampling": "nearest",
+      "mosaic_method": "last",
+      "respect_source_nodata": false,
+      "style": {
+        "colors": {
+          "0": "#F3F0E8FF",
+          "1": "#D6402FFF"
+        },
+        "unknown_color": "#8E2A20FF",
+        "nodata_color": "#00000000"
+      }
+    },
+    {
+      "name": "final_state_code",
+      "title": "Final organic-soil state (2021-2024)",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_1_0_1/0_005deg_output_aggregation/combined_state_reclassified/ogh_mixed_f1_f15_f2_20260513/2021_2024/0_005deg_global__combined_state_reclassified_2021_2024.tif",
+      "kind": "categorical",
+      "resampling": "nearest",
+      "mosaic_method": "last",
+      "source_nodata": 255,
+      "style": {
+        "colors": {
+          "1": "#D7E8D0FF",
+          "2": "#E69F00FF",
+          "3": "#D55E00FF",
+          "4": "#7B3294FF"
+        },
+        "unknown_color": "#00000000",
+        "nodata_color": "#00000000"
+      }
+    },
+    {
+      "name": "total_drained_emissions",
+      "title": "Total drained emissions (Mg CO2e yr-1 per 0.005-degree pixel)",
+      "source": "s3://gfw2-data/climate/AFOLU_flux_model/organic_soils/outputs/version_1_0_1/0_005deg_output_aggregation/drained_total_Mg_CO2e_pixel_yr/ogh_mixed_f1_f15_f2_20260513/2021_2024/0_005deg_global__drained_total_Mg_CO2e_pixel_yr_2021_2024.tif",
+      "kind": "continuous",
+      "resampling": "bilinear",
+      "mosaic_method": "last",
+      "mask_values": [
+        0
+      ],
+      "valid_min": 0,
+      "style": {
+        "cmap": "magma",
+        "stretch": "asinh",
+        "percentiles": [
+          2,
+          99.5
+        ],
+        "nodata_color": "#00000000"
+      }
+    }
+  ]
+}
