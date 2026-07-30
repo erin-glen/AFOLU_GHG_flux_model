@@ -57,6 +57,16 @@ def _json_safe_scalar(value: Any) -> Any:
     return value
 
 
+def _json_safe(value: Any) -> Any:
+    """Recursively normalize metadata values for strict JSON manifests."""
+
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return _json_safe_scalar(value)
+
+
 def _array_metadata_snapshot(group: zarr.Group) -> dict[str, dict[str, Any]]:
     snapshot: dict[str, dict[str, Any]] = {}
     for name in sorted(group.array_keys()):
@@ -148,7 +158,7 @@ def _write_json(fs, path: str, payload: dict[str, Any]) -> None:
     if parent:
         fs.makedirs(parent, exist_ok=True)
     body = json.dumps(
-        payload,
+        _json_safe(payload),
         indent=2,
         sort_keys=True,
         default=_json_default,
