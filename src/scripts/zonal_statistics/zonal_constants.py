@@ -237,19 +237,27 @@ assert len(BURNED_STATE_CODE_TO_ID) <= (1 << COMBINED_STATE_BURNED_BITS), (
     "burned state registry exceeds 4-bit packed id capacity"
 )
 
+def _pack_combined_state_ids(drained_id: int, burned_id: int) -> int:
+    """Pack registry ids, including an explicitly absent component (id zero)."""
+
+    value = np.uint32(drained_id)
+    if drained_id:
+        value |= np.uint32(1 << COMBINED_STATE_HAS_DRAINED_BIT)
+    if burned_id:
+        value |= np.uint32(burned_id << COMBINED_STATE_BURNED_SHIFT)
+        value |= np.uint32(1 << COMBINED_STATE_HAS_BURNED_BIT)
+    return int(value)
+
+
+# Enumerate the packed id space directly. Calling ``pack_combined_state`` with
+# numeric drained code zero is ambiguous because the registered legacy code
+# ``"00000000"`` also converts to zero. That route therefore sets a drainage
+# id and omits valid burned-only values already present in production rasters.
 COMBINED_STATE_GROUP_VALUES = np.array(
     sorted(
-        {
-            0,
-            *[
-                int(pack_combined_state(
-                    np.array([[np.uint32(int(d_code))]], dtype=np.uint32),
-                    np.array([[np.uint32(int(b_code))]], dtype=np.uint32),
-                )[0, 0])
-                for d_code in ["0", *sorted(ALL_DRAINED_STATE_CODES)]
-                for b_code in ["0", *sorted(ALL_BURNED_STATE_CODES)]
-            ],
-        }
+        _pack_combined_state_ids(drained_id, burned_id)
+        for drained_id in [0, *DRAINED_STATE_ID_TO_CODE]
+        for burned_id in [0, *BURNED_STATE_ID_TO_CODE]
     ),
     dtype=np.uint32,
 )

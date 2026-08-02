@@ -36,6 +36,24 @@ def test_combined_state_group_values_cover_registry_outputs() -> None:
     assert set(np.unique(packed).tolist()).issubset(set(group_values.tolist()))
 
 
+def test_combined_state_group_values_cover_burned_only_production_states() -> None:
+    group_values = set(zc.COMBINED_STATE_GROUP_VALUES.tolist())
+    expected_count = (
+        (len(zc.DRAINED_STATE_ID_TO_CODE) + 1)
+        * (len(zc.BURNED_STATE_ID_TO_CODE) + 1)
+    )
+    assert len(group_values) == expected_count == 1791
+
+    burned_only_values = {
+        (burned_id << zc.COMBINED_STATE_BURNED_SHIFT)
+        | (1 << zc.COMBINED_STATE_HAS_BURNED_BIT)
+        for burned_id in zc.BURNED_STATE_ID_TO_CODE
+    }
+    assert burned_only_values.issubset(group_values)
+    # Observed in 19 valid pixels at 2006_2010 / 50N_070W.
+    assert 10240 in group_values
+
+
 def test_new_write_contracts_use_combined_state_names() -> None:
     assert "organic_soil" in cn.drainage_outputs_to_zarr
     assert cn.drainage_output_dtypes["organic_soil"] == "uint8"
