@@ -360,7 +360,11 @@ def _validate_repair(
             )
 
     with _fresh_read_store(zarr_path) as fresh_store:
-        group = zarr.open_group(store=fresh_store, mode="r")
+        group = zarr.open_group(
+            store=fresh_store,
+            mode="r",
+            use_consolidated=False,
+        )
         for name in COORDINATE_NAMES:
             array = group[name]
             if "_FillValue" in array.attrs:
@@ -370,7 +374,15 @@ def _validate_repair(
                 )
 
     with _fresh_read_store(zarr_path) as fresh_store:
-        group = zarr.open_group(store=fresh_store, mode="r")
+        # Compare the leaf array metadata on both sides.  Consolidating a
+        # store can legitimately refresh stale entries in the root metadata;
+        # comparing a stale consolidated before-view to an unconsolidated
+        # after-view would falsely report that data-array metadata changed.
+        group = zarr.open_group(
+            store=fresh_store,
+            mode="r",
+            use_consolidated=False,
+        )
         metadata_after = _array_metadata_snapshot(group)
     non_coordinate_metadata_after = {
         name: value for name, value in metadata_after.items() if name not in COORDINATE_NAMES
@@ -397,7 +409,13 @@ def _validate_repair(
 
 def inspect_or_repair(zarr_path: str, *, apply: bool, backup_path: str | None) -> dict[str, Any]:
     store = dzu.make_zarr_store(zarr_path, read_only=not apply)
-    group = zarr.open_group(store=store, mode="r+" if apply else "r")
+    # Snapshot leaf metadata rather than the optional consolidated copy.  The
+    # latter may be stale, and this command refreshes it as part of a repair.
+    group = zarr.open_group(
+        store=store,
+        mode="r+" if apply else "r",
+        use_consolidated=False,
+    )
     _validate_source_shape(group)
     metadata_before = _array_metadata_snapshot(group)
     layouts = _coordinate_layouts(group)

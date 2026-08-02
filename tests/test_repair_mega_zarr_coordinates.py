@@ -48,10 +48,24 @@ class RepairMegaZarrCoordinatesTests(unittest.TestCase):
                 dtype="uint32",
                 chunks=(1, 3, 4),
                 fill_value=0,
+                attributes={"_FillValue": 0, "units": "state_code"},
                 dimension_names=("year", "y", "x"),
             )
             group["combined_state"][:] = np.arange(12, dtype="uint32").reshape(1, 3, 4)
             zarr.consolidate_metadata(str(source))
+
+            # Reproduce production's stale root metadata: the consolidated
+            # copy still advertises _FillValue, while the actual leaf array
+            # metadata has already had it removed.
+            del group["combined_state"].attrs["_FillValue"]
+            consolidated_group = zarr.open_group(
+                str(source), mode="r", use_consolidated=True
+            )
+            unconsolidated_group = zarr.open_group(
+                str(source), mode="r", use_consolidated=False
+            )
+            self.assertIn("_FillValue", consolidated_group["combined_state"].attrs)
+            self.assertNotIn("_FillValue", unconsolidated_group["combined_state"].attrs)
 
             with (
                 patch.object(dzu, "global_grid_shape", return_value=(3, 4)),
@@ -87,6 +101,11 @@ class RepairMegaZarrCoordinatesTests(unittest.TestCase):
             repaired_group = zarr.open_group(str(source), mode="r")
             for coordinate in ("x", "y"):
                 self.assertNotIn("_FillValue", repaired_group[coordinate].attrs)
+            self.assertEqual(
+                repaired_group["combined_state"].attrs["units"],
+                "state_code",
+            )
+            self.assertNotIn("_FillValue", repaired_group["combined_state"].attrs)
 
 
 if __name__ == "__main__":
