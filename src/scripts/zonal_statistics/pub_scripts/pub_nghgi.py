@@ -188,17 +188,61 @@ def _fold_model_landuse(landuse: Optional[str]) -> Optional[str]:
 
 # ----------------------------- model side -----------------------------
 
-def _model_parquet_globs(spec: RunSpec, interval_folder: str) -> list[str]:
+def _model_parquet_globs(
+    spec: RunSpec,
+    interval_folder: str,
+    model_zonal_root: Optional[str] = None,
+) -> list[str]:
     """
     Candidate parquet globs for a run x interval, combined_state branch.
     """
-    base_prefix = build_output_parquet(
-        spec.model_version,
-        spec.run_name,
-        spec.run_date,
-        interval_folder,
-    ).rstrip("/")
+    if model_zonal_root:
+        normalized_root = model_zonal_root.replace("\\", "/").rstrip("/")
+        base_prefix = posixpath.join(normalized_root, interval_folder)
+    else:
+        base_prefix = build_output_parquet(
+            spec.model_version,
+            spec.run_name,
+            spec.run_date,
+            interval_folder,
+        ).rstrip("/")
     return [posixpath.join(base_prefix, "combined_state", "*.parquet")]
+
+
+def _validate_model_interval_end(
+    df: pd.DataFrame, interval_folder: str
+) -> None:
+    expected = int(interval_folder.rsplit("_", 1)[-1])
+    raw = df["interval_end"]
+    numeric = pd.to_numeric(raw, errors="coerce")
+    finite = pd.Series(
+        np.isfinite(numeric.to_numpy(dtype=float, na_value=np.nan)),
+        index=numeric.index,
+    )
+    invalid = numeric.isna() | ~finite
+    if invalid.any():
+        invalid_values = raw.loc[invalid].astype(str).drop_duplicates().tolist()
+        raise ValueError(
+            f"Model interval mismatch for {interval_folder}: invalid "
+            f"interval_end values={invalid_values}"
+        )
+
+    non_integral = numeric.mod(1).ne(0)
+    if non_integral.any():
+        invalid_values = numeric.loc[non_integral].drop_duplicates().tolist()
+        raise ValueError(
+            f"Model interval mismatch for {interval_folder}: non-integral "
+            f"interval_end values={invalid_values}"
+        )
+
+    observed = sorted(
+        numeric.astype(int).unique().tolist()
+    )
+    if observed != [expected]:
+        raise ValueError(
+            f"Model interval mismatch for {interval_folder}: "
+            f"expected interval_end={expected}, observed={observed}"
+        )
 
 
 def _model_country_landuse_for_interval(
@@ -206,6 +250,7 @@ def _model_country_landuse_for_interval(
     interval_folder: str,
     aws_region: Optional[str],
     adm0_lookup_csv: Optional[str],
+    model_zonal_root: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Run table_nghgi_comparison_subset_sql for a single (run, interval_folder)
@@ -213,15 +258,24 @@ def _model_country_landuse_for_interval(
         interval_end, gadm_adm0, country, iso3, land_use,
         drained_area_ha, undrained_area_ha, drained_on_site_co2_Mg_CO2_yr
 
-    Returns an empty DataFrame if the parquet tiles don't exist for that
-    interval (allows partial model runs to skip cleanly).
+    Canonical model runs may skip intervals that do not exist. An explicit
+    ``model_zonal_root`` is an exact corrected-run contract, so every requested
+    interval must exist and contain the endpoint encoded by its folder name.
     """
     con = duckdb.connect()
     try:
-        pa._ensure_httpfs(con, aws_region)
-        globs = _model_parquet_globs(spec, interval_folder)
+        globs = _model_parquet_globs(
+            spec, interval_folder, model_zonal_root=model_zonal_root
+        )
+        if any(path.startswith("s3://") for path in globs):
+            pa._ensure_httpfs(con, aws_region)
 
         if pa._count_globs(con, globs) == 0:
+            if model_zonal_root:
+                raise FileNotFoundError(
+                    f"Missing corrected model interval {interval_folder}: "
+                    f"no combined_state parquet files at {globs[0]}"
+                )
             print(
                 f"  [skip] {spec.label} {interval_folder}: no combined_state "
                 f"parquet files at {globs[0]}"
@@ -237,6 +291,9 @@ def _model_country_landuse_for_interval(
         df = con.execute(sql).df()
     finally:
         con.close()
+
+    if model_zonal_root:
+        _validate_model_interval_end(df, interval_folder)
 
     if df.empty:
         return df
@@ -271,6 +328,7 @@ def load_model_country_landuse(
     years: Sequence[int],
     aws_region: Optional[str],
     adm0_lookup_csv: Optional[str],
+    model_zonal_root: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     For each run x interval (derived from years), run the NGHGI-comparison SQL
@@ -283,7 +341,11 @@ def load_model_country_landuse(
         for start, end in pairs:
             interval_folder = f"{start}_{end}"
             df = _model_country_landuse_for_interval(
-                spec, interval_folder, aws_region, adm0_lookup_csv
+                spec,
+                interval_folder,
+                aws_region,
+                adm0_lookup_csv,
+                model_zonal_root=model_zonal_root,
             )
             if df.empty:
                 continue
@@ -1614,6 +1676,19 @@ def main(argv=None):
         ),
     )
     p.add_argument(
+        "--model-zonal-root",
+        "--model_zonal_root",
+        dest="model_zonal_root",
+        default=None,
+        help=(
+            "Optional run root containing "
+            "<interval>/combined_state/*.parquet. Use this for an isolated "
+            "local or alternate-prefix corrected run instead of the canonical "
+            "S3 location derived from --run. Exactly one --run is allowed "
+            "when this option is set."
+        ),
+    )
+    p.add_argument(
         "--nghgi_dir",
         default=DEFAULT_NGHGI_DIR,
         help=(
@@ -1676,6 +1751,9 @@ def main(argv=None):
 
     OUT_DIR_ROOT = args.out_dir_root
 
+    if args.validate_jrc and args.model_zonal_root:
+        p.error("--model-zonal-root cannot be used with --validate_jrc")
+
     if args.validate_jrc:
         drop_label = os.path.basename(os.path.normpath(args.jrc_dir)) or "jrc"
         out_dir = _join(OUT_DIR_ROOT, "validation", drop_label)
@@ -1692,6 +1770,8 @@ def main(argv=None):
 
     years = sorted({int(y) for y in args.years})
     run_specs = _parse_run_specs(args.run)
+    if args.model_zonal_root and len(run_specs) != 1:
+        p.error("--model-zonal-root requires exactly one --run")
     interval_pairs = build_interval_pairs(years)
 
     primary = run_specs[0]
@@ -1701,13 +1781,19 @@ def main(argv=None):
     print("  intervals:", [f"{s}_{e}" for s, e in interval_pairs])
     for spec in run_specs:
         print(f"  model: {spec.label} (run={spec.run_name} v={spec.model_version} date={spec.run_date})")
+    if args.model_zonal_root:
+        print("  model zonal root:", args.model_zonal_root)
     print("  nghgi_dir:", args.nghgi_dir)
     print("  output dir:", OUT_DIR)
 
     # --- Model side ---
     print("\n[1/3] Reading model zonal stats")
     model_df = load_model_country_landuse(
-        run_specs, years, args.aws_region, args.adm0_lookup_csv
+        run_specs,
+        years,
+        args.aws_region,
+        args.adm0_lookup_csv,
+        model_zonal_root=args.model_zonal_root,
     )
     if model_df.empty:
         print("  No model rows found for any (run, interval). Aborting.")

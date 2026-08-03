@@ -351,6 +351,7 @@ This mode skips the model side and does not require `--years` or `--run`.
 | --- | --- |
 | `--years 2024 [2015 ...]` | Inventory end years to compare. Required unless `--validate_jrc` is set. |
 | `--run "run_name=model_version:run_date|Label"` | Model run spec. May be repeated. Required unless `--validate_jrc` is set. |
+| `--model-zonal-root <path>` | Optional isolated run root containing `<interval>/combined_state/*.parquet`; requires exactly one `--run`, requires every requested interval with a matching embedded endpoint, and bypasses the canonical S3 input location. It cannot be combined with `--validate_jrc`. |
 | `--nghgi_dir <path>` | Directory containing the two compiled raw NGHGI CSVs. |
 | `--jrc_dir <path>` | Directory containing `AnnexI_2026/` and optional `BTR1_2024_Table3D.xlsx`. |
 | `--no_jrc` | Disable JRC replacement and run raw-only. |
