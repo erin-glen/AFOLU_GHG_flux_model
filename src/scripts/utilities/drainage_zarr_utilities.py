@@ -133,12 +133,15 @@ def initialize_global_mega_zarr(
             "model": "organic_soils_drainage",
             "interval_type": interval_type,
             "chunk_size_pixels": chunk_size_pixels,
+            "run_status": "initialized",
         },
     )
 
     ds.to_zarr(
         store=store,
-        mode="w",
+        # Creation must never erase an existing run. Repairs use the separate
+        # update-existing path and write only requested regions.
+        mode="w-",
         compute=False,
         zarr_format=3,
     )
@@ -150,6 +153,22 @@ def initialize_global_mega_zarr(
             del arr.attrs["_FillValue"]
 
     logger.info("Initialized mega-zarr with %d datasets", len(outputs))
+
+
+def set_mega_zarr_run_status(
+    zarr_path: str,
+    status: str,
+    **metadata,
+) -> None:
+    """Record whether a newly-created model store is safe for downstream use."""
+
+    if status not in {"initialized", "running", "complete", "failed"}:
+        raise ValueError(f"Unsupported mega-zarr run status: {status!r}")
+    store = make_zarr_store(zarr_path)
+    group = zarr.open_group(store=store, mode="r+")
+    group.attrs["run_status"] = status
+    for key, value in metadata.items():
+        group.attrs[key] = value
 
 
 def populate_mega_zarr(

@@ -20,10 +20,12 @@ assert SPEC is not None and SPEC.loader is not None
 SPEC.loader.exec_module(drainage_model)
 
 
-def _drained_soil_for_threshold(threshold_m, **float_overrides):
+def _drained_soil_for_threshold(threshold_m, land_cover=None, **float_overrides):
+    if land_cover is None:
+        land_cover = cn.ipcc_codes["forest"]
     layers = {
         "peat": np.array([[1]], dtype=np.uint8),
-        "land_cover": np.array([[cn.ipcc_codes["forest"]]], dtype=np.uint8),
+        "land_cover": np.array([[land_cover]], dtype=np.uint8),
         "planted_forest_type": np.array([[0]], dtype=np.uint8),
         "extraction": np.array([[0]], dtype=np.uint8),
         "mangrove_extent": np.array([[0]], dtype=np.uint8),
@@ -75,6 +77,46 @@ def test_dadap_drains_independent_of_distance_threshold():
 def test_engert_drains_independent_of_distance_threshold():
     assert _drained_soil_for_threshold(250, engert=1.0) == 2
     assert _drained_soil_for_threshold(750, engert=1.0) == 2
+
+
+def test_land_cover_nodata_cannot_be_routed_to_otherland():
+    assert _drained_soil_for_threshold(500, land_cover=0, osm_roads=100.0) == 0
+
+
+def test_pipeline_rejects_land_cover_nodata_on_organic_soil():
+    layers = {
+        "peat": np.array([[1, 0]], dtype=np.uint8),
+        "land_cover": np.array([[0, 0]], dtype=np.uint8),
+    }
+
+    with pytest.raises(
+        drainage_model.uu.RequiredInputRasterError,
+        match="Refusing to route unknown class values to Otherland",
+    ):
+        drainage_model.validate_land_cover_on_organic_soil(
+            layers,
+            tile_id="00N_110E",
+            bounds_string="test-window",
+            iv_start=2011,
+            iv_end=2015,
+        )
+
+
+def test_pipeline_rejects_unconfigured_climate_domain_source_code():
+    layers = {
+        "climate_domain": np.array([[1, 4]], dtype=np.int16),
+        "land_cover": np.array([[0, cn.ipcc_codes["forest"]]], dtype=np.uint8),
+    }
+
+    with pytest.raises(
+        drainage_model.uu.RequiredInputRasterError,
+        match="outside its configured legend",
+    ):
+        drainage_model.validate_climate_domain_source_codes(
+            layers,
+            tile_id="00N_110E",
+            bounds_string="test-window",
+        )
 
 
 def test_exported_organic_soil_is_binary_peat_presence():

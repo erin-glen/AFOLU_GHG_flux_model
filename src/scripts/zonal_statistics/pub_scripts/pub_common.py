@@ -562,6 +562,39 @@ def aggregate_landuse(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
     out["LandUse"] = pd.Categorical(out["LandUse"], totals, ordered=True)
     return out.sort_values(["LandUse", "Climate"])
 
+
+def merge_burned_drained_other(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """Combine the generic burned ``Drained`` stratum with ``Drained Other``.
+
+    The publication groups the residual drained burned-area classes together so
+    Figure 10b has the three interpretable strata used in the prior submission:
+    crop/plantation drainage, other drainage, and undrained. Climate-specific
+    values are summed, so the transformation preserves every climate total.
+    """
+    required = {"LandUse", "Climate", value_col}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(
+            "Burned land-use merge is missing columns: " + ", ".join(sorted(missing))
+        )
+
+    out = df.loc[:, ["LandUse", "Climate", value_col]].copy()
+    out["LandUse"] = out["LandUse"].astype(str).replace(
+        {"Drained": "Drained Other"}
+    )
+    out = (
+        out.groupby(["LandUse", "Climate"], as_index=False, observed=False)[value_col]
+        .sum()
+    )
+    totals = (
+        out.groupby("LandUse", observed=False)[value_col]
+        .sum()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
+    out["LandUse"] = pd.Categorical(out["LandUse"], totals, ordered=True)
+    return out.sort_values(["LandUse", "Climate"])
+
 # ----------------------------- Plot helpers -------------------------------
 
 def stacked_column_by_category(
@@ -1811,3 +1844,31 @@ def sql_country_emissions_vs_area_avg(n_periods: int, with_lookup: bool) -> str:
     WHERE a.avg_drained_ha IS NOT NULL AND a.avg_drained_ha > 0
     ORDER BY total_avg_GtCO2e_per_yr DESC;
     """
+def save_publication_figure(*args, **kwargs):
+    """Save PNGs unchanged or strict final-size TIFFs via the offline helper."""
+
+    from src.scripts.zonal_statistics.pub_scripts.publication_figure_export import (
+        save_publication_figure as implementation,
+    )
+
+    return implementation(*args, **kwargs)
+
+
+def publication_figure_validation_issues(*args, **kwargs):
+    """Return artist-level publication issues from the offline export helper."""
+
+    from src.scripts.zonal_statistics.pub_scripts.publication_figure_export import (
+        publication_figure_validation_issues as implementation,
+    )
+
+    return implementation(*args, **kwargs)
+
+
+def validate_publication_figure(*args, **kwargs):
+    """Validate artist-level publication requirements via the offline helper."""
+
+    from src.scripts.zonal_statistics.pub_scripts.publication_figure_export import (
+        validate_publication_figure as implementation,
+    )
+
+    return implementation(*args, **kwargs)

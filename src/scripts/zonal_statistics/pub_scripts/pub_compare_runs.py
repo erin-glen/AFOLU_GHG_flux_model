@@ -14,6 +14,10 @@ Arguments mirror ``pub_assets`` conventions:
   separator; e.g. ``--run "gfw_standard_model_500m=0_9_7:20251006|GFW 500 m"``.
 * ``--aws_region`` – optional AWS region for S3 access (mirrors
   ``pub_assets`` default behaviour).
+* ``--baseline-run-name`` – optional replacement for the canonical OGH
+  baseline run name embedded in the comparison definitions. This permits an
+  isolated corrected rerun to occupy the baseline slot without changing the
+  default comparison contract.
 * ``--data-only`` – skip figure generation and export CSV data only.
 * ``--flag-abs-mha`` – absolute spread threshold (Mha) for FLAGging countries
   in the disagreement summary (default 0.1 = 100,000 ha).
@@ -325,13 +329,16 @@ METRIC_SPECS: Mapping[str, MetricSpec] = {
 }
 
 
+DEFAULT_BASELINE_RUN_NAME = "ogh_mixed_f1_f15_f2_20260513"
+
+
 COMPARISONS: Sequence[ComparisonSpec] = (
     ComparisonSpec(
         key="ogh_distance",
         label="OGH Sensitivity (Distance Threshold (meters))",
         run_names=(
             "ogh_sensitivity_250m",
-            "ogh_mixed_f1_f15_f2_20260513",
+            DEFAULT_BASELINE_RUN_NAME,
             "ogh_sensitivity_750m",
         ),
         # summary CSV has drained area + drained + total; figure uses total stack
@@ -341,7 +348,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         key="inventory_source",
         label="Inventory Input Source Comparison",
         run_names=(
-            "ogh_mixed_f1_f15_f2_20260513",
+            DEFAULT_BASELINE_RUN_NAME,
             "gfw_standard_model_500m",
             "gpd_standard_model_500m",
         ),
@@ -351,7 +358,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         key="ogh_sensitivity_range",
         label="OGH Sensitivity (High/Low Emissions)",
         # Low – Baseline – High so baseline is always in the middle
-        run_names=("ogh_sensitivity_low", "ogh_mixed_f1_f15_f2_20260513", "ogh_sensitivity_high"),
+        run_names=("ogh_sensitivity_low", DEFAULT_BASELINE_RUN_NAME, "ogh_sensitivity_high"),
         metric_keys=("drained_emissions", "burned_emissions", "total_emissions"),
     ),
     ComparisonSpec(
@@ -359,7 +366,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         label="OGH Sensitivity (Mapped Area Threshold Only)",
         run_names=(
             "ogh_sensitivity_area_low",
-            "ogh_mixed_f1_f15_f2_20260513",
+            DEFAULT_BASELINE_RUN_NAME,
             "ogh_sensitivity_area_high",
         ),
         metric_keys=("peat_drained_area", "drained_emissions", "burned_emissions", "total_emissions"),
@@ -369,7 +376,7 @@ COMPARISONS: Sequence[ComparisonSpec] = (
         label="OGH Sensitivity (Emission Factor Only)",
         run_names=(
             "ogh_sensitivity_ef_low",
-            "ogh_mixed_f1_f15_f2_20260513",
+            DEFAULT_BASELINE_RUN_NAME,
             "ogh_sensitivity_ef_high",
         ),
         metric_keys=("drained_emissions", "burned_emissions", "total_emissions"),
@@ -377,12 +384,35 @@ COMPARISONS: Sequence[ComparisonSpec] = (
 )
 
 
+def _comparisons_for_baseline(baseline_run_name: str) -> tuple[ComparisonSpec, ...]:
+    """Return comparison specs with ``baseline_run_name`` in the OGH slot."""
+
+    baseline_run_name = baseline_run_name.strip()
+    if not baseline_run_name:
+        raise ValueError("baseline_run_name must be non-empty")
+    if baseline_run_name == DEFAULT_BASELINE_RUN_NAME:
+        return tuple(COMPARISONS)
+    return tuple(
+        ComparisonSpec(
+            key=comp.key,
+            label=comp.label,
+            run_names=tuple(
+                baseline_run_name if run_name == DEFAULT_BASELINE_RUN_NAME else run_name
+                for run_name in comp.run_names
+            ),
+            metric_keys=comp.metric_keys,
+        )
+        for comp in COMPARISONS
+    )
+
+
 def _partition_comparisons(
     run_specs: Mapping[str, RunSpec],
+    comparisons: Sequence[ComparisonSpec] = COMPARISONS,
 ) -> tuple[list[ComparisonSpec], Mapping[str, tuple[str, ...]]]:
     active: list[ComparisonSpec] = []
     missing: dict[str, tuple[str, ...]] = {}
-    for comp in COMPARISONS:
+    for comp in comparisons:
         missing_runs = tuple(run for run in comp.run_names if run not in run_specs)
         if missing_runs:
             missing[comp.key] = missing_runs
@@ -1653,6 +1683,14 @@ def main(argv: Sequence[str] | None = None):
         ),
     )
     parser.add_argument(
+        "--baseline-run-name",
+        default=DEFAULT_BASELINE_RUN_NAME,
+        help=(
+            "Run name to use in the OGH baseline slot for every comparison "
+            f"(default: {DEFAULT_BASELINE_RUN_NAME})."
+        ),
+    )
+    parser.add_argument(
         "--inventory-label",
         action="append",
         help=(
@@ -1748,7 +1786,11 @@ def main(argv: Sequence[str] | None = None):
                 print(f"[chunk_stats] Auto-discovered chunk_stats for {run_name}: {guessed}")
 
     out_dir = _comparison_out_dir(run_specs)
-    active_comparisons, skipped_comparisons = _partition_comparisons(run_specs)
+    comparison_specs = _comparisons_for_baseline(args.baseline_run_name)
+    active_comparisons, skipped_comparisons = _partition_comparisons(
+        run_specs,
+        comparison_specs,
+    )
     if skipped_comparisons:
         for key, missing_runs in sorted(skipped_comparisons.items()):
             missing_list = ", ".join(missing_runs)

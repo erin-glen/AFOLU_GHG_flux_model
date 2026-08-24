@@ -242,6 +242,14 @@ def _calculate_drainage_and_emissions_numba(
             # pixel values
             peat = peat_block[row, col]
             land_cover = land_cover_block[row, col]
+            valid_land_cover = land_cover in (
+                forest_code,
+                cropland_code,
+                settlement_code,
+                wetland_code,
+                grassland_code,
+                otherland_code,
+            )
             planted_forest_type = planted_forest_type_block[row, col]
             dadap = dadap_block[row, col]
             osm_roads = osm_roads_block[row, col]
@@ -288,7 +296,7 @@ def _calculate_drainage_and_emissions_numba(
             drained = False
 
             # A) Drainage classification ----------------------------------
-            if peat > 0:
+            if peat > 0 and valid_land_cover:
                 node = nu.accrete_node(node, 1)
                 if (
                     dadap > 0 and dadap <= drainage_distance_threshold_m
@@ -368,11 +376,17 @@ def _calculate_drainage_and_emissions_numba(
                     elif land_cover == wetland_code:
                         emission_node = nu.accrete_node(category_node, 7)
                         key = "boreal_wetland"
-                    else:
+                    elif land_cover == otherland_code:
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "boreal_otherland"
+                    else:
+                        missing = True
 
                     vals, missing = lookup_efs(key, drainage_table, coastal_code)
+                    if missing:
+                        raise ValueError(
+                            "Missing drainage emission factor for boreal route"
+                        )
 
                 # TEMPERATE -----------------------------------------------
                 elif ecozone == temperate_code:
@@ -409,11 +423,17 @@ def _calculate_drainage_and_emissions_numba(
                     elif land_cover == wetland_code:
                         emission_node = nu.accrete_node(category_node, 7)
                         key = "temperate_wetland"
-                    else:
+                    elif land_cover == otherland_code:
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "temperate_otherland"
+                    else:
+                        missing = True
 
                     vals, missing = lookup_efs(key, drainage_table, coastal_code)
+                    if missing:
+                        raise ValueError(
+                            "Missing drainage emission factor for temperate route"
+                        )
 
                 # TROPICAL -------------------------------------------------
                 elif ecozone == tropical_code:
@@ -456,11 +476,17 @@ def _calculate_drainage_and_emissions_numba(
                     elif land_cover == wetland_code:
                         emission_node = nu.accrete_node(category_node, 7)
                         key = "tropical_wetland"
-                    else:
+                    elif land_cover == otherland_code:
                         emission_node = nu.accrete_node(category_node, 8)
                         key = "tropical_otherland"
+                    else:
+                        missing = True
 
                     vals, missing = lookup_efs(key, drainage_table, coastal_code)
+                    if missing:
+                        raise ValueError(
+                            "Missing drainage emission factor for tropical route"
+                        )
 
                 else:
                     if coastal_code:
@@ -582,6 +608,8 @@ def _calculate_drainage_and_emissions_numba(
                         burned_emission_node = nu.accrete_node(burned_emission_node, 4)
 
                     bvals, bmissing = lookup_befs(bkey, burned_table)
+                    if bmissing:
+                        raise ValueError("Missing burned-area emission factor")
                     gef_co2 = bvals[0]
                     gef_co = bvals[1]
                     gef_ch4 = bvals[2]
@@ -706,6 +734,60 @@ def binarize_extraction_layer(layers: dict):
         layers["extraction"] = (layers["extraction"] > 0).astype(np.uint8)
 
 
+def validate_land_cover_on_organic_soil(
+    layers: dict,
+    *,
+    tile_id: str,
+    bounds_string: str,
+    iv_start: int,
+    iv_end: int,
+) -> None:
+    """Reject organic-soil pixels without an explicit IPCC land-use class."""
+
+    peat = layers["peat"]
+    land_cover = layers["land_cover"]
+    valid_codes = np.asarray(sorted(cn.ipcc_codes.values()), dtype=np.uint8)
+    invalid_on_peat = (peat > 0) & ~np.isin(land_cover, valid_codes)
+    invalid_count = int(np.count_nonzero(invalid_on_peat))
+    if not invalid_count:
+        return
+    invalid_values = np.unique(land_cover[invalid_on_peat]).tolist()
+    raise uu.RequiredInputRasterError(
+        "Land cover is missing or invalid on "
+        f"{invalid_count} organic-soil pixels in {tile_id} {bounds_string} "
+        f"for {iv_start}-{iv_end}; values={invalid_values}. Refusing to route "
+        "unknown class values to Otherland."
+    )
+
+
+def validate_climate_domain_source_codes(
+    layers: dict,
+    *,
+    tile_id: str,
+    bounds_string: str,
+) -> None:
+    """Reject source climate-domain codes outside the configured legend."""
+
+    climate = layers["climate_domain"]
+    land_cover = layers["land_cover"]
+    valid_codes = np.asarray(sorted(cn.climate_domain_remap), dtype=np.int16)
+    valid_land_cover_codes = np.asarray(
+        sorted(cn.ipcc_codes.values()),
+        dtype=np.uint8,
+    )
+    modeled_pixels = np.isin(land_cover, valid_land_cover_codes)
+    invalid = modeled_pixels & ~np.isin(climate, valid_codes)
+    invalid_count = int(np.count_nonzero(invalid))
+    if not invalid_count:
+        return
+    invalid_values = np.unique(climate[invalid]).tolist()
+    raise uu.RequiredInputRasterError(
+        "Climate-domain source contains "
+        f"{invalid_count} modeled pixels outside its configured legend in {tile_id} "
+        f"{bounds_string}; values={invalid_values}."
+    )
+
+
 # ----------------------------------------------------------------------
 # per‑chunk wrapper
 # ----------------------------------------------------------------------
@@ -726,6 +808,7 @@ def calculate_and_upload_drainage(
     outputs_to_zarr: Optional[list[str]] = None,
     interval_end_years: Optional[list[int]] = None,
     run_date: Optional[str] = None,
+    required_layers: Optional[set[str]] = None,
     drainage_distance_threshold_m: float = DEFAULT_DRAINAGE_DISTANCE_THRESHOLD_M,
 ):
     """Process a single chunk for a given interval.
@@ -770,6 +853,10 @@ def calculate_and_upload_drainage(
     run_date : str, optional
         Date string (YYYYMMDD) used in raster output paths. When ``None``,
         falls back to ``cn.today_date``.
+    required_layers : set[str], optional
+        Input layers that must be readable with the exact expected window
+        shape. The driver always requires land cover and climate in the model
+        domain, and requires peat where preflight found a stored peat tile.
     drainage_distance_threshold_m : float, optional
         Distance threshold, in meters, for Dadap canals, OSM canals, OSM roads,
         and GRIP roads. Must be positive and less than 1000 m for the current
@@ -784,6 +871,11 @@ def calculate_and_upload_drainage(
     tid = uu.xy_to_tile_id(bounds[0], bounds[3])
     chunk_px = uu.calc_chunk_length_pixels(bounds)
     chunk_stats = []
+    required_layers = set(
+        required_layers
+        if required_layers is not None
+        else {"land_cover", "climate_domain", "peat"}
+    )
 
     lu.print_and_log(
         f"Processing {bstr} {iv_start}-{iv_end} using land cover {closing_year}",
@@ -813,6 +905,11 @@ def calculate_and_upload_drainage(
         is_final,
         logger,
     )
+    lu.print_and_log(
+        f"Required input layers: {sorted(required_layers)}",
+        is_final,
+        logger,
+    )
 
     if not uu.check_for_tile(dwn, is_final, logger):
         return f"Skipped {bstr} (tile absent)", chunk_stats
@@ -823,7 +920,12 @@ def calculate_and_upload_drainage(
 
     # download chunk windows in parallel
     futs = uu.queue_chunk_downloads(
-        bounds, dwn, chunk_px, logger, is_final=is_final
+        bounds,
+        dwn,
+        chunk_px,
+        logger,
+        is_final=is_final,
+        required_layers=required_layers,
     )
     layers = {}
     for fut in concurrent.futures.as_completed(futs):
@@ -858,6 +960,11 @@ def calculate_and_upload_drainage(
     # Done before peat thresholding so per-biome thresholds can use
     # the remapped ecozone codes.
     if "climate_domain" in layers:
+        validate_climate_domain_source_codes(
+            layers,
+            tile_id=tid,
+            bounds_string=bstr,
+        )
         cd = layers["climate_domain"].astype(np.int16, copy=False)
         remapped = np.zeros_like(cd, dtype=np.int16)
         for src_val, dst_val in cn.climate_domain_remap.items():
@@ -876,6 +983,14 @@ def calculate_and_upload_drainage(
                 layers["peat"] = binary_peat
             else:
                 layers["peat"] = (peat_layer >= peat_threshold).astype(np.uint8)
+
+    validate_land_cover_on_organic_soil(
+        layers,
+        tile_id=tid,
+        bounds_string=bstr,
+        iv_start=iv_start,
+        iv_end=iv_end,
+    )
 
     binarize_extraction_layer(layers)
 
@@ -1019,6 +1134,7 @@ def calculate_and_upload_drainage(
         chunk_px,
         is_final,
         logger,
+        required=True,
     )[0]
 
     if mega_zarr_path and outputs_to_zarr:
@@ -1044,20 +1160,19 @@ def calculate_and_upload_drainage(
             interval_years = interval_end_years or [iv_end]
             try:
                 year_index = interval_years.index(iv_end)
-            except ValueError:
-                lu.print_and_log(
-                    f"Interval end year {iv_end} missing from zarr year index list.",
-                    is_final,
-                    logger,
-                )
-            else:
-                zu.populate_mega_zarr(
-                    mega_zarr_path,
-                    zarr_outputs,
-                    outputs_to_zarr,
-                    bounds,
-                    year_index,
-                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"Interval end year {iv_end} is missing from zarr year "
+                    f"index {interval_years}; refusing to write rasters and "
+                    "MegaZarr from divergent interval selections."
+                ) from exc
+            zu.populate_mega_zarr(
+                mega_zarr_path,
+                zarr_outputs,
+                outputs_to_zarr,
+                bounds,
+                year_index,
+            )
 
     # stats for outputs, with explicit layer categorization
     drainage_classification_layers = ["organic_soil", "drained_state", "combined_state"]
@@ -1139,7 +1254,9 @@ def calculate_and_upload_drainage(
             logger,
         )
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
-            ex.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks)
+            # Consume the iterator so worker exceptions propagate and a failed
+            # upload cannot be reported as a successful model chunk.
+            list(ex.map(lambda args: uu.upload_raster_to_s3(*args), upload_tasks))
         lu.print_and_log(
             f"Uploads completed for {bstr} in {tid} using {cn.outputs_path}: {uu.timestr()}",
             is_final,
@@ -1155,38 +1272,111 @@ def calculate_and_upload_drainage(
 
 
 def compute_intervals(start_year, end_year, interval_type, all_five_year_periods):
-    """Return list of interval tuples and normalized settings."""
+    """Return only inventory intervals backed by complete land-cover inputs."""
+    if interval_type not in {cn.intervals_annual, cn.intervals_five_year}:
+        raise ValueError(
+            f"Unsupported interval_type {interval_type!r}; expected "
+            f"{cn.intervals_annual!r} or {cn.intervals_five_year!r}."
+        )
+
+    canonical = list(cn.five_year_inventory_periods)
     if all_five_year_periods:
         interval_type = cn.intervals_five_year
-        start_year = cn.five_year_inventory_periods[0][0]
-        end_year = cn.five_year_inventory_periods[-1][1]
-    else:
-        start_year = start_year or cn.annual_land_cover_start_year
-        if end_year is None:
-            if interval_type == cn.intervals_five_year:
-                end_year = start_year + 4
-            else:
-                end_year = start_year
-        end_year = min(end_year, cn.five_year_inventory_periods[-1][1])
-        if (
-            interval_type == cn.intervals_annual
-            and start_year < cn.annual_land_cover_start_year
-        ):
-            start_year = cn.annual_land_cover_start_year
-        if end_year < start_year:
+        return (
+            canonical,
+            canonical[0][0],
+            canonical[-1][1],
+            interval_type,
+        )
+
+    if interval_type == cn.intervals_annual:
+        if start_year is None and end_year is None:
+            start_year = end_year = cn.annual_land_cover_years[-1]
+        elif start_year is None:
+            start_year = end_year
+        elif end_year is None:
             end_year = start_year
+        start_year = int(start_year)
+        end_year = int(end_year)
+        if end_year < start_year:
+            raise ValueError("end_year must be greater than or equal to start_year.")
+        requested_years = list(range(start_year, end_year + 1))
+        unsupported = sorted(set(requested_years) - set(cn.annual_land_cover_years))
+        if unsupported:
+            raise ValueError(
+                "Annual model periods lack complete global land-cover coverage "
+                f"for years {unsupported}. Supported annual years are "
+                f"{cn.annual_land_cover_years}."
+            )
+        return (
+            [(year, year) for year in requested_years],
+            start_year,
+            end_year,
+            interval_type,
+        )
 
-    if interval_type == cn.intervals_five_year:
-        # Snap a 2019 start year to the final interval (2020–2024)
-        if start_year == 2019 and end_year >= 2024:
-            start_year = 2020
-        intervals = [
-            (y, min(y + 4, end_year)) for y in range(start_year, end_year + 1, 5)
-        ]
+    if start_year is None and end_year is None:
+        selected = [canonical[-1]]
+    elif start_year is None:
+        selected = [period for period in canonical if period[1] == int(end_year)]
+    elif end_year is None:
+        selected = [period for period in canonical if period[0] == int(start_year)]
     else:
-        intervals = [(y, y) for y in range(start_year, end_year + 1)]
+        start_year = int(start_year)
+        end_year = int(end_year)
+        selected = [
+            period
+            for period in canonical
+            if period[0] >= start_year and period[1] <= end_year
+        ]
 
-    return intervals, start_year, end_year, interval_type
+    if not selected:
+        raise ValueError(
+            "Five-year runs must select canonical inventory-period boundaries: "
+            f"{canonical}."
+        )
+    normalized_start = selected[0][0]
+    normalized_end = selected[-1][1]
+    if start_year is not None and int(start_year) != normalized_start:
+        raise ValueError(
+            "start_year is not a canonical inventory-period boundary; "
+            f"expected one of {[period[0] for period in canonical]}."
+        )
+    if end_year is not None and int(end_year) != normalized_end:
+        raise ValueError(
+            "end_year is not a canonical inventory-period boundary; "
+            f"expected one of {[period[1] for period in canonical]}."
+        )
+    return selected, normalized_start, normalized_end, interval_type
+
+
+def normalize_zarr_write_options(
+    *,
+    no_upload: bool,
+    create_zarr: bool,
+    update_existing_zarr: bool,
+    mega_zarr_path: Optional[str],
+) -> bool:
+    """Validate write intent and return the normalized update flag."""
+
+    if create_zarr and update_existing_zarr:
+        raise ValueError(
+            "--create_zarr and --update_existing_zarr are mutually exclusive. "
+            "Use --create_zarr only for new global stores, and "
+            "--update_existing_zarr for partial repairs."
+        )
+    if mega_zarr_path and create_zarr:
+        raise ValueError(
+            "--mega_zarr_path cannot be combined with --create_zarr because "
+            "creation always targets a new, automatically-derived store."
+        )
+    normalized_update = bool(update_existing_zarr or mega_zarr_path)
+    if no_upload and (create_zarr or normalized_update):
+        raise ValueError(
+            "--no_upload forbids all remote writes and cannot be combined with "
+            "--create_zarr, --update_existing_zarr, or --mega_zarr_path."
+        )
+    return normalized_update
 
 
 def parse_optional_float(value: Optional[str]) -> Optional[float]:
@@ -1388,6 +1578,12 @@ def run_drainage_model(
     drainage_distance_threshold_m = validate_drainage_distance_threshold_m(
         drainage_distance_threshold_m
     )
+    update_existing_zarr = normalize_zarr_write_options(
+        no_upload=no_upload,
+        create_zarr=create_zarr,
+        update_existing_zarr=update_existing_zarr,
+        mega_zarr_path=mega_zarr_path,
+    )
     stage = "drainage_model"
     start_ts = uu.timestr()
     cluster, client, run_local = uu.connect_to_cluster(
@@ -1504,24 +1700,6 @@ def run_drainage_model(
     if not run_date:
         run_date = datetime.utcnow().strftime("%Y%m%d")
 
-    if create_zarr and update_existing_zarr:
-        raise ValueError(
-            "--create_zarr and --update_existing_zarr are mutually exclusive. "
-            "Use --create_zarr only for new global stores, and "
-            "--update_existing_zarr for partial repairs."
-        )
-    if mega_zarr_path and create_zarr:
-        raise ValueError(
-            "--mega_zarr_path cannot be combined with --create_zarr because "
-            "creating a zarr initializes the store with mode='w'."
-        )
-    if mega_zarr_path:
-        update_existing_zarr = True
-
-    # Whenever the run is large-scale (final), force zarr creation unless this
-    # is an explicit repair of an already initialized store.
-    if is_final and not update_existing_zarr:
-        create_zarr = True
     main_logger.info("Create and populate global mega-zarr: %s", create_zarr)
     main_logger.info("Update existing mega-zarr in place: %s", update_existing_zarr)
 
@@ -1535,11 +1713,175 @@ def run_drainage_model(
     interval_end_years = [iv[1] for iv in intervals]
     zarr_year_index = interval_end_years
 
+    # Land cover is both a required classifier and a drainage trigger. Use the
+    # complete annual 2024 footprint to distinguish valid ocean/edge gaps from
+    # an accidentally sparse processing prefix, then check every model period
+    # before initializing a Zarr or running model tasks.
+    requested_tile_ids = sorted(
+        {uu.xy_to_tile_id(bounds[0], bounds[3]) for bounds in chunks}
+    )
+    reference_start, reference_end = cn.land_cover_coverage_reference_period
+    reference_inputs = cn.get_dynamic_download_dict(
+        cn.sample_tile_id,
+        reference_start,
+        reference_end,
+        peat_dataset=peat_dataset,
+    )
+    land_cover_reference_template = reference_inputs["land_cover"]
+    reference_land_cover_tile_ids = uu.list_existing_s3_tile_ids(
+        land_cover_reference_template,
+        cn.tile_id_list,
+    )
+    reference_land_cover_tile_ids = uu.validate_tile_set_fingerprint(
+        reference_land_cover_tile_ids,
+        expected_count=cn.land_cover_reference_tile_count,
+        expected_sha256=cn.land_cover_reference_tile_ids_sha256,
+        layer_name="Land-cover model-domain",
+    )
+    required_land_cover_tile_ids = set(requested_tile_ids) & set(
+        reference_land_cover_tile_ids
+    )
+    excluded_tile_ids = sorted(
+        set(requested_tile_ids) - required_land_cover_tile_ids
+    )
+    main_logger.info(
+        "Audited land-cover model domain contains %d tiles; %d of %d requested "
+        "tiles are in-domain: %s",
+        len(reference_land_cover_tile_ids),
+        len(required_land_cover_tile_ids),
+        len(requested_tile_ids),
+        land_cover_reference_template,
+    )
+    if excluded_tile_ids:
+        main_logger.info(
+            "Excluding %d requested tiles outside the audited land-cover model "
+            "domain (examples: %s)",
+            len(excluded_tile_ids),
+            ", ".join(excluded_tile_ids[:10]),
+        )
+        chunks = [
+            bounds
+            for bounds in chunks
+            if uu.xy_to_tile_id(bounds[0], bounds[3])
+            in required_land_cover_tile_ids
+        ]
+    if not chunks:
+        raise ValueError(
+            "No requested chunks intersect the audited land-cover model domain."
+        )
+    required_tile_ids = sorted(required_land_cover_tile_ids)
+
+    period_input_templates = {}
+    for iv_start, iv_end in intervals:
+        input_templates = cn.get_dynamic_download_dict(
+            cn.sample_tile_id,
+            iv_start,
+            iv_end,
+            peat_dataset=peat_dataset,
+        )
+        if exclude_regional_linear_features:
+            input_templates = exclude_regional_linear_feature_layers(input_templates)
+        period_input_templates[(iv_start, iv_end)] = input_templates
+
+    climate_domain_template = reference_inputs["climate_domain"]
+    validated_climate_count = uu.validate_required_s3_tile_coverage(
+        climate_domain_template,
+        required_land_cover_tile_ids,
+        layer_name="climate_domain",
+    )
+    main_logger.info(
+        "Validated required climate-domain coverage: %d land-cover-footprint "
+        "tiles at %s",
+        validated_climate_count,
+        climate_domain_template,
+    )
+
+    pixel_area_template = (
+        f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{{tile_id}}.tif"
+    )
+    validated_pixel_area_count = uu.validate_required_s3_tile_coverage(
+        pixel_area_template,
+        required_tile_ids,
+        layer_name="pixel_area",
+    )
+    main_logger.info(
+        "Validated required pixel-area coverage: %d requested tiles at %s",
+        validated_pixel_area_count,
+        pixel_area_template,
+    )
+
+    # Sparse inputs legitimately omit tiles with no data. Resolve every exact
+    # object footprint once, then require successful reads wherever an object
+    # exists. This preserves sparse-layer semantics without allowing transient
+    # read failures or corrupt objects to masquerade as all-zero inputs.
+    mandatory_layers = {"land_cover", "climate_domain"}
+    sparse_templates = {
+        template
+        for input_templates in period_input_templates.values()
+        for layer_name, template in input_templates.items()
+        if layer_name not in mandatory_layers
+    }
+    sparse_footprints = uu.list_existing_s3_tile_ids_for_templates(
+        sparse_templates,
+        required_tile_ids,
+    )
+    required_input_tile_ids_by_interval = {}
+    for iv_start, iv_end in intervals:
+        input_templates = period_input_templates[(iv_start, iv_end)]
+        land_cover_template = input_templates["land_cover"]
+        validated_count = uu.validate_required_s3_tile_coverage(
+            land_cover_template,
+            required_land_cover_tile_ids,
+            layer_name=f"land_cover for {iv_start}-{iv_end}",
+        )
+        main_logger.info(
+            "Validated required land-cover coverage for %s-%s: "
+            "%d reference-footprint tiles at %s",
+            iv_start,
+            iv_end,
+            validated_count,
+            land_cover_template,
+        )
+        interval_footprints = {}
+        for layer_name, template in input_templates.items():
+            if layer_name in mandatory_layers:
+                interval_footprints[layer_name] = set(
+                    required_land_cover_tile_ids
+                )
+            else:
+                interval_footprints[layer_name] = sparse_footprints[template]
+        required_input_tile_ids_by_interval[(iv_start, iv_end)] = (
+            interval_footprints
+        )
+        main_logger.info(
+            "Input object footprints for %s-%s (present objects become "
+            "required reads): %s",
+            iv_start,
+            iv_end,
+            ", ".join(
+                f"{name}={len(tile_set)}"
+                for name, tile_set in sorted(interval_footprints.items())
+            ),
+        )
+
+    peat_template = reference_inputs["peat"]
+    required_peat_tile_ids = sparse_footprints[peat_template]
+    main_logger.info(
+        "Peat input contains %d of %d requested tiles; absent tiles are "
+        "allowed because preprocessing omits all-zero peat rasters: %s",
+        len(required_peat_tile_ids),
+        len(required_tile_ids),
+        peat_template,
+    )
+
     if create_zarr:
         if not chunks:
             raise ValueError("No chunks available to determine zarr chunk size.")
         chunk_size_pixels = uu.calc_chunk_length_pixels(chunks[0])
-        zarr_year_index = zu.full_model_year_index(interval_type)
+        # A store must advertise only the intervals this run will populate.
+        # This prevents a one-period run from looking like a complete temporal
+        # series with zero-filled years.
+        zarr_year_index = interval_end_years
         main_logger.info(
             "Zarr year index (%s): %s",
             interval_type,
@@ -1628,6 +1970,17 @@ def run_drainage_model(
     bag_items = [(bds, iv[0], iv[1]) for iv in intervals for bds in chunks]
     bag = dask.bag.from_sequence(bag_items, npartitions=len(bag_items))
 
+    if create_zarr:
+        zu.set_mega_zarr_run_status(
+            mega_zarr_path,
+            "running",
+            expected_task_count=len(bag_items),
+            expected_chunk_count=len(chunks),
+            selected_inventory_periods=[
+                f"{iv_start}_{iv_end}" for iv_start, iv_end in intervals
+            ],
+        )
+
     typed_dict_cache = {}
 
     def _wrap(t):
@@ -1652,6 +2005,19 @@ def run_drainage_model(
             typed_dict_cache[key] = uu.add_file_type_to_dict(first_tiles)
 
         typed_dict = typed_dict_cache[key]
+        tile_id = uu.xy_to_tile_id(t[0][0], t[0][3])
+        interval_footprints = required_input_tile_ids_by_interval[(t[1], t[2])]
+        required_layers = {
+            layer_name
+            for layer_name, tile_set in interval_footprints.items()
+            if tile_id in tile_set
+        }
+        missing_required_layers = sorted(required_layers - set(typed_dict))
+        if missing_required_layers:
+            raise uu.RequiredInputRasterError(
+                "Required inputs could not be typed for interval "
+                f"{t[1]}-{closing_year}: {missing_required_layers}."
+            )
 
         return calculate_and_upload_drainage(
             t[0],
@@ -1670,15 +2036,43 @@ def run_drainage_model(
             outputs_to_zarr=outputs_to_zarr,
             interval_end_years=zarr_year_index,
             run_date=run_date,
+            required_layers=required_layers,
             drainage_distance_threshold_m=drainage_distance_threshold_m,
         )
 
-    results = bag.map(_wrap).compute()
+    try:
+        results = bag.map(_wrap).compute()
+    except Exception as exc:
+        if create_zarr:
+            try:
+                zu.set_mega_zarr_run_status(
+                    mega_zarr_path,
+                    "failed",
+                    failure_type=type(exc).__name__,
+                )
+            except Exception:
+                main_logger.exception(
+                    "Could not mark failed mega-zarr run status: %s",
+                    mega_zarr_path,
+                )
+        raise
 
     # Summarize chunk results and gather per-chunk statistics
     success_count, all_stats = uu.count_successful_chunks(
         bag_items, is_final, main_logger, results
     )
+    if success_count != len(bag_items):
+        if create_zarr:
+            zu.set_mega_zarr_run_status(
+                mega_zarr_path,
+                "failed",
+                successful_task_count=success_count,
+                expected_task_count=len(bag_items),
+            )
+        raise RuntimeError(
+            "Drainage model did not complete every submitted task: "
+            f"{success_count} of {len(bag_items)} succeeded."
+        )
 
     # Aggregate per‑chunk statistics and merge with the fishnet shapefile
     if (not no_stats) and (success_count > 0):
@@ -1690,6 +2084,14 @@ def run_drainage_model(
             main_logger,
             run_name=run_name,
             run_date=run_date,
+        )
+
+    if create_zarr:
+        zu.set_mega_zarr_run_status(
+            mega_zarr_path,
+            "complete",
+            successful_task_count=success_count,
+            expected_task_count=len(bag_items),
         )
 
 
@@ -1722,11 +2124,11 @@ def main(argv=None):
             chunk_shapefile_uri=None,
             first_chunks=None,
             run_local=True,
-            no_stats=False,
+            no_stats=True,
             no_log=False,
-            no_upload=False,
-            start_year=2015,
-            end_year=2020,
+            no_upload=True,
+            start_year=2021,
+            end_year=2024,
             interval_type=cn.intervals_five_year,
             all_five_year_periods=False,
             peat_dataset="ogh",

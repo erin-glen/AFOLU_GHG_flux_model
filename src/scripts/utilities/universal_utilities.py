@@ -6,13 +6,14 @@ All comments and log strings use plain ASCII.
 
 from __future__ import annotations
 import concurrent.futures
+import hashlib
 import math
 import os
 import posixpath
 import re
 import sys
 from datetime import datetime
-from typing import Dict, List, Tuple, Union
+from typing import Dict, Iterable, List, Tuple, Union
 
 import subprocess
 import time
@@ -113,7 +114,24 @@ def boundstr(bounds: List[float]) -> str:
 
 
 def calc_chunk_length_pixels(bounds: List[float]) -> int:
-    return int((bounds[3] - bounds[1]) * (40000 / 10))
+    pixels_per_degree = cn.full_raster_dims / 10
+    width_float = (bounds[2] - bounds[0]) * pixels_per_degree
+    height_float = (bounds[3] - bounds[1]) * pixels_per_degree
+    width = int(round(width_float))
+    height = int(round(height_float))
+    tolerance = 1e-6
+    if (
+        width <= 0
+        or height <= 0
+        or width != height
+        or abs(width_float - width) > tolerance
+        or abs(height_float - height) > tolerance
+    ):
+        raise ValueError(
+            "Chunk bounds must define a positive square aligned to the "
+            f"{1 / pixels_per_degree}-degree model grid: {bounds}."
+        )
+    return height
 
 
 def xy_to_tile_id(x: float, y: float) -> str:
@@ -139,7 +157,7 @@ def create_chunk_list(bounding_box, chunk_shapefile_uri, chunk_size_deg, first_c
     # Output list form is [[115.25, -3.75, 115.5, -3.5], [...], [...], ...]
     if bounding_box and chunk_size_deg:
 
-        chunk_size_pixels = int(cn.full_raster_dims * chunk_size_deg / 10)
+        chunk_size_pixels = int(round(cn.full_raster_dims * chunk_size_deg / 10))
 
         main_logger.info("Using bounding box and chunk size to determine chunks")
         main_logger.info(f"Chunk source: Bounding box {bounding_box} (W, S, E, N)")
@@ -394,9 +412,9 @@ def upload_raster_to_s3(file_path: str, bucket: str, s3_key: str) -> None:
     s3c = boto3.client("s3")
     try:
         s3c.upload_file(file_path, bucket, s3_key)
-        os.remove(file_path)
     except Exception as exc:  # pragma: no cover - network issues
-        print(f"Upload failed for {s3_key}: {exc}")
+        raise RuntimeError(f"Upload failed for s3://{bucket}/{s3_key}: {exc}") from exc
+    os.remove(file_path)
 
 
 def download_file_from_s3(
@@ -699,6 +717,145 @@ def split_s3_path(s3_path: str) -> tuple:
 # S3 / raster read helpers
 # ----------------------------------------------------------------------
 
+
+class RequiredInputRasterError(RuntimeError):
+    """Raised when a model input that must exist cannot be read."""
+
+
+def tile_id_set_sha256(tile_ids: Iterable[str]) -> str:
+    """Return a stable SHA-256 fingerprint for a tile-ID set."""
+
+    payload = "\n".join(sorted(set(tile_ids))) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def validate_tile_set_fingerprint(
+    tile_ids: Iterable[str],
+    *,
+    expected_count: int,
+    expected_sha256: str,
+    layer_name: str,
+) -> set[str]:
+    """Return a tile set only if its audited count and fingerprint match."""
+
+    resolved = set(tile_ids)
+    fingerprint = tile_id_set_sha256(resolved)
+    if len(resolved) != expected_count or fingerprint != expected_sha256:
+        raise RequiredInputRasterError(
+            f"{layer_name} footprint drifted from the audited reference: "
+            f"count={len(resolved)} (expected {expected_count}), "
+            f"sha256={fingerprint} (expected {expected_sha256})."
+        )
+    return resolved
+
+
+def list_existing_s3_tile_ids(
+    uri_template: str,
+    tile_ids: Iterable[str],
+    *,
+    s3_client=None,
+) -> set[str]:
+    """Return requested tile IDs whose exact objects exist under a template.
+
+    ``uri_template`` must be an S3 URI containing a literal ``{tile_id}``
+    placeholder. The containing prefix is listed once and exact expected keys
+    are matched, so similarly named objects cannot satisfy the check.
+    """
+
+    marker = "{tile_id}"
+    requested_tile_ids = sorted(set(tile_ids))
+    if not requested_tile_ids:
+        return set()
+    if not uri_template.startswith("s3://"):
+        raise ValueError(f"Tile input must be an S3 URI: {uri_template}")
+    if marker not in uri_template:
+        raise ValueError(f"Tile URI must contain {marker}: {uri_template}")
+
+    bucket, key_template = split_s3_path(uri_template)
+    prefix = key_template.split(marker, 1)[0]
+    client = s3_client or boto3.client(
+        "s3", config=Config(retries={"max_attempts": 10, "mode": "standard"})
+    )
+    paginator = client.get_paginator("list_objects_v2")
+    object_sizes = {
+        item["Key"]: int(item.get("Size", 1))
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
+        for item in page.get("Contents", [])
+    }
+    expected_by_key = {
+        key_template.replace(marker, tile_id): tile_id
+        for tile_id in requested_tile_ids
+    }
+    empty_tile_ids = sorted(
+        tile_id
+        for key, tile_id in expected_by_key.items()
+        if key in object_sizes and object_sizes[key] <= 0
+    )
+    if empty_tile_ids:
+        examples = ", ".join(empty_tile_ids[:5])
+        raise RequiredInputRasterError(
+            "Tile prefix contains zero-byte raster objects for "
+            f"{len(empty_tile_ids)} requested tiles (examples: {examples}): "
+            f"{uri_template}"
+        )
+    return {
+        tile_id
+        for key, tile_id in expected_by_key.items()
+        if key in object_sizes
+    }
+
+
+def list_existing_s3_tile_ids_for_templates(
+    uri_templates: Iterable[str],
+    tile_ids: Iterable[str],
+    *,
+    s3_client=None,
+) -> dict[str, set[str]]:
+    """Resolve exact tile footprints for several S3 templates with one client."""
+
+    client = s3_client or boto3.client(
+        "s3", config=Config(retries={"max_attempts": 10, "mode": "standard"})
+    )
+    requested_tile_ids = set(tile_ids)
+    return {
+        template: list_existing_s3_tile_ids(
+            template,
+            requested_tile_ids,
+            s3_client=client,
+        )
+        for template in sorted(set(uri_templates))
+    }
+
+
+def validate_required_s3_tile_coverage(
+    uri_template: str,
+    tile_ids: Iterable[str],
+    *,
+    layer_name: str,
+    s3_client=None,
+) -> int:
+    """Require every requested tile object to exist before model execution."""
+
+    requested_tile_ids = sorted(set(tile_ids))
+    existing_tile_ids = list_existing_s3_tile_ids(
+        uri_template,
+        requested_tile_ids,
+        s3_client=s3_client,
+    )
+    missing_tile_ids = sorted(set(requested_tile_ids) - existing_tile_ids)
+    if missing_tile_ids:
+        examples = ", ".join(
+            uri_template.replace("{tile_id}", tile_id)
+            for tile_id in missing_tile_ids[:5]
+        )
+        raise RequiredInputRasterError(
+            f"Required {layer_name} coverage is incomplete: "
+            f"{len(missing_tile_ids)} of {len(requested_tile_ids)} requested tiles are missing. "
+            f"Examples: {examples}"
+        )
+    return len(requested_tile_ids)
+
+
 _DTYPE_MAP = {
     "Byte": np.uint8,
     "UInt16": np.uint16,
@@ -743,15 +900,18 @@ def open_window_as_array(
     chunk_px: int,
     logger,
     is_final: bool = False,
+    required: bool = False,
 ) -> np.ndarray:
     """
     Read a window from an S3 GeoTIFF using GDAL's /vsis3/ driver.
 
-    * If s3_uri is None (placeholder for a missing layer) we return an
-      all‑zero array of the requested dtype.
+    * If s3_uri is None (placeholder for a missing optional layer) we return an
+      all-zero array of the requested dtype. Required layers fail instead.
     * Credentials are obtained automatically from environment variables
       or ~/.aws/credentials.  No s3fs / AWSSession wrapper is used.
     """
+    if s3_uri is None and required:
+        raise RequiredInputRasterError("Required raster URI is missing.")
     if s3_uri is None:
         return np.zeros((chunk_px, chunk_px), dtype=_dtype(gdal_dtype))
 
@@ -759,8 +919,25 @@ def open_window_as_array(
     try:
         with rasterio.Env():  # GDAL handles auth internally
             with rio_open(vsipath) as ds:
-                return ds.read(1, window=from_bounds(*bounds, ds.transform))
+                arr = ds.read(1, window=from_bounds(*bounds, ds.transform))
+        expected_shape = (chunk_px, chunk_px)
+        if arr.shape != expected_shape:
+            message = (
+                f"Raster {s3_uri} returned shape {arr.shape}; expected "
+                f"{expected_shape} for bounds {bounds}."
+            )
+            if required:
+                raise RequiredInputRasterError(message)
+            logger.warning("WARNING: %s -> zeros", message)
+            return np.zeros(expected_shape, dtype=_dtype(gdal_dtype))
+        return arr
     except Exception as exc:
+        if isinstance(exc, RequiredInputRasterError):
+            raise
+        if required:
+            raise RequiredInputRasterError(
+                f"Required raster {s3_uri} could not be read: {exc}"
+            ) from exc
         logger.warning(f"WARNING: {s3_uri} failed ({exc}) -> zeros")
         return np.zeros((chunk_px, chunk_px), dtype=_dtype(gdal_dtype))
 
@@ -772,6 +949,7 @@ def get_tile_dataset_rio(
     chunk_px: int,
     is_final: bool,
     logger,
+    required: bool = False,
 ) -> tuple:
     """Return array window from *uri* using rasterio.
 
@@ -796,6 +974,8 @@ def get_tile_dataset_rio(
     """
 
     dtype = _dtype(dtype_str)
+    if uri is None and required:
+        raise RequiredInputRasterError("Required raster URI is missing.")
     if uri is None:
         return np.zeros((chunk_px, chunk_px), dtype=dtype), False
 
@@ -807,21 +987,45 @@ def get_tile_dataset_rio(
         with rasterio.Env():
             with rasterio.open(path) as ds:
                 arr = ds.read(1, window=from_bounds(*bounds, ds.transform))
+        expected_shape = (chunk_px, chunk_px)
+        if arr.shape != expected_shape:
+            raise ValueError(
+                f"Raster returned shape {arr.shape}; expected {expected_shape} "
+                f"for bounds {bounds}."
+            )
         return arr.astype(dtype), True
     except Exception as exc:  # pragma: no cover - network/gdal issues
+        if required:
+            raise RequiredInputRasterError(
+                f"Required raster {uri} could not be read: {exc}"
+            ) from exc
         lu.print_and_log(f"WARNING: {uri} failed ({exc}) -> zeros", is_final, logger)
         return np.zeros((chunk_px, chunk_px), dtype=dtype), False
 
 
 def queue_chunk_downloads(
-    bounds, typed_dict, chunk_px, logger, max_threads=16, is_final=False
+    bounds,
+    typed_dict,
+    chunk_px,
+    logger,
+    max_threads=16,
+    is_final=False,
+    required_layers=None,
 ):
+    required_layers = set(required_layers or ())
     futs = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as ex:
         for k, (uri, dt) in typed_dict.items():
             futs[
                 ex.submit(
-                    open_window_as_array, uri, dt, bounds, chunk_px, logger, is_final
+                    open_window_as_array,
+                    uri,
+                    dt,
+                    bounds,
+                    chunk_px,
+                    logger,
+                    is_final,
+                    k in required_layers,
                 )
             ] = k
     return futs

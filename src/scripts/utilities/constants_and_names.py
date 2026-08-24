@@ -378,7 +378,11 @@ intervals_annual = "annual"
 intervals_five_year = "five_year"
 intervals_hybrid = "hybrid"
 
-annual_land_cover_start_year = 2015
+# Annual IPCC land-cover products currently have complete global coverage only
+# for 2024. Keep the explicit roster so callers cannot infer that the sparse
+# 2015-2023 prefixes are production-ready.
+annual_land_cover_years = [2024]
+annual_land_cover_start_year = annual_land_cover_years[0]
 
 # Version mapping for land cover composites
 land_cover_version_map = {
@@ -392,8 +396,21 @@ land_cover_ipcc_dates = {
     intervals_five_year: "20250710",
 }
 
-# End years that correspond to available five year land cover composites
-five_year_land_cover_years = [2005, 2010, 2015, 2020, 2024]
+# End years backed by complete five-year land-cover composites. The final
+# 2021-2024 inventory period uses the complete annual 2024 composite instead.
+five_year_land_cover_years = [2005, 2010, 2015, 2020]
+
+# The complete annual 2024 composite defines the expected 10x10-degree tile
+# footprint for every land-cover input. This lets the model distinguish valid
+# ocean/edge gaps from an accidentally sparse processing prefix.
+land_cover_coverage_reference_period = (2024, 2024)
+
+# Release-gate fingerprint for the complete processed land-cover model domain.
+# Update only after an intentional input-footprint revision and a fresh audit.
+land_cover_reference_tile_count = 266
+land_cover_reference_tile_ids_sha256 = (
+    "9b817f485f856ed9811a0f4293f762830311dd92a84674e398a9e81574d7922b"
+)
 
 # Convenience list of five year inventory periods. The first period now uses the 2005 land cover composite (2000–2004). The final period uses the 2024 land cover composite for the 2024 inventory year.
 five_year_inventory_periods = [
@@ -523,18 +540,43 @@ pres_text = f"Preliminary organic soils fluxes (model v{model_version})"
 # 7. Dynamic Download Dictionary Function
 # ---------------------------------------------------
 
+def resolve_land_cover_interval_type(
+    interval_start_year: int,
+    interval_end_year: int,
+) -> str:
+    """Return the source interval used for an inventory period's land cover.
+
+    Multi-year periods ending in 2005, 2010, 2015, or 2020 use the complete
+    five-year composites. Annual model runs use annual composites, and the
+    shortened 2021-2024 inventory period uses the complete annual 2024 source.
+    """
+
+    period = (int(interval_start_year), int(interval_end_year))
+    if period in five_year_inventory_periods:
+        return (
+            intervals_annual
+            if period[1] in annual_land_cover_years
+            else intervals_five_year
+        )
+    if period[0] == period[1] and period[1] in annual_land_cover_years:
+        return intervals_annual
+    raise ValueError(
+        "Unsupported land-cover period "
+        f"{period[0]}-{period[1]}. Supported inventory periods are "
+        f"{five_year_inventory_periods}; supported annual years are "
+        f"{annual_land_cover_years}."
+    )
+
+
 def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=None, peat_dataset='ogh'):
     if interval_end_year is None:
         interval_end_year = interval_start_year
 
     lc_year = interval_end_year
-    if lc_year in {2015, 2020, 2024}:
-        # These inventory years are backed by the annual land cover composites
-        interval_type = intervals_annual
-    elif lc_year in five_year_land_cover_years:
-        interval_type = intervals_five_year
-    else:
-        interval_type = intervals_annual
+    interval_type = resolve_land_cover_interval_type(
+        interval_start_year,
+        interval_end_year,
+    )
 
     # Updated IPCC land cover directory
     pixel_resolution = "40000_pixels"
@@ -593,10 +635,6 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
         'descals_type': posixpath.join(dirs['descals_type'], patterns['descals_type'].format(tile_id=tile_id)),
         'mangrove_extent': posixpath.join(dirs['mangrove_extent'], patterns['mangrove_extent'].format(tile_id=tile_id)),
         'tidal_marsh': posixpath.join(dirs['tidal_marsh'], patterns['tidal_marsh'].format(tile_id=tile_id)),
-        'ogh': posixpath.join(
-            peat_mask_dirs['ogh_unthresholded'],
-            f"{tile_id}_ogh_unthresholded_mask.tif",
-        ),
     }
 
     # Add burned area layers for each year in the interval
@@ -615,6 +653,6 @@ def get_dynamic_download_dict(tile_id, interval_start_year, interval_end_year=No
 # ---------------------------------------------------
 
 if __name__ == "__main__":
-    test_dict = get_dynamic_download_dict('00N_110E', 2015)
+    test_dict = get_dynamic_download_dict('00N_110E', 2024)
     for k, v in test_dict.items():
         print(f"{k}: {v}")

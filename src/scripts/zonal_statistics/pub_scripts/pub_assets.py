@@ -982,6 +982,9 @@ def main(argv=None):
         # 3) Burned: Land Use × Climate (LATEST inventory period only)
         b_lu_raw = con.execute(pc.sql_burned_landuse_climate_avgs(n_periods)).df()
         b_lu = pc.aggregate_landuse(b_lu_raw, "burned_avg_GtCO2e_per_yr")
+        b_lu = pc.merge_burned_drained_other(
+            b_lu, "burned_avg_GtCO2e_per_yr"
+        )
         _write_figure_table(
             con,
             b_lu[["LandUse", "Climate", "burned_avg_GtCO2e_per_yr"]],

@@ -116,6 +116,27 @@ def build_year_indices(interval_type: str) -> tuple[list[int], dict[int, int]]:
     return year_index, year_lookup
 
 
+def ready_mega_zarr_year_index(zarr_path: str, logger) -> list[int]:
+    """Return stored years only when a new-style model run is complete."""
+
+    zarr_group = zarr.open_group(
+        dzu.make_zarr_store(zarr_path, read_only=True),
+        mode="r",
+    )
+    run_status = zarr_group.attrs.get("run_status")
+    if run_status is not None and run_status != "complete":
+        raise RuntimeError(
+            f"Mega-zarr is not marked complete (run_status={run_status!r}): "
+            f"{zarr_path}"
+        )
+    if run_status is None:
+        logger.warning(
+            "Mega-zarr has no run_status marker; treating it as a legacy store: %s",
+            zarr_path,
+        )
+    return [int(year) for year in zarr_group["year"][:]]
+
+
 def load_zarr_window(zarr_path: str, dataset: str, bounds, year_idx: int) -> np.ndarray:
     return dzu.open_zarr_window(zarr_path, dataset, bounds, year_idx)
 
@@ -181,7 +202,13 @@ def create_10x10_outputs_from_zarr(
     if is_numeric:
         pixel_area_uri = f"{cn.pixel_area_dir}{cn.pixel_area_pattern}_{tile_id}.tif"
         pixel_area = uu.get_tile_dataset_rio(
-            pixel_area_uri, "Float32", bounds, chunk_px, is_final, logger
+            pixel_area_uri,
+            "Float32",
+            bounds,
+            chunk_px,
+            is_final,
+            logger,
+            required=True,
         )[0]
         data_per_pixel = data_per_ha * pixel_area * cn.m2_to_ha
 
@@ -299,7 +326,6 @@ def main(
 
     chunk_size_pixels = int(pixel_resolution.replace("_pixels", ""))
     output_pixel_resolution = f"{cn.full_raster_dims}_pixels"
-    year_index, year_lookup = build_year_indices(interval_type)
     inventory_periods = get_inventory_periods(interval_type)
     inventory_periods = filter_inventory_periods(inventory_periods, interval_end_years)
     logger.info(f"Inventory periods selected for aggregation: {inventory_periods}")
@@ -312,7 +338,18 @@ def main(
         output_date,
         logger,
     )
-    zarr.open_group(dzu.make_zarr_store(zarr_path, read_only=True), mode="r")
+    year_index = ready_mega_zarr_year_index(zarr_path, logger)
+    year_lookup = {year: index for index, year in enumerate(year_index)}
+    missing_periods = [
+        period
+        for period in inventory_periods
+        if int(period.split("_")[-1]) not in year_lookup
+    ]
+    if missing_periods:
+        raise ValueError(
+            "Selected inventory periods are absent from the mega-zarr year "
+            f"coordinate {year_index}: {missing_periods}."
+        )
 
     if tile_ids:
         unknown_tile_ids = [tile_id for tile_id in tile_ids if tile_id not in cn.tile_id_list]
@@ -349,10 +386,7 @@ def main(
     for dataset in data_types:
         for period in inventory_periods:
             end_year = int(period.split("_")[-1])
-            year_idx = year_lookup.get(end_year)
-            if year_idx is None:
-                logger.warning(f"Skipping period {period}; not in zarr year index")
-                continue
+            year_idx = year_lookup[end_year]
             for tile_id in tile_ids:
                 tasks.append(
                     dask.delayed(robust_create_10x10_outputs)(
@@ -378,6 +412,17 @@ def main(
 
     results = dask.compute(*delayed_results)
     lu.print_and_log(results, is_final, logger)
+
+    errors = [
+        result[0]
+        for result in results
+        if result and isinstance(result[0], str) and result[0].startswith("Error:")
+    ]
+    if errors:
+        raise RuntimeError(
+            f"Raster aggregation failed for {len(errors)} tasks; "
+            f"first error: {errors[0]}"
+        )
 
     success_count, all_stats = uu.count_successful_chunks(
         tile_ids, is_final, logger, results

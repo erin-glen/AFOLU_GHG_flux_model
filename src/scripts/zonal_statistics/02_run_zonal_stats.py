@@ -345,6 +345,11 @@ def resolve_mega_zarr_path(model_version: str, run_name: str, run_date: str, int
 
 def open_mega_zarr_region(path: str, year: int, bbox: Optional[List[float]], chunk_size: int) -> xr.Dataset:
     dsx = xr.open_zarr(path, consolidated=None, storage_options={"anon": False})
+    run_status = dsx.attrs.get("run_status")
+    if run_status is not None and run_status != "complete":
+        raise RuntimeError(
+            f"Mega-zarr is not marked complete (run_status={run_status!r}): {path}"
+        )
     if "year" not in dsx.coords:
         raise ValueError(f"Mega-zarr missing year coordinate: {path}")
     dsy = dsx.sel(year=year, drop=True)

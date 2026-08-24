@@ -61,7 +61,8 @@ def test_aggregate_presence_block_global() -> None:
         threshold_config=config,
     )
 
-    np.testing.assert_array_equal(out, np.array([[1, 0], [0, 1]], dtype=np.uint8))
+    # Equality is included in the model's documented >= threshold contract.
+    np.testing.assert_array_equal(out, np.array([[1, 0], [1, 1]], dtype=np.uint8))
 
 
 def test_aggregate_presence_block_per_biome_uses_fallback_for_unknown() -> None:

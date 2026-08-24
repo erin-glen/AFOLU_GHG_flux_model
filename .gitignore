@@ -59,3 +59,9 @@ AGENTS.md
 CLAUDE.md
 GEMINI.md
 CODEX.md
+
+# Local QA, render, and model-output artifacts
+/.codex_tmp/
+/output/
+/outputs/
+/tmp/

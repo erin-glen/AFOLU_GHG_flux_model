@@ -1,5 +1,15 @@
 # OGH Probability Publication Rerun Checklist
 
+> **2026-08-24 correction notice:** The
+> `ogh_mixed_f1_f15_f2_20260513` / `20260525` baseline is retained for audit
+> only and must not be treated as publication-ready. Its 2011-2015 and
+> 2016-2020 periods were run against sparse annual 2015/2020 land-cover
+> prefixes instead of the complete five-year composites. Rerun all five
+> periods into a new run-name/date lineage; do not overwrite the existing
+> outputs. Replace the historical completion statements and downstream
+> references below only after the corrected model, raster aggregation, and
+> zonal-statistics release gates pass.
+
 This runbook inventories the steps needed when a refreshed OpenGeoHub organic
 soil probability raster arrives and the organic-soils model must be rerun for
 publication outputs.
