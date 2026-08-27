@@ -391,3 +391,45 @@ def test_matched_sum_keeps_reported_zero():
     assert out["iso3"].tolist() == ["AAA"]
     assert out.loc[0, "model"] == 5.0
     assert out.loc[0, "nghgi"] == 0.0
+
+
+def test_join_model_nghgi_zero_denominators_have_undefined_ratios():
+    model_df = pd.DataFrame(
+        [
+            {
+                "run_label": "Run",
+                "run_name": "run",
+                "model_version": "0",
+                "run_date": "20260101",
+                "interval": "2001_2005",
+                "interval_start": 2001,
+                "interval_end": 2005,
+                "gadm_adm0": "AAA",
+                "iso3": "AAA",
+                "country": "A",
+                "land_use": "Forest",
+                "drained_area_ha": 1.0,
+                "undrained_area_ha": 0.0,
+                "drained_on_site_co2_Mg_CO2_yr": 2.0,
+                "drained_n2o_Mg_CO2e_yr": 3.0,
+            }
+        ]
+    )
+    nghgi_df = pd.DataFrame(
+        [
+            {
+                "iso3": "AAA",
+                "land_use": "Forest",
+                "interval": "2001_2005",
+                "interval_start": 2001,
+                "interval_end": 2005,
+                "nghgi_area_drained_organic_ha": 0.0,
+                "nghgi_em_co2_Mg_yr": 0.0,
+            }
+        ]
+    )
+
+    joined = pub_nghgi.join_model_nghgi(model_df, nghgi_df)
+
+    assert pd.isna(joined.loc[0, "area_ratio_model_over_nghgi"])
+    assert pd.isna(joined.loc[0, "co2_ratio_model_over_nghgi"])

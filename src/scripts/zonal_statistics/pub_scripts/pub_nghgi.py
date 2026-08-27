@@ -911,12 +911,18 @@ def join_model_nghgi(
 
     # Derived: difference, ratio
     joined["area_diff_ha"] = joined["model_drained_area_ha"] - joined["nghgi_area_drained_organic_ha"]
+    area_denominator = joined["nghgi_area_drained_organic_ha"].where(
+        joined["nghgi_area_drained_organic_ha"].ne(0)
+    )
     joined["area_ratio_model_over_nghgi"] = (
-        joined["model_drained_area_ha"] / joined["nghgi_area_drained_organic_ha"]
+        joined["model_drained_area_ha"] / area_denominator
     )
     joined["co2_diff_Mg_yr"] = joined["model_drained_co2_Mg_yr"] - joined["nghgi_em_co2_Mg_yr"]
+    co2_denominator = joined["nghgi_em_co2_Mg_yr"].where(
+        joined["nghgi_em_co2_Mg_yr"].ne(0)
+    )
     joined["co2_ratio_model_over_nghgi"] = (
-        joined["model_drained_co2_Mg_yr"] / joined["nghgi_em_co2_Mg_yr"]
+        joined["model_drained_co2_Mg_yr"] / co2_denominator
     )
 
     return joined
