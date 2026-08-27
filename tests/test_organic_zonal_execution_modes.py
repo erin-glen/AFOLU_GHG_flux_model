@@ -26,6 +26,39 @@ class FakeS3:
         return list(self.matches)
 
 
+def test_main_defaults_local_staging_to_output_lineage(monkeypatch) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        organic_zonal,
+        "run",
+        lambda args: captured.setdefault("args", args),
+    )
+
+    organic_zonal.main(
+        [
+            "--model_version",
+            "1_0_1",
+            "--run_date",
+            "20260525",
+            "--interval_end_years",
+            "2024",
+            "--run_name",
+            "baseline",
+            "--output_run_name",
+            "corrected",
+            "--output_run_date",
+            "20260826",
+        ]
+    )
+
+    args = captured["args"]
+    assert args.local_output == organic_zonal.default_local_output(
+        "1_0_1",
+        "corrected",
+        "20260826",
+    )
+
+
 def test_auto_mode_resolves_tile_for_global_and_explicit_tiles() -> None:
     args_global = SimpleNamespace(
         tile_ids=None,
